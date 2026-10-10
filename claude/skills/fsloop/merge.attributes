@@ -1,0 +1,5 @@
+messages/*.json merge=fsl-json
+locales/**/*.json merge=fsl-json
+public/locales/**/*.json merge=fsl-json
+src/locales/**/*.json merge=fsl-json
+src/i18n/**/*.json merge=fsl-json

@@ -1,0 +1,14 @@
+# fsloop — the backend part
+
+Read once per run, at bootstrap, before the first `spike-lease.mjs` call; spikes are `spike.md`. A backend part is proven by a test at a seam that went red before the code, by a job through the worker, and — where `.spike/` allows — by a call against the live system.
+
+## Sessions
+
+An account is a folder `.spike/sessions/<name>/` in the starting checkout (its session string, 2FA, web sessions, notes). One holder at a time, enforced by `node <start>/.claude/skills/fsloop/spike-lease.mjs`, not by the brief: `acquire <checkout> <session>` takes an atomic lease and links the folder into the checkout; a checkout without the lease has no such folder at all, so a script, test or worker there fails on a missing path instead of racing — that failure lands under the launch's OPEN and is a decision: acquire when `status` shows it free (`--wait <s>` to queue), relaunch. `release` / `unlink` give it back; a lease whose owner checkout is gone (`status` marks it `gone`) is freed with `release <owner> <session>` run from the start checkout, never deleted by hand; the hook `.claude/hooks/spike-guard.mjs` blocks hand-made links, copies of `sessions/` and deleted leases. `link <checkout>` mirrors everything else in `.spike/` (links, nothing to copy back); only a real folder at the mirror's root fails `unlink` — a path through a junction (`.spike/toolkits/<topic>/out/`) lands in the main `.spike/` and is free to write; `common.md` says so.
+
+The lease's owner is the checkout path. Every thread working in the start checkout — an inline run, the user, another thread — shares that path, so the lease cannot tell them apart there: an inline run acquires only a session `status` shows `free`; `held by <start checkout>` is another thread of that tree — `--wait <s>`, or the criterion is `unverified live`, a decision.
+
+## Live criteria
+
+A live criterion names the session (`.spike/sessions/<name>/`) or sample (`.spike/data/…`) it uses and the command. A `.spike/toolkits/` script resolves its imports through the junction to the starting checkout, so its command maps the repo's import aliases to the lane (under Bun: `--tsconfig-override <toolkit>/tsconfig.repo.json`). Its test skips itself unless `LIVE=1` and that resource exists — the suite picks every test file up, and only Verify runs it, with `LIVE=1`. Every criterion runs on the manifest's files or the unit's own; one that runs a script or toolkit puts that script in the manifest. A token or cookie never lands in a committed fixture — a test reads it from `.spike/` or skips when absent. A live criterion blocked by a resource `.spike/` lacks is a decision; the gate falls back to the offline criteria and the report says `unverified live`, with what to drop into `.spike/`.
+
