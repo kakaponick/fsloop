@@ -37,10 +37,10 @@ const gitPath = spawnSync("git", ["-C", target, "rev-parse", "--git-path", "info
 if (gitPath.status === 0) {
   const rel = gitPath.stdout.trim();
   const exclude = isAbsolute(rel) ? rel : join(target, rel);
-  // The run folders stay out of git; the facts file is the project's and is committed.
+  // The run folders stay out of git; the config file is the project's and is committed.
   const lines = (existsSync(exclude) ? readFileSync(exclude, "utf8") : "").split(/\r?\n/);
   const kept = lines.filter((l) => !/^\/?\.claude\/fsloop\/?$/.test(l.trim()));
-  const want = [".claude/fsloop/*", "!.claude/fsloop/facts.md"];
+  const want = [".claude/fsloop/*", "!.claude/fsloop/config.md"];
   const missing = want.filter((w) => !kept.some((l) => l.trim() === w));
   if (missing.length || kept.length !== lines.length) {
     while (kept.length && !kept.at(-1).trim()) kept.pop();
@@ -50,8 +50,8 @@ if (gitPath.status === 0) {
   }
 }
 
-if (existsSync(join(claude, "fsloop.md")) && !existsSync(join(claude, "fsloop", "facts.md")))
-  console.log("move the facts file: git mv .claude/fsloop.md .claude/fsloop/facts.md — fsloop reads it only there");
+if (existsSync(join(claude, "fsloop.md")) && !existsSync(join(claude, "fsloop", "config.md")))
+  console.log("move the config file: git mv .claude/fsloop.md .claude/fsloop/config.md — fsloop reads it only there");
 
 const spike = join(target, ".spike");
 for (const d of ["data", "sessions", "toolkits"]) mkdirSync(join(spike, d), { recursive: true });

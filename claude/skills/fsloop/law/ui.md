@@ -15,7 +15,7 @@ A change that leaves any of them behind the code breaks this rule.
 
 ## Roles
 
-The rules below name the parts of an interface by **role**, not by component: the project's role map says which component plays each — the project's UI rules or `.claude/fsloop/facts.md` → Roles, quoted in `common.md`. A role the map leaves empty is filled once, by the rule «Existing component first»: the search for a component that already plays it, else one shared component under the project's component folder, recorded in `DESIGN.md` — never a one-off at a call site. A project with no UI has no map.
+The rules below name the parts of an interface by **role**, not by component: the project's role map says which component plays each — the project's UI rules or `.claude/fsloop/config.md` → Roles, quoted in `common.md`. A role the map leaves empty is filled once, by the rule «Existing component first»: the search for a component that already plays it, else one shared component under the project's component folder, recorded in `DESIGN.md` — never a one-off at a call site. A project with no UI has no map.
 
 | role | what it is |
 |---|---|
