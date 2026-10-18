@@ -400,6 +400,7 @@ export function collect(runDir) {
   return { runDir, id, common, launches, findings, verdicts, audits, surfaces, judges, judged, decisions, rowsByStage, units, journal, passes, gates };
 }
 
+const refsOf = (row) => row.refs.split(/[\s,;]+/).filter(Boolean);
 const lastGate = (run, stage) => run.gates.filter((g) => g.stage === stage).at(-1) ?? null;
 export const HELD = "— it holds the push";
 /** A red integrate gate whose every line is a held finding: the push waits, the run finishes. */
@@ -434,7 +435,12 @@ function prerequisites(run, stage) {
     return need.map((s) => `${s} is not green`);
   }
   if (step === "finish") {
-    if (isGreen(run, "integrate") || heldPush(lastGate(run, "integrate"))) return [];
+    if (heldPush(lastGate(run, "integrate"))) return [];
+    if (isGreen(run, "integrate")) {
+      // A green gate comes before the push; Integrate is done when the push list ran to exit 0.
+      const last = read(join(run.runDir, "logs", "push.log.lines")).trim().split(/\r?\n/).at(-1) ?? "";
+      return /exit 0\b/.test(last) ? [] : ["integrate is green but logs/push.log.lines shows no push that exited 0 — push first"];
+    }
     return [lastGate(run, "integrate") ? "integrate is red for more than held findings — settle the rest, gate it again" : "integrate has no gate yet"];
   }
   // A later pass may skip Map and Spike: a step it ran has a launch or a green gate, a red attempt alone is no run.
@@ -488,6 +494,8 @@ function checkDecisions(run, stage) {
       problems.push(`${where}: no such finding in a ${stage} report`);
       continue;
     }
+    if (stage === "integrate" && run.findings.get(row.finding).own && row.decision === "fix")
+      problems.push(`${where}: a check Integrate can still fix is no finding — the run's own is open, or a candidate when flaky`);
     if (run.findings.get(row.finding).own && !run.findings.get(row.finding).severity)
       problems.push(`${where}: the run's own finding needs a severity column — critical, major or minor`);
     if (!DECISIONS.includes(row.decision)) problems.push(`${where}: decision "${row.decision}" is not one of ${DECISIONS.join(" · ")}`);
@@ -636,15 +644,21 @@ export function gate(run, stage, { commitMessage = defaultCommitMessage } = {}) 
       if (!["critical", "major"].includes(f.severity) || !/-(review|verdict)$|^integrate$/.test(f.stage)) continue;
       if (f.stage === "integrate" && !f.own && f.launch !== lastCritic) continue;
       const { status } = statusOf(run, f, run.decisions.get(f.id));
-      if (HOLDS_PUSH.includes(status)) problems.push(`${f.id}: ${f.severity}, ${status} ${HELD}`);
+      if (!HOLDS_PUSH.includes(status)) continue;
+      // Only a finding the run gave up on holds the push; one still on its way to a fix is work left.
+      problems.push(status === "open" ? `${f.id}: ${f.severity}, open ${HELD}` : `${f.id}: ${f.severity}, ${status} — settle it before the push`);
     }
   }
-  if (step === "review") {
-    // Each question an implementer left to Review is answered by a critic, or recorded open in the journal.
-    const answered = new Set(run.judged.filter((j) => j.stage === stage).map((j) => j.id));
-    for (const q of run.judges.filter((j) => j.stage === `p${pass}-units`))
-      if (!answered.has(q.id) && !run.journal.some((r) => r.refs.includes(q.id)))
+  // Each question an implementer left to judge is answered by the next critic, or recorded open in the journal:
+  // units' at Review, fix units' at the verdicts (with N, Assess takes no prior work — the journal), Integrate's own.
+  const asked = { review: `p${pass}-units`, verdict: `p${pass}-fix`, assess: `p${pass}-fix`, integrate: "integrate" }[step];
+  if (asked) {
+    const answered = new Set(run.judged.filter((j) => j.stage === stage && step !== "assess").map((j) => j.id));
+    for (const q of run.judges.filter((j) => j.stage === asked))
+      if (!answered.has(q.id) && !run.journal.some((r) => refsOf(r).includes(q.id)))
         problems.push(`${q.id}: to judge "${q.text}" — no JUDGED line opens with its id, no journal row refs it`);
+  }
+  if (step === "review") {
   }
   if (step === "finish") {
     const report = read(join(run.runDir, "report.md"));
@@ -736,7 +750,7 @@ export function build(run) {
     surfaces: run.surfaces,
     judges: run.judges.map((q) => {
       const answer = run.judged.filter((j) => j.id === q.id).at(-1);
-      const journal = run.journal.find((r) => r.refs.includes(q.id));
+      const journal = run.journal.find((r) => refsOf(r).includes(q.id));
       return { ...q, answer: answer ?? null, journal: journal?.n ?? null };
     }),
     audits: run.audits,

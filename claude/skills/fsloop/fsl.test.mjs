@@ -403,7 +403,11 @@ describe("a whole run", () => {
 
     pass("integrate");
     put(join(run, "report.md"), "# ab12cd34\n\n## Spikes\n\n—\n");
-    assert.deepEqual(gate(collect(run), "finish"), ["report.md has no tables of fsl.mjs report — run it"]);
+    assert.deepEqual(gate(collect(run), "finish"), [
+      "integrate is green but logs/push.log.lines shows no push that exited 0 — push first",
+      "report.md has no tables of fsl.mjs report — run it",
+    ]);
+    put(join(run, "logs", "push.log.lines"), "1 push — exit 0 — main -> main\n");
     writeReport(run);
     writeReport(run);
     const report = readFileSync(join(run, "report.md"), "utf8");
@@ -450,6 +454,22 @@ describe("integrate and finish", () => {
     assert.deepEqual(gate(collect(run), "integrate"), ["integrate-own#1: major, open — it holds the push"]);
   });
 
+  test("a red check Integrate can still fix is no finding", () => {
+    common();
+    green("p1-verdict");
+    put(join(run, "findings", "integrate.md"), table(["finding", "decision", "ref", "repeat", "severity", "why"], [["integrate-own#1", "fix", "—", "—", "major", "suite red"]]));
+    assert.ok(gate(collect(run), "integrate").includes("findings/integrate.md integrate-own#1: a check Integrate can still fix is no finding — the run's own is open, or a candidate when flaky"));
+  });
+
+  test("a fix unit's question is answered at the verdicts; a journal row answers only its own id", () => {
+    common();
+    transcript("q1", { agent: "fsloop-implement", description: "f1 implement", final: "RESULT: done\nNOTES:\n" + Array.from({ length: 10 }, (_, i) => `- to judge: choice ${i + 1}`).join("\n") });
+    save(run, "p1-fix", "q1");
+    green("p1-fix");
+    put(join(run, "journal.md"), table(["#", "stage", "question", "decision", "why", "refs"], [["1", "p1-verdict", "choice 10", "left open", "no lens", Array.from({ length: 9 }, (_, i) => `p1-fix-f1-implement#judge-${i + 2}`).join(" ")]]));
+    assert.deepEqual(gate(collect(run), "p1-verdict"), ['p1-fix-f1-implement#judge-1: to judge "choice 1" — no JUDGED line opens with its id, no journal row refs it']);
+  });
+
   test("every question an implementer left to Review is answered by its id, or recorded open", () => {
     common();
     transcript("j1", { agent: "fsloop-implement", description: "u1 implement", final: "RESULT: done\nNOTES:\n- kept the old loader\n- to judge: edited use-page.ts outside the manifest — the width hook lives there\n- to judge: test written after the cell" });
@@ -484,7 +504,7 @@ describe("integrate and finish", () => {
     transcript("ic1", { agent: "fsloop-critic", description: "critic craft verdict", final: critic("craft verdict", ["craft-1 [craft] major high local app/a.tsx:1 — ux 2 — /impeccable layout"]) });
     save(run, "integrate", "ic1");
     put(join(run, "findings", "integrate.md"), table(["finding", "decision", "ref", "repeat", "why"], [["integrate-critic-craft-verdict#craft-1", "fix", "—", "—", "ux 2, the merge clipped the header"]]));
-    assert.deepEqual(gate(collect(run), "integrate"), ["integrate-critic-craft-verdict#craft-1: major, queued — it holds the push"]);
+    assert.deepEqual(gate(collect(run), "integrate"), ["integrate-critic-craft-verdict#craft-1: major, queued — settle it before the push"]);
     transcript("ic2", { agent: "fsloop-critic", description: "critic craft verdict", final: critic("craft verdict", []) });
     save(run, "integrate", "ic2");
     const r = collect(run);
