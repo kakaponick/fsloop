@@ -581,7 +581,8 @@ describe("init", () => {
     transcript("pr", {
       agent: "general-purpose",
       description: "shots proof",
-      final: "FRAME: shots/init-public.png ok — the landing page\nFRAME: shots/init-authed.png bad — a login form\nFRAME: shots/init-dialog.png ok — the delete dialog over the list",
+      // The proof may echo the absolute path it read; it is the same frame.
+      final: `FRAME: ${join(run, "shots", "init-public.png")} ok — the landing page\nFRAME: shots/init-authed.png bad — a login form\nFRAME: shots/init-dialog.png ok — the delete dialog over the list`,
     });
     save(run, "init", "pr");
     assert.deepEqual(gate(collect(run), "init"), [
@@ -595,6 +596,15 @@ describe("init", () => {
     const start = project();
     put(join(start, ".claude", "fsloop", "config.md"), config({ shots: "none — a CLI with no UI" }).replace("run ab12cd34", "run 00000000").replace(/## Design\n\n.*\n/, ""));
     assert.deepEqual(gate(collect(run), "init"), ['config.md: no "Verified: <date> · <sha> · run ab12cd34" line', "config.md: no ## Design, or it is empty — write none — <why>"]);
+  });
+
+  test("a green init closes its run", () => {
+    const start = project();
+    put(join(start, ".claude", "fsloop", "config.md"), config({ shots: "- none — a CLI with no UI" }));
+    const r = collect(run);
+    assert.deepEqual(gate(r, "init"), []);
+    put(join(run, "gates.jsonl"), JSON.stringify({ stage: "init", green: true, at: "t", problems: [] }) + "\n");
+    assert.equal(build(collect(run)).closed, true);
   });
 });
 describe("cli", () => {

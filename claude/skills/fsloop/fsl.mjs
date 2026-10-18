@@ -733,7 +733,12 @@ function checkInit(run) {
     const shotsDir = join(run.runDir, "shots");
     const frames = existsSync(shotsDir) ? readdirSync(shotsDir).filter((f) => /^init-.+\.png$/.test(f)).map((f) => `shots/${f}`) : [];
     const proof = run.launches.filter((l) => l.stage === "init" && l.description === "shots proof").at(-1);
-    const verdicts = proof ? Object.fromEntries([...read(join(run.runDir, proof.report)).matchAll(/^FRAME:\s*(\S+)\s+(ok|bad)\b/gm)].map((m) => [m[1], m[2]])) : {};
+    // A frame is named relative to the run folder; an absolute path that ends so counts as the same frame.
+    const frameName = (p) => {
+      const m = /(?:^|[\\/])shots[\\/](init-[\w.-]+\.png)$/.exec(p);
+      return m ? `shots/${m[1]}` : p;
+    };
+    const verdicts = proof ? Object.fromEntries([...read(join(run.runDir, proof.report)).matchAll(/^FRAME:\s*(\S+)\s+(ok|bad)\b/gm)].map((m) => [frameName(m[1]), m[2]])) : {};
     const ok = frames.filter((f) => verdicts[f] === "ok");
     if (ok.length < 3)
       problems.push(
@@ -806,6 +811,8 @@ export function build(run) {
     start: run.common.start,
     worktree: run.common.worktree,
     stages,
+    // A run is closed by its last stage: finish, or init for /fsloop init.
+    closed: isGreen(run, "finish") || isGreen(run, "init"),
     passes: run.passes,
     units: run.units.map(({ sections, ...u }) => u),
     launches: run.launches.map(({ reportMissing, ...l }) => l),

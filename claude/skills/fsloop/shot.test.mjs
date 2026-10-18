@@ -19,8 +19,10 @@ describe("arguments", () => {
       out: "a.png",
       full: true,
       localStorage: [["theme", "dark"], ["k", "a=b"]],
+      env: {},
     });
     assert.equal(parseArgs(["serve", "--cmd", "npm run dev", "--pidfile", "p"]).cmd, "npm run dev");
+    assert.deepEqual(parseArgs(["serve", "--env", "PORT=4100", "--env", "DATABASE_URL=postgres://x/db_shots"]).env, { PORT: "4100", DATABASE_URL: "postgres://x/db_shots" });
     assert.throws(() => parseArgs(["shoot", "--url"]), /--url needs a value/);
   });
 
@@ -43,6 +45,20 @@ describe("arguments", () => {
     assert.deepEqual(suspect({ url: "http://x/accounts", finalUrl: "http://x/accounts?tab=1", status: 200, overlay: null }), []);
     assert.deepEqual(suspect({ url: "http://x/accounts", finalUrl: "http://x/login?next=%2Faccounts", status: 200, overlay: null }), ["landed on /login"]);
     assert.deepEqual(suspect({ url: "http://x/a", finalUrl: "http://x/a", status: 500, overlay: "nextjs-portal" }), ["HTTP 500", "error overlay nextjs-portal"]);
+  });
+});
+
+describe("stop", () => {
+  test("an empty or missing pidfile stops nothing — pid 0 would signal fsloop's own process group", () => {
+    const dir = mkdtempSync(join(tmpdir(), "shot-stop-"));
+    writeFileSync(join(dir, "p.pid"), "");
+    for (let i = 0; i < 2; i++) {
+      const r = spawnSync(process.execPath, [SCRIPT, "stop", "--pidfile", join(dir, "p.pid")], { encoding: "utf8" });
+      assert.equal(r.status, 0);
+      assert.deepEqual(JSON.parse(r.stdout), { ok: true, stopped: null });
+    }
+    assert.equal(existsSync(join(dir, "p.pid")), false);
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 
@@ -131,6 +147,7 @@ createServer((req, res) => {
     const stopped = run("stop", "--pidfile", join(dir, "server.pid"));
     assert.equal(stopped.status, 0);
     assert.ok(JSON.parse(stopped.stdout).stopped > 0);
-    assert.equal(existsSync(join(dir, "server.pid")) && readFileSync(join(dir, "server.pid"), "utf8").trim(), "");
+    assert.equal(existsSync(join(dir, "server.pid")), false);
+    assert.equal(JSON.parse(run("stop", "--pidfile", join(dir, "server.pid")).stdout).stopped, null, "a second stop sends nothing");
   });
 });

@@ -3,22 +3,24 @@
 // the dev server and waits until it answers, Shoot takes one stable frame, Login saves a session, Stop
 // ends what Serve started — by the pid it recorded, never by a name.
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const USAGE = `usage:
-  node shot.mjs serve --cmd "<dev server command>" --url <ready url> --pidfile <file> [--log <file>] [--cwd <dir>] [--timeout <s>]
+  node shot.mjs serve --cmd "<dev server command>" --url <ready url> --pidfile <file> [--env K=V (repeat)] [--log <file>] [--cwd <dir>] [--timeout <s>]
+                      --cmd runs in the platform shell (cmd.exe on Windows): set variables with --env, not K=V before the command
   node shot.mjs shoot --url <url> --out <png> [frame options]
   node shot.mjs login --url <url> --steps <steps.json> --save <state.json> [frame options]
-  node shot.mjs stop  --pidfile <file>
+  node shot.mjs stop  --pidfile <file>     a pidfile empty or gone stops nothing
 frame options:
   --viewport 1440x900  --full  --region <selector>  --wait <selector>  --settle <ms>  --timeout <ms>
-  --theme light|dark  --locale <tag>  --storage <state.json>  --local-storage <key>=<value> (repeat)
+  --theme light|dark (absent: the page's own)  --locale <tag>  --storage <state.json>  --local-storage <key>=<value> (repeat)
   --steps <steps.json | inline JSON>: [{"click": sel} | {"fill": [sel, text]} | {"select": [sel, value]} | {"press": key}
-                         | {"hover": sel} | {"wait": sel} | {"goto": url}] — a text "$ENV:NAME" reads the variable
+                         | {"hover": sel} | {"wait": sel} | {"goto": url}] — a text "$ENV:NAME" reads the process environment
+                         (load env files with: node --env-file=<file> shot.mjs …)
 shoot prints one JSON line: ok, finalUrl, status, overlay, consoleErrors, ms.
 exit: 0 frame taken · 1 frame taken but suspect (another path, HTTP ≥ 400, an error overlay) · 2 failed · 3 no puppeteer-core or Chrome · 4 usage`;
 
@@ -26,7 +28,7 @@ const OVERLAYS = ["nextjs-portal", "vite-error-overlay", "#webpack-dev-server-cl
 
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
-  const opts = { command, localStorage: [] };
+  const opts = { command, localStorage: [], env: {} };
   for (let i = 0; i < rest.length; i++) {
     const key = rest[i];
     if (!key.startsWith("--")) throw new Error(`unexpected ${key}`);
@@ -41,6 +43,10 @@ export function parseArgs(argv) {
       const at = value.indexOf("=");
       if (at < 1) throw new Error(`--local-storage takes key=value`);
       opts.localStorage.push([value.slice(0, at), value.slice(at + 1)]);
+    } else if (name === "env") {
+      const at = value.indexOf("=");
+      if (at < 1) throw new Error(`--env takes key=value`);
+      opts.env[value.slice(0, at)] = value.slice(at + 1);
     } else opts[name.replace(/-(\w)/g, (_, c) => c.toUpperCase())] = value;
   }
   return opts;
@@ -135,7 +141,7 @@ async function frame(opts) {
     page.setDefaultNavigationTimeout(timeout);
     await page.setViewport(parseViewport(opts.viewport));
     await page.emulateMediaFeatures([
-      { name: "prefers-color-scheme", value: opts.theme === "dark" ? "dark" : "light" },
+      ...(opts.theme ? [{ name: "prefers-color-scheme", value: opts.theme === "dark" ? "dark" : "light" }] : []),
       { name: "prefers-reduced-motion", value: "reduce" },
     ]);
     if (opts.locale) await page.setExtraHTTPHeaders({ "Accept-Language": opts.locale });
@@ -206,7 +212,14 @@ async function serve(opts) {
   const log = resolve(opts.log ?? `${opts.pidfile}.log`);
   mkdirSync(dirname(log), { recursive: true });
   const fd = openSync(log, "a");
-  const child = spawn(opts.cmd, { shell: true, cwd: opts.cwd ?? process.cwd(), detached: true, stdio: ["ignore", fd, fd], windowsHide: true });
+  const child = spawn(opts.cmd, {
+    shell: true,
+    cwd: opts.cwd ?? process.cwd(),
+    env: { ...process.env, ...opts.env },
+    detached: true,
+    stdio: ["ignore", fd, fd],
+    windowsHide: true,
+  });
   closeSync(fd);
   writeFileSync(opts.pidfile, `${child.pid}\n`);
   let exited = null;
@@ -242,14 +255,11 @@ function stopPid(pid) {
 
 function stop(opts) {
   if (!opts.pidfile) throw new Error("stop needs --pidfile");
-  if (!existsSync(opts.pidfile)) {
-    console.log(JSON.stringify({ ok: true, stopped: null }));
-    return 0;
-  }
-  const pid = Number(readFileSync(opts.pidfile, "utf8").trim());
-  stopPid(pid);
-  writeFileSync(opts.pidfile, "");
-  console.log(JSON.stringify({ ok: true, stopped: pid }));
+  const pid = existsSync(opts.pidfile) ? Number(readFileSync(opts.pidfile, "utf8").trim()) : 0;
+  // A second stop finds no pid: pid 0 would signal this process's own group, so nothing is sent.
+  if (Number.isInteger(pid) && pid > 0) stopPid(pid);
+  rmSync(opts.pidfile, { force: true });
+  console.log(JSON.stringify({ ok: true, stopped: pid > 0 ? pid : null }));
   return 0;
 }
 
