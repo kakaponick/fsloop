@@ -3,7 +3,7 @@
 // done, `build` writes run.json — what a UI reads. Everything here is derived from the run folder's
 // files and git; nothing is kept in memory between calls.
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -150,25 +150,60 @@ const projectsRoot = () =>
 
 /** The launch's lasting transcript: `subagents/agent-<id>.jsonl` under ~/.claude/projects, found by
  * agent id — the `output_file` an Agent call returns is a temporary copy that may be gone or empty. */
-export function findTranscript(ref) {
+export function findTranscript(ref, runId) {
   const id = basename(ref).replace(/\.(output|jsonl)$/, "").replace(/^agent-/, "");
+  const dirs = subagentDirs();
+  for (const dir of dirs) {
+    const path = join(dir, `agent-${id}.jsonl`);
+    if (existsSync(path)) return path;
+  }
+  if (existsSync(ref) && read(ref).trim()) return resolve(ref);
+  return runId ? findByDescription(dirs, ref, runId) : null;
+}
+
+function subagentDirs() {
   const root = projectsRoot();
-  if (existsSync(root)) {
-    for (const project of readdirSync(root)) {
-      const projectDir = join(root, project);
-      let sessions;
+  const dirs = [];
+  if (!existsSync(root)) return dirs;
+  for (const project of readdirSync(root)) {
+    let sessions;
+    try {
+      sessions = readdirSync(join(root, project));
+    } catch {
+      continue;
+    }
+    for (const session of sessions) {
+      const dir = join(root, project, session, "subagents");
+      if (existsSync(dir)) dirs.push(dir);
+    }
+  }
+  return dirs;
+}
+
+/** On Resume the agent id may be lost with the session: the launch is the newest transcript whose
+ * meta carries this description and whose prompt names this run (`Common: <run folder>/common.md`). */
+function findByDescription(dirs, description, runId) {
+  // The path as it sits in the JSON line: either slash, backslashes escaped.
+  const names = new RegExp(`[\\\\/]+${runId.replace(/[^\w-]/g, "")}[\\\\/]+common\\.md`);
+  let best = null;
+  for (const dir of dirs) {
+    for (const file of readdirSync(dir)) {
+      if (!file.endsWith(".meta.json")) continue;
+      let meta;
       try {
-        sessions = readdirSync(projectDir);
+        meta = JSON.parse(read(join(dir, file)));
       } catch {
         continue;
       }
-      for (const session of sessions) {
-        const path = join(projectDir, session, "subagents", `agent-${id}.jsonl`);
-        if (existsSync(path)) return path;
-      }
+      if (meta.description !== description) continue;
+      const path = join(dir, file.replace(/\.meta\.json$/, ".jsonl"));
+      const first = read(path).split("\n", 1)[0];
+      if (!names.test(first)) continue;
+      const mtime = statSync(path).mtimeMs;
+      if (!best || mtime > best.mtime) best = { path, mtime };
     }
   }
-  return existsSync(ref) && read(ref).trim() ? resolve(ref) : null;
+  return best?.path ?? null;
 }
 
 /** The final message, model, agent type and description of a transcript. A launch is finished when
@@ -557,12 +592,16 @@ export function gate(run, stage, { commitMessage = defaultCommitMessage } = {}) 
   }
   // Green here is the push's precondition: a critical or major finding of a review, a verdict or the
   // merge still open after Fix holds it (SKILL.md step 7). Assess findings are the passes' to judge.
-  if (step === "integrate")
+  // The merge's critic is a check run again after each fix: only its last report speaks.
+  if (step === "integrate") {
+    const lastCritic = lastIntegrateCritic(run);
     for (const f of run.findings.values()) {
       if (!["critical", "major"].includes(f.severity) || !/-(review|verdict)$|^integrate$/.test(f.stage)) continue;
+      if (f.stage === "integrate" && f.launch !== lastCritic) continue;
       const { status } = statusOf(run, f, run.decisions.get(f.id));
       if (HOLDS_PUSH.includes(status)) problems.push(`${f.id}: ${f.severity}, ${status} — it holds the push`);
     }
+  }
   if (step === "finish" && !existsSync(join(run.runDir, "report.md"))) problems.push("no report.md");
   return problems;
 }
@@ -594,9 +633,13 @@ function verdictOf(run, findingId) {
 
 // ── build ─────────────────────────────────────────────────────────────────────────────────────
 
+const lastIntegrateCritic = (run) => run.launches.filter((l) => l.stage === "integrate" && l.description.startsWith("critic ")).at(-1)?.id;
+
 function statusOf(run, f, decision) {
   if (!decision) return { status: "undecided" };
   if (decision.decision !== "fix") return { status: decision.decision };
+  if (f.stage === "integrate")
+    return f.launch === lastIntegrateCritic(run) ? { status: "queued" } : { status: "closed", checkedBy: lastIntegrateCritic(run) };
   const by = closers(run, f.id);
   if (!by.length) return { status: "queued" };
   const unit = by.at(-1);
@@ -655,8 +698,10 @@ const escapeCell = (s) => String(s ?? "—").replace(/\|/g, "\\|").replace(/\r?\
 
 export function save(runDir, stage, ref, descriptionGiven) {
   if (!parseStage(stage)) throw new Error(`unknown stage "${stage}"`);
-  const transcript = findTranscript(ref);
-  if (!transcript) throw new Error(`no transcript for ${ref} — neither ~/.claude/projects/*/*/subagents/agent-<id>.jsonl nor a non-empty file`);
+  const runId = parseCommon(read(join(runDir, "common.md"))).run ?? basename(runDir);
+  const transcript = findTranscript(ref, runId);
+  if (!transcript)
+    throw new Error(`no transcript for ${ref} — no agent by that id, no such file, no launch of run ${runId} by that description; relaunch it`);
   const t = readTranscript(transcript);
   if (!t.finalText) throw new Error(`${transcript}: no final message — the launch did not finish; relaunch it`);
 
@@ -695,7 +740,8 @@ export function save(runDir, stage, ref, descriptionGiven) {
 // ── cli ───────────────────────────────────────────────────────────────────────────────────────
 
 const USAGE = `usage:
-  node fsl.mjs save  <run folder> <stage> <agent id | output_file> ["<description>"]   file a launch's final block
+  node fsl.mjs save  <run folder> <stage> <agent id | output_file | "<description>"> ["<description>"]
+                     file a launch's final block; by description on Resume; the last argument names a launch with no meta file
   node fsl.mjs gate  <run folder> <stage>    is the stage done? exit 1 when not
   node fsl.mjs build <run folder>            write run.json
 stage: p<n>-{${STEPS.join("|")}} | integrate | finish`;

@@ -58,4 +58,4 @@ ORDER:
 - <n>. <surface> — /impeccable <command> — <finding ids>, or —
 ```
 
-`LENS: shape` returns `SHAPE:` with the lines of lens 6, one per line, and `ASSUMPTIONS:`, in place of AUDIT, VERDICT, FINDINGS, UNVERIFIED and ORDER; `LENS: design` returns `CONVENTIONS:` (`- <pattern> — <solution> — <file:line> — <rule>`) in place of AUDIT and VERDICT. Finding ids carry the lens group (`code-3`, `craft-1`, `runtime-2`, `design-1`) so parallel reports merge without collision.
+`LENS: shape` returns `SHAPE:` with the lines of lens 6, one per line, and `ASSUMPTIONS:`, in place of AUDIT, VERDICT, FINDINGS, UNVERIFIED and ORDER; `LENS: design` returns `CONVENTIONS:` (`- <pattern> — <solution> — <file:line> — <rule>`) in place of AUDIT and VERDICT. Finding ids are `<lens group>-<n>` (`code-3`, `craft-1`, `runtime-2`, `design-1`); a VERDICT line names each finding by the id the prompt gives.

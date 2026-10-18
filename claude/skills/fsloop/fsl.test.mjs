@@ -20,10 +20,10 @@ function put(path, text) {
 }
 
 /** A finished launch's transcript where Claude Code keeps it, with the meta file beside it. */
-function transcript(agentId, { agent, description, final, model = "claude-opus-5-5" }) {
+function transcript(agentId, { agent, description, final, model = "claude-opus-5-5", prompt = "Repo: /repo" }) {
   const dir = join(projects, "C--repo", "session-1", "subagents");
   const lines = [
-    { type: "user", message: { role: "user", content: "Repo: /repo" } },
+    { type: "user", message: { role: "user", content: prompt } },
     { type: "assistant", message: { model, content: [{ type: "tool_use", id: "t1", name: "Read", input: {} }] } },
     { type: "assistant", message: { model, content: [{ type: "text", text: final }] } },
   ];
@@ -172,6 +172,15 @@ describe("save", () => {
     put(join(dir, "agent-c3.jsonl"), step("msg_2", { type: "text", text: "LENS: code" }) + "\n");
     put(join(dir, "agent-c3.meta.json"), JSON.stringify({ agentType: "fsloop-critic", description: "critic code", finished: false }));
     assert.throws(() => save(run, "p1-review", "c3"), /no final message/);
+  });
+
+  test("on Resume a launch is found by its description among this run's launches only", () => {
+    common();
+    transcript("other-run", { agent: "fsloop-implement", description: "u3 implement", final: "RESULT: done", prompt: "Repo: /x\nCommon: /repo/.claude/fsloop/runs/99999999/common.md" });
+    transcript("this-run", { agent: "fsloop-implement", description: "u3 implement", final: "RESULT: partial", prompt: "Repo: /x\nCommon: /repo/.claude/fsloop/runs/ab12cd34/common.md" });
+    const r = save(run, "p1-units", "u3 implement");
+    assert.equal(readFileSync(join(run, r.report), "utf8"), "RESULT: partial\n");
+    assert.throws(() => save(run, "p1-units", "u4 implement"), /no launch of run ab12cd34 by that description/);
   });
 
   test("a launch saved under one stage is not saved again under another", () => {
@@ -421,6 +430,20 @@ describe("integrate and finish", () => {
     put(join(run, "gates.jsonl"), readOr(join(run, "gates.jsonl")) + JSON.stringify({ stage: "integrate", green: false, at: "t", problems: [] }) + "\n");
     put(join(run, "report.md"), "# ab12cd34\n");
     assert.deepEqual(gate(collect(run), "finish"), []);
+  });
+
+  test("the merge's critic runs again after a fix: only its last report holds the push", () => {
+    common();
+    green("p1-verdict");
+    transcript("ic1", { agent: "fsloop-critic", description: "critic craft verdict", final: critic("craft verdict", ["craft-1 [craft] major high local app/a.tsx:1 — ux 2 — /impeccable layout"]) });
+    save(run, "integrate", "ic1");
+    put(join(run, "findings", "integrate.md"), table(["finding", "decision", "ref", "repeat", "why"], [["integrate-critic-craft-verdict#craft-1", "fix", "—", "—", "ux 2, the merge clipped the header"]]));
+    assert.deepEqual(gate(collect(run), "integrate"), ["integrate-critic-craft-verdict#craft-1: major, queued — it holds the push"]);
+    transcript("ic2", { agent: "fsloop-critic", description: "critic craft verdict", final: critic("craft verdict", []) });
+    save(run, "integrate", "ic2");
+    const r = collect(run);
+    assert.deepEqual(gate(r, "integrate"), []);
+    assert.equal(build(r).findings[0].status, "closed");
   });
 
   test("the run's own finding needs a severity and counts toward the pass rule", () => {

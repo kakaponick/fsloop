@@ -129,7 +129,7 @@ report.md
 - перед пушем (`integrate`) осталась открытой critical или major находка ревью. Пуш тогда не делается, а прогон всё равно завершается отчётом.
 
 ```
-node .claude/skills/fsloop/fsl.mjs save  <run folder> <stage> <agent id | output_file>
+node .claude/skills/fsloop/fsl.mjs save  <run folder> <stage> <agent id | output_file | "описание запуска">
 node .claude/skills/fsloop/fsl.mjs gate  <run folder> <stage>
 node .claude/skills/fsloop/fsl.mjs build <run folder>
 ```
