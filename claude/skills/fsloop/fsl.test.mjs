@@ -555,7 +555,7 @@ describe("init", () => {
         ["role", "command"],
         roles
           .filter((r) => !skip.includes(r))
-          .map((r) => [r, r === "worker" ? "— none" : r === "type-check" ? "`npm run type-check` — red on main: 3 errors" : `\`npm run ${r}\``]),
+          .map((r) => [r, r === "worker" ? "none — no job runner" : r === "type-check" ? "`npm run type-check` — red on main: 3 errors" : `\`npm run ${r}\``]),
       ),
       "## Shared catalogs",
       "",
@@ -588,14 +588,50 @@ describe("init", () => {
     assert.deepEqual(gate(collect(run), "init"), [
       "config.md Commands build: never run — no logs/init-build.log.lines",
       'config.md Commands: no row "impeccable"',
-      'Shots: 2 of the three frames shots/init-*.png read ok by a "shots proof" launch — shots/init-authed.png bad, shots/init-dialog.png ok, shots/init-public.png ok; or ## Shots says none — <why>',
+      'Shots: 2 of 3 frames read ok by a "shots proof" launch — shots/init-authed.png bad; or ## Shots is - none — <why>',
     ]);
   });
 
-  test("shots may be none with a reason; a config without its design, or from another run, is not done", () => {
+  const recipe = (login) => `- raise: \`npm run db:seed\` · serve: \`node shot.mjs serve …\` · login: ${login} · shoot: \`node shot.mjs shoot …\` · stop: \`node shot.mjs stop …\` · drop: \`dropdb <db>\``;
+  const proofOf = (final, id = "pr") => {
+    transcript(id, { agent: "general-purpose", description: "shots proof", final });
+    save(run, "init", id);
+  };
+
+  test("a proof's FRAME lines read the same with a list dash, bold or a backticked path", () => {
+    const start = project();
+    put(join(start, ".claude", "fsloop", "config.md"), config({ shots: recipe("`node shot.mjs login …`") }));
+    for (const f of ["init-public", "init-authed", "init-dialog"]) put(join(run, "shots", `${f}.png`), "png");
+    proofOf("- FRAME: shots/init-public.png ok — the landing page\n**FRAME:** `shots/init-authed.png` ok — the accounts list\nFRAME: `shots/init-dialog.png` **ok** — the delete dialog");
+    assert.deepEqual(gate(collect(run), "init"), []);
+  });
+
+  test("with login — the page behind a session is not needed: two frames suffice, a missing one is named", () => {
+    const start = project();
+    put(join(start, ".claude", "fsloop", "config.md"), config({ shots: `${recipe("—")}\n- refuses: authed pages — no test user` }));
+    put(join(run, "shots", "init-public.png"), "png");
+    proofOf("FRAME: shots/init-public.png ok — the landing page");
+    assert.deepEqual(gate(collect(run), "init"), ['Shots: 1 of 2 frames read ok by a "shots proof" launch — shots/init-dialog.png missing; or ## Shots is - none — <why>']);
+    put(join(run, "shots", "init-dialog.png"), "png");
+    proofOf("FRAME: shots/init-public.png ok — the landing page\nFRAME: shots/init-dialog.png ok — the menu", "pr2");
+    assert.deepEqual(gate(collect(run), "init"), []);
+  });
+
+  test("a project without a UI states none — <why> for its roles, design and shots, and a role it lacks needs no log", () => {
+    const start = project();
+    rmSync(join(run, "logs", "init-impeccable.log.lines"));
+    const text = config({ shots: "- none — no UI" })
+      .replace("`npm run impeccable`", "none — no UI")
+      .replace(/## Roles\n\n[\s\S]*?(?=## Design)/, "## Roles\n\n- none — no UI\n\n")
+      .replace(/## Design\n\n.*\n/, "## Design\n\n- none — no UI\n");
+    put(join(start, ".claude", "fsloop", "config.md"), text);
+    assert.deepEqual(gate(collect(run), "init"), []);
+  });
+
+  test("a config without its design, or from another run, is not done", () => {
     const start = project();
     put(join(start, ".claude", "fsloop", "config.md"), config({ shots: "none — a CLI with no UI" }).replace("run ab12cd34", "run 00000000").replace(/## Design\n\n.*\n/, ""));
-    assert.deepEqual(gate(collect(run), "init"), ['config.md: no "Verified: <date> · <sha> · run ab12cd34" line', "config.md: no ## Design, or it is empty — write none — <why>"]);
+    assert.deepEqual(gate(collect(run), "init"), ['config.md: no "Verified: <date> · <sha> · run ab12cd34" line', "config.md: no ## Design, or it is empty — write - none — <why>"]);
   });
 
   test("a green init closes its run", () => {

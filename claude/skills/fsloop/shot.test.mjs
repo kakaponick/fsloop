@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { findChrome, parseArgs, parseViewport, readSteps, suspect } from "./shot.mjs";
+import { findChrome, parseArgs, parseViewport, readSteps, startTime, suspect } from "./shot.mjs";
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "shot.mjs");
 
@@ -59,6 +59,43 @@ describe("stop", () => {
     }
     assert.equal(existsSync(join(dir, "p.pid")), false);
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("a process's start time tells it from a later one given the same pid", () => {
+    assert.ok(startTime(process.pid));
+    assert.equal(startTime(process.pid), startTime(process.pid));
+    const ended = spawnSync(process.execPath, ["-e", ""]).pid;
+    assert.equal(startTime(ended), null);
+    assert.equal(startTime(0), null);
+  });
+
+  test("a pid that no longer names the process serve started is never signalled", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "shot-reuse-"));
+    const port = 40000 + Math.floor(Math.random() * 20000);
+    const url = `http://127.0.0.1:${port}/`;
+    const pidfile = join(dir, "server.pid");
+    const run = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8", cwd: dir, timeout: 60000 });
+    writeFileSync(join(dir, "server.mjs"), `import { createServer } from "node:http"; createServer((_, res) => res.end("up")).listen(${port});`);
+    const served = run("serve", "--cmd", `"${process.execPath}" server.mjs`, "--url", url, "--pidfile", pidfile, "--timeout", "30");
+    assert.equal(served.status, 0, served.stderr);
+    const recorded = readFileSync(pidfile, "utf8");
+    const pid = Number(recorded.split(" ")[0]);
+    try {
+      // The pid as the OS would hand it to a later process: the start time differs.
+      writeFileSync(pidfile, `${pid} 2000-01-01T00:00:00.0000000Z\n`);
+      assert.deepEqual(JSON.parse(run("stop", "--pidfile", pidfile).stdout), { ok: true, stopped: null, gone: pid });
+      assert.equal(await (await fetch(url)).text(), "up");
+
+      writeFileSync(pidfile, recorded);
+      assert.equal(JSON.parse(run("stop", "--pidfile", pidfile).stdout).stopped, pid);
+      let down = false;
+      for (const until = Date.now() + 10000; !down && Date.now() < until; ) down = await fetch(url).then(() => false, () => true);
+      assert.ok(down, "the server serve started is stopped");
+    } finally {
+      writeFileSync(pidfile, recorded);
+      run("stop", "--pidfile", pidfile);
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -39,16 +39,18 @@ Once per pass, after the briefs are drafted and before the first lane opens, whe
 
 ## The shot server
 
-Frames are taken in `<wt>` — the start checkout in the inline mode — and the server serves its live code. The config's `## Shots` (`/fsloop init` proves it) fills four roles — else the screenshot tooling the project's doc or `CLAUDE.md` names — recorded in `common.md` → shots:
+Frames are taken in `<wt>` — the start checkout in the inline mode — and the server serves its live code. The config's `## Shots` (`/fsloop init` proves it) fills six roles, one template each — else the screenshot tooling the project's doc or `CLAUDE.md` names — recorded in `common.md` → shots:
 
-- **Raise** — a throwaway database for the tree, seeded from a fixture shaped after the production shape, and a free port. A raise over a running shot server stops it first.
-- **Serve** — the tree's dev server against that database on that port, every other external key blanked. Most dev servers refuse a second instance in one tree.
+- **Raise** — a throwaway database for the tree, `<base>_shots_<run id>`, seeded from a fixture shaped after the production shape, and a free port. A raise over a standing shot database replaces it; over a running shot server it stops it first.
+- **Serve** — the tree's dev server against that database on that port, every other variable that reaches an outside service — keys, tokens, and the hosts and URLs of queues, caches, mail and storage — blank, by name; names from `sed 's/=.*//' <env file>`, never the file itself. Most dev servers refuse a second instance in one tree.
+- **Login** — a session saved for the pages behind sign-in, when the app has one.
 - **Shoot** — one frame of a route or a dialog to a PNG at the capture defaults; a page whose rows read a live process (a worker heartbeat) refreshes it first, when the tooling can.
-- **Teardown** — the server stopped and, at Finish, the shot database dropped.
+- **Stop** — the server stopped by the pid Serve recorded.
+- **Drop** — the shot database dropped. Stop then Drop is the **shot teardown**.
 
-The dev database, production and every live account stay outside: the shot database is its own. A project with neither gets `shot.mjs` beside this file, over its dev server and the tree's own throwaway data — Serve `node <start>/.claude/skills/fsloop/shot.mjs serve`, Shoot `shot.mjs shoot` (with `login` first when a page needs a session), Teardown `shot.mjs stop` by the pid Serve recorded — a decision, and the report suggests `/fsloop init`; a page that needs data no seed provides goes to its critic without a frame, a decision.
+The dev database, production and every live account stay outside: the shot database is its own. A project with neither gets `shot.mjs` beside this file, over its dev server and the tree's own throwaway data — Serve `node <start>/.claude/skills/fsloop/shot.mjs serve`, Login `shot.mjs login`, Shoot `shot.mjs shoot`, Stop `shot.mjs stop` by the pidfile Serve wrote — a decision, and the report suggests `/fsloop init`; a page that needs data no seed provides goes to its critic without a frame, a decision.
 
-- **A capture** — yours, one command list per fixture: raise with it, serve in the background, login when `## Shots` has one, one shoot for every surface the fixture shapes, teardown, its log `logs/p<p>-<moment>-capture.log`; frames under `<run folder>/shots/`. You view none of them.
+- **A capture** — yours, one command list per fixture: raise with it, serve in the background, login when `## Shots` has one, one shoot for every surface the fixture shapes, stop, its log `logs/p<p>-<moment>-capture.log`; frames under `<run folder>/shots/`. The shot database stays for the next capture's Raise until the shot teardown (SKILL.md steps 7 and 8). You view none of them.
 - **Raise or serve refuses** — another dev server holds the tree, or its lock is unreadable: the surface goes to its critic without a frame, a decision; the critic judges from code and says so.
 
 The journal names each surface's fixture, from Map.

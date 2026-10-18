@@ -704,6 +704,12 @@ const sectionOf = (text, heading) => {
   return m ? m[1].trim() : null;
 };
 
+/** A cell or section with nothing to state: `none — <why>`, or a bare `—`. */
+const isNone = (text) => /^(?:-\s*)?(?:none\b|—)/i.test(text);
+
+// The proof is pinned to bare FRAME lines, but a list dash, bold or a backticked path still reads as one.
+const FRAME_LINE = /^[\s>*_-]*FRAME[*_]*:[*_]*\s*`?([^\s`]+?)`?\s+[*_`]*(ok|bad)\b/gim;
+
 /** init.md → Done: the config this run verified, each command with the outcome of its run, the shot recipe proven. */
 function checkInit(run) {
   // The config is written in the worktree and lands in the start checkout with the push.
@@ -721,28 +727,29 @@ function checkInit(run) {
       const row = rows.find((r) => cell(r, "role") === role);
       if (!row) problems.push(`config.md Commands: no row "${role}"`);
       // The proof of a command is its run's log in this run folder, never a line of the config.
-      else if (RUN_ROLES.includes(role) && !/^—/.test(cell(row, "command")) && !existsSync(join(run.runDir, "logs", `init-${roleSlug(role)}.log.lines`)))
+      else if (RUN_ROLES.includes(role) && !isNone(cell(row, "command")) && !existsSync(join(run.runDir, "logs", `init-${roleSlug(role)}.log.lines`)))
         problems.push(`config.md Commands ${role}: never run — no logs/init-${roleSlug(role)}.log.lines`);
     }
   }
-  for (const heading of ["Shared catalogs", "Roles", "Design"]) if (!sectionOf(text, heading)) problems.push(`config.md: no ## ${heading}, or it is empty — write none — <why>`);
+  for (const heading of ["Shared catalogs", "Roles", "Design"]) if (!sectionOf(text, heading)) problems.push(`config.md: no ## ${heading}, or it is empty — write - none — <why>`);
   const shots = sectionOf(text, "Shots");
   if (!shots) problems.push("config.md: no ## Shots");
-  else if (!/^-?\s*none\s+—/im.test(shots)) {
-    // The recipe is proven by three frames in this run folder that the proof read ok; the config holds the recipe alone.
-    const shotsDir = join(run.runDir, "shots");
-    const frames = existsSync(shotsDir) ? readdirSync(shotsDir).filter((f) => /^init-.+\.png$/.test(f)).map((f) => `shots/${f}`) : [];
+  else if (!isNone(shots)) {
+    // The recipe is proven by frames in this run folder that the proof read ok; the config holds the recipe alone.
+    // With login `—` (no sign-in, or no test user) the page behind a session is not the recipe's to reach.
+    const need = ["init-public", ...(/(?:^|[\s·])login:\s*`?—/im.test(shots) ? [] : ["init-authed"]), "init-dialog"].map((n) => `shots/${n}.png`);
     const proof = run.launches.filter((l) => l.stage === "init" && l.description === "shots proof").at(-1);
     // A frame is named relative to the run folder; an absolute path that ends so counts as the same frame.
     const frameName = (p) => {
       const m = /(?:^|[\\/])shots[\\/](init-[\w.-]+\.png)$/.exec(p);
       return m ? `shots/${m[1]}` : p;
     };
-    const verdicts = proof ? Object.fromEntries([...read(join(run.runDir, proof.report)).matchAll(/^FRAME:\s*(\S+)\s+(ok|bad)\b/gm)].map((m) => [frameName(m[1]), m[2]])) : {};
-    const ok = frames.filter((f) => verdicts[f] === "ok");
-    if (ok.length < 3)
+    const verdicts = proof ? Object.fromEntries([...read(join(run.runDir, proof.report)).matchAll(FRAME_LINE)].map((m) => [frameName(m[1]), m[2].toLowerCase()])) : {};
+    const status = need.map((f) => [f, !existsSync(join(run.runDir, f)) ? "missing" : (verdicts[f] ?? "unread")]);
+    const short = status.filter(([, s]) => s !== "ok");
+    if (short.length)
       problems.push(
-        `Shots: ${ok.length} of the three frames shots/init-*.png read ok by a "shots proof" launch${proof ? "" : " (none saved)"}${frames.length ? ` — ${frames.map((f) => `${f} ${verdicts[f] ?? "unread"}`).join(", ")}` : ""}; or ## Shots says none — <why>`,
+        `Shots: ${need.length - short.length} of ${need.length} frames read ok by a "shots proof" launch${proof ? "" : " (none saved)"} — ${short.map(([f, s]) => `${f} ${s}`).join(", ")}; or ## Shots is - none — <why>`,
       );
   }
   return problems;

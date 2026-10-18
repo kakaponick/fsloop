@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The screenshot engine (puppeteer-core over the installed Chrome) for a project with no tooling of its own (ui.md → The shot server): Serve starts
 // the dev server and waits until it answers, Shoot takes one stable frame, Login saves a session, Stop
-// ends what Serve started — by the pid it recorded, never by a name.
+// ends what Serve started — by the pid and start time it recorded, never by a name.
 import { spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -14,7 +14,8 @@ const USAGE = `usage:
                       --cmd runs in the platform shell (cmd.exe on Windows): set variables with --env, not K=V before the command
   node shot.mjs shoot --url <url> --out <png> [frame options]
   node shot.mjs login --url <url> --steps <steps.json> --save <state.json> [frame options]
-  node shot.mjs stop  --pidfile <file>     a pidfile empty or gone stops nothing
+  node shot.mjs stop  --pidfile <file>     stops only the process serve started: a pidfile empty or gone, or a pid
+                                           now another process's (its start time differs), stops nothing
 frame options:
   --viewport 1440x900  --full  --region <selector>  --wait <selector>  --settle <ms>  --timeout <ms>
   --theme light|dark (absent: the page's own)  --locale <tag>  --storage <state.json>  --local-storage <key>=<value> (repeat)
@@ -221,7 +222,7 @@ async function serve(opts) {
     windowsHide: true,
   });
   closeSync(fd);
-  writeFileSync(opts.pidfile, `${child.pid}\n`);
+  writeFileSync(opts.pidfile, `${child.pid} ${startTime(child.pid) ?? ""}\n`);
   let exited = null;
   child.on("exit", (code) => (exited = code));
   child.unref();
@@ -253,13 +254,37 @@ function stopPid(pid) {
     } catch {}
 }
 
+/** When the process `pid` started, as the OS reports it; null when no process has that pid. */
+export function startTime(pid, platform = process.platform) {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  const out = (cmd, args) => {
+    const r = spawnSync(cmd, args, { encoding: "utf8", windowsHide: true });
+    return r.status === 0 && r.stdout.trim() ? r.stdout.trim() : null;
+  };
+  if (platform === "win32")
+    return out("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')`]);
+  if (platform === "linux")
+    try {
+      // Field 22 of stat, counted from after the command name, which may itself hold spaces and parentheses.
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+      return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] ?? null;
+    } catch {
+      return null;
+    }
+  return out("ps", ["-o", "lstart=", "-p", String(pid)]);
+}
+
 function stop(opts) {
   if (!opts.pidfile) throw new Error("stop needs --pidfile");
-  const pid = existsSync(opts.pidfile) ? Number(readFileSync(opts.pidfile, "utf8").trim()) : 0;
-  // A second stop finds no pid: pid 0 would signal this process's own group, so nothing is sent.
-  if (Number.isInteger(pid) && pid > 0) stopPid(pid);
+  const [head = "", ...rest] = existsSync(opts.pidfile) ? readFileSync(opts.pidfile, "utf8").trim().split(" ") : [];
+  const pid = Number(head);
+  const started = rest.join(" ");
+  // An ended server's pid is free for the OS to reuse: only the process with the start time Serve recorded is
+  // signalled. A second stop finds no pid, and pid 0 would signal this process's own group, so nothing is sent.
+  const ours = Number.isInteger(pid) && pid > 0 && started !== "" && startTime(pid) === started;
+  if (ours) stopPid(pid);
   rmSync(opts.pidfile, { force: true });
-  console.log(JSON.stringify({ ok: true, stopped: pid > 0 ? pid : null }));
+  console.log(JSON.stringify({ ok: true, stopped: ours ? pid : null, ...(pid > 0 && !ours ? { gone: pid } : {}) }));
   return 0;
 }
 
