@@ -695,6 +695,10 @@ const HOLDS_PUSH = ["open", "queued", "in-progress", "undecided", "fixed"];
 /** The roles of SKILL.md → Project facts: the config's Commands table has a row for each. */
 export const COMMAND_ROLES = ["default", "install", "type-check", "lint", "test, one file", "unit tests", "guards", "suite", "build", "migrate", "worker", "machine lock", "production shape", "shots", "find-polluter", "impeccable"];
 
+/** The roles init runs (init.md step 3); the rest are named, not run. */
+const RUN_ROLES = ["install", "type-check", "lint", "test, one file", "unit tests", "guards", "suite", "build", "migrate", "worker", "machine lock", "impeccable"];
+export const roleSlug = (role) => role.replace(/[\s,]+/g, "-");
+
 const sectionOf = (text, heading) => {
   const m = new RegExp(`^## ${heading}\\s*\\r?\\n([\\s\\S]*?)(?=^## |(?![\\s\\S]))`, "m").exec(text);
   return m ? m[1].trim() : null;
@@ -716,23 +720,25 @@ function checkInit(run) {
     for (const role of COMMAND_ROLES) {
       const row = rows.find((r) => cell(r, "role") === role);
       if (!row) problems.push(`config.md Commands: no row "${role}"`);
-      else if (NONE.test(cell(row, "verified")) && !/^—/.test(cell(row, "command")))
-        problems.push(`config.md Commands ${role}: verified is empty — the exit and time of its run, or why it was not run`);
+      // The proof of a command is its run's log in this run folder, never a line of the config.
+      else if (RUN_ROLES.includes(role) && !/^—/.test(cell(row, "command")) && !existsSync(join(run.runDir, "logs", `init-${roleSlug(role)}.log.lines`)))
+        problems.push(`config.md Commands ${role}: never run — no logs/init-${roleSlug(role)}.log.lines`);
     }
   }
-  for (const heading of ["Shared catalogs", "Roles"]) if (!sectionOf(text, heading)) problems.push(`config.md: no ## ${heading}, or it is empty — write — with why`);
+  for (const heading of ["Shared catalogs", "Roles", "Design"]) if (!sectionOf(text, heading)) problems.push(`config.md: no ## ${heading}, or it is empty — write none — <why>`);
   const shots = sectionOf(text, "Shots");
   if (!shots) problems.push("config.md: no ## Shots");
-  else if (!/^none\s+—/im.test(shots)) {
-    const frames = [...new Set(shots.match(/shots\/init-[\w.-]+\.png/g) ?? [])];
-    if (frames.length < 3) problems.push("config.md Shots: a Proof line naming three frames shots/init-*.png, or none — <why>");
+  else if (!/^-?\s*none\s+—/im.test(shots)) {
+    // The recipe is proven by three frames in this run folder that the proof read ok; the config holds the recipe alone.
+    const shotsDir = join(run.runDir, "shots");
+    const frames = existsSync(shotsDir) ? readdirSync(shotsDir).filter((f) => /^init-.+\.png$/.test(f)).map((f) => `shots/${f}`) : [];
     const proof = run.launches.filter((l) => l.stage === "init" && l.description === "shots proof").at(-1);
     const verdicts = proof ? Object.fromEntries([...read(join(run.runDir, proof.report)).matchAll(/^FRAME:\s*(\S+)\s+(ok|bad)\b/gm)].map((m) => [m[1], m[2]])) : {};
-    for (const f of frames) {
-      if (!existsSync(join(run.runDir, f))) problems.push(`config.md Shots: ${f} is not in the run folder`);
-      else if (!proof) problems.push(`config.md Shots: no "shots proof" launch saved to read ${f}`);
-      else if (verdicts[f] !== "ok") problems.push(`config.md Shots: ${f} — the proof reads it ${verdicts[f] ?? "not at all"}`);
-    }
+    const ok = frames.filter((f) => verdicts[f] === "ok");
+    if (ok.length < 3)
+      problems.push(
+        `Shots: ${ok.length} of the three frames shots/init-*.png read ok by a "shots proof" launch${proof ? "" : " (none saved)"}${frames.length ? ` — ${frames.map((f) => `${f} ${verdicts[f] ?? "unread"}`).join(", ")}` : ""}; or ## Shots says none — <why>`,
+      );
   }
   return problems;
 }

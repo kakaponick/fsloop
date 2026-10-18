@@ -533,44 +533,50 @@ describe("integrate and finish", () => {
 });
 
 describe("init", () => {
+  const roles = ["default", "install", "type-check", "lint", "test, one file", "unit tests", "guards", "suite", "build", "migrate", "worker", "machine lock", "production shape", "shots", "find-polluter", "impeccable"];
+  const ran = ["install", "type-check", "lint", "test-one-file", "unit-tests", "guards", "suite", "build", "migrate", "machine-lock", "impeccable"];
+
   function project() {
     const start = join(root, "repo");
     put(join(run, "common.md"), ["Run: ab12cd34", "Mode: init", "N: —", "K: 1", `Start: ${start}`, `Worktree: ${start}`, "", "## Goal", "init"].join("\n"));
+    for (const r of ran) put(join(run, "logs", `init-${r}.log.lines`), `1 ${r} — exit 0 — 4 s — ok\n`);
     return start;
   }
-  const roles = ["default", "install", "type-check", "lint", "test, one file", "unit tests", "guards", "suite", "build", "migrate", "worker", "machine lock", "production shape", "shots", "find-polluter", "impeccable"];
-  const commands = (skip = []) =>
-    table(
-      ["role", "command", "verified"],
-      roles
-        .filter((r) => !skip.includes(r))
-        .map((r) => [r, r === "worker" ? "— none: no job runner" : `npm run ${r}`, r === "worker" ? "—" : r === "type-check" ? "exit 2 · 14 s · 3 errors on main" : "exit 0 · 4 s"]),
-    );
-  const config = (shots, skip) =>
+  // A short config: commands only, a red in a few words, no evidence.
+  const config = ({ shots, skip = [] }) =>
     [
-      "# fsloop — config",
+      "# fsloop config",
       "",
       "Verified: 2026-10-18 · 9c16146 · run ab12cd34",
       "",
       "## Commands",
       "",
-      commands(skip),
+      table(
+        ["role", "command"],
+        roles
+          .filter((r) => !skip.includes(r))
+          .map((r) => [r, r === "worker" ? "— none" : r === "type-check" ? "`npm run type-check` — red on main: 3 errors" : `\`npm run ${r}\``]),
+      ),
       "## Shared catalogs",
       "",
-      "- messages/*.json — guard test/i18n.test.ts",
+      "- `messages/*.json` — `test/i18n.test.ts`",
       "",
       "## Roles",
       "",
-      table(["role", "component"], [["status dot", "components/status-dot.tsx"]]),
+      table(["role", "component"], [["status dot", "`components/status-dot.tsx`"]]),
+      "## Design",
+      "",
+      "- `PRODUCT.md` · `DESIGN.md` · system: `components/ui/`, `app/globals.css` · build: code-led",
+      "",
       "## Shots",
       "",
       shots,
     ].join("\n");
 
-  test("the config is done when every command role has its run's outcome and the shots are proven by three frames read ok", () => {
+  test("done when every role has its row and the ones init runs have their log, the design is named, three frames read ok", () => {
     const start = project();
-    const proofLine = "Proof: shots/init-public.png, shots/init-authed.png, shots/init-dialog.png";
-    put(join(start, ".claude", "fsloop", "config.md"), config(`- Shoot: node .claude/skills/fsloop/shot.mjs shoot …\n${proofLine}`, ["impeccable"]));
+    rmSync(join(run, "logs", "init-build.log.lines"));
+    put(join(start, ".claude", "fsloop", "config.md"), config({ shots: "- serve: `node shot.mjs serve …`\n- shoot: `node shot.mjs shoot …`", skip: ["impeccable"] }));
     for (const f of ["init-public", "init-authed", "init-dialog"]) put(join(run, "shots", `${f}.png`), "png");
     transcript("pr", {
       agent: "general-purpose",
@@ -578,16 +584,19 @@ describe("init", () => {
       final: "FRAME: shots/init-public.png ok — the landing page\nFRAME: shots/init-authed.png bad — a login form\nFRAME: shots/init-dialog.png ok — the delete dialog over the list",
     });
     save(run, "init", "pr");
-    assert.deepEqual(gate(collect(run), "init"), ['config.md Commands: no row "impeccable"', "config.md Shots: shots/init-authed.png — the proof reads it bad"]);
+    assert.deepEqual(gate(collect(run), "init"), [
+      "config.md Commands build: never run — no logs/init-build.log.lines",
+      'config.md Commands: no row "impeccable"',
+      'Shots: 2 of the three frames shots/init-*.png read ok by a "shots proof" launch — shots/init-authed.png bad, shots/init-dialog.png ok, shots/init-public.png ok; or ## Shots says none — <why>',
+    ]);
   });
 
-  test("shots may be none with a reason; a config from another run is not this one's", () => {
+  test("shots may be none with a reason; a config without its design, or from another run, is not done", () => {
     const start = project();
-    put(join(start, ".claude", "fsloop", "config.md"), config("none — a CLI with no UI").replace("run ab12cd34", "run 00000000"));
-    assert.deepEqual(gate(collect(run), "init"), ['config.md: no "Verified: <date> · <sha> · run ab12cd34" line']);
+    put(join(start, ".claude", "fsloop", "config.md"), config({ shots: "none — a CLI with no UI" }).replace("run ab12cd34", "run 00000000").replace(/## Design\n\n.*\n/, ""));
+    assert.deepEqual(gate(collect(run), "init"), ['config.md: no "Verified: <date> · <sha> · run ab12cd34" line', "config.md: no ## Design, or it is empty — write none — <why>"]);
   });
 });
-
 describe("cli", () => {
   test("gate prints the problems, exits 1, and logs the gate into run.json", () => {
     common();
