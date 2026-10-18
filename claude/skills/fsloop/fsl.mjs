@@ -21,7 +21,8 @@ const SEVERITIES = ["critical", "major", "minor"];
 const NONE = /^(—|-|none)?$/i;
 
 const read = (path) => (existsSync(path) ? readFileSync(path, "utf8") : "");
-const orNull = (s) => (s === undefined || s === null || NONE.test(String(s).trim()) ? null : String(s).trim());
+const compact = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null && v !== undefined && v !== false && !(Array.isArray(v) && !v.length)));
+const orNull =(s) => (s === undefined || s === null || NONE.test(String(s).trim()) ? null : String(s).trim());
 
 // ── markdown ──────────────────────────────────────────────────────────────────────────────────
 
@@ -1320,10 +1321,15 @@ export function build(run) {
     return lines.length ? lines : null;
   };
   const history = new Map();
-  for (const e of run.decisionLog) {
-    const { finding, ...rest } = e;
-    (history.get(finding) ?? history.set(finding, []).get(finding)).push(rest);
-  }
+  for (const e of run.decisionLog)
+    (history.get(e.finding) ?? history.set(e.finding, []).get(e.finding)).push(compact({ decision: e.to, ref: e.ref, repeat: e.repeat, why: e.why, at: e.at }));
+  // The versions of a finding's row before the one it holds now, and when that one was first seen.
+  const versions = (id, d) => {
+    const all = history.get(id) ?? [];
+    const last = all.at(-1);
+    const current = d && last && last.decision === d.decision && (last.ref ?? null) === orNull(d.ref) && (last.repeat ?? null) === orNull(d.repeat);
+    return current ? { history: all.slice(0, -1), decidedAt: last.at } : { history: all, decidedAt: null };
+  };
   const duplicates = new Map();
   for (const [id, d] of run.decisions) if (d.decision === "duplicate") (duplicates.get(d.ref) ?? duplicates.set(d.ref, []).get(d.ref)).push(id);
 
@@ -1333,7 +1339,8 @@ export function build(run) {
     const e = effectiveOf(run, f.id, status);
     const kind = d ? refKind(run, d.ref) : null;
     const j = kind === "journal" ? journalRow(run, d.ref) : null;
-    return {
+    // The bulk of a big run's run.json: a key whose value is null, false or empty is left out.
+    return compact({
       id: f.id,
       local: f.local,
       launch: f.launch,
@@ -1357,7 +1364,7 @@ export function build(run) {
       refJournal: j ? { n: j.n, question: j.question, decision: j.decision, why: j.why } : null,
       repeat: d ? orNull(d.repeat) : null,
       why: d ? orNull(d.why) : null,
-      history: history.get(f.id) ?? [],
+      ...versions(f.id, d),
       journal: run.journal.filter((r) => refsOf(r).includes(f.id)).map((r) => r.n),
       status: s.status,
       effectiveStatus: e.status,
@@ -1371,7 +1378,7 @@ export function build(run) {
       repeatedBy: run.repeaters.get(f.id) ?? null,
       supersededBy: e.id !== f.id ? e.id : null,
       human: humanFor("finding", f.id),
-    };
+    });
   });
 
   const stages = stagesOf(run);

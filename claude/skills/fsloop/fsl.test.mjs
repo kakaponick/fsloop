@@ -436,7 +436,7 @@ describe("a whole run", () => {
     pass("finish");
 
     const json = build(collect(run));
-    const fate = Object.fromEntries(json.findings.map((f) => [f.id, [f.status, f.closedBy, f.effectiveStatus]]));
+    const fate = Object.fromEntries(json.findings.map((f) => [f.id, [f.status, f.closedBy ?? null, f.effectiveStatus]]));
     assert.deepEqual(fate, {
       // Review read the surface u1 built and raised it no more: fixed, though no verdict scored it.
       "p1-map-craft-cabinets#craft-1": ["fixed", "not-reraised", "fixed"],
@@ -706,7 +706,7 @@ describe("run.json for a UI", () => {
     const ids = ["p1-review-critic-code#code-1", "p1-review-critic-code#code-1~2", "p1-review-critic-code#code-2", "p1-review-critic-code#code-3"];
     let json = build(collect(run));
     assert.deepEqual(json.findings.map((f) => [f.id, f.parsed, f.severity]), [[ids[0], "strict", "major"], [ids[1], "strict", "minor"], [ids[2], "loose", "major"], [ids[3], "loose", "major"]]);
-    assert.deepEqual([json.findings[0].raw, json.findings[3].rule, json.findings[3].raw], [null, "c", "code-3 [spec] major high local d.ts:4 - c - w"]);
+    assert.deepEqual([json.findings[0].raw, json.findings[3].rule, json.findings[3].raw], [undefined, "c", "code-3 [spec] major high local d.ts:4 - c - w"]);
     assert.deepEqual(json.launches[0].unparsed, [{ id: "p1-review-critic-code#line-11", section: "FINDINGS", line: 11, text: "No findings of note beyond these." }]);
     assert.equal(json.launches[0].block.FINDINGS, undefined, "finding lines live in findings[], not twice");
     decide("p1-review", ids.map((id) => [id, "candidate", "—", "—", "minor"]));
@@ -717,7 +717,7 @@ describe("run.json for a UI", () => {
     assert.deepEqual(json.journal[0].refs, [{ id: "p1-review-critic-code#line-11", kind: "line" }]);
   });
 
-  test("a re-decided finding keeps each of its rows in decisions.jsonl, exposed as its history", () => {
+  test("a re-decided finding keeps each of its rows in decisions.jsonl; run.json shows the earlier ones as its history", () => {
     common();
     transcript("h1", { agent: "fsloop-critic", description: "critic code", final: critic("code", ["code-1 [spec] major high local a.ts:1 — c — x"]) });
     save(run, "p1-review", "h1");
@@ -729,12 +729,13 @@ describe("run.json for a UI", () => {
     writeRunJson(run, { at: "t2" });
     decide("p1-review", [[id, "candidate", "—", "—", "the fix needs a file outside the manifest"]]);
     const json = writeRunJson(run, { at: "t3" });
+    assert.deepEqual([json.findings[0].decision, json.findings[0].decidedAt], ["candidate", "t3"]);
     assert.deepEqual(json.findings[0].history, [
-      { stage: "p1-review", from: null, to: "fix", ref: null, repeat: null, why: "major", at: "t1" },
-      { stage: "p1-review", from: "fix", to: "fix", ref: "f1", repeat: null, why: "major", at: "t2" },
-      { stage: "p1-review", from: "fix", to: "candidate", ref: null, repeat: null, why: "the fix needs a file outside the manifest", at: "t3" },
+      { decision: "fix", why: "major", at: "t1" },
+      { decision: "fix", ref: "f1", why: "major", at: "t2" },
     ]);
-    assert.equal(readFileSync(join(run, "decisions.jsonl"), "utf8").trim().split("\n").length, 3);
+    const log = readFileSync(join(run, "decisions.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    assert.deepEqual(log.map((e) => [e.finding, e.stage, e.from, e.to, e.ref, e.at]), [[id, "p1-review", null, "fix", null, "t1"], [id, "p1-review", "fix", "fix", "f1", "t2"], [id, "p1-review", "fix", "candidate", null, "t3"]]);
   });
 
   test("a drop or decline rests on j<n>, a finding or law:<file> <rule>; build follows the ref", () => {
