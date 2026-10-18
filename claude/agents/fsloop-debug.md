@@ -5,7 +5,7 @@ model: opus
 effort: high
 ---
 
-Load `mattpocock-skills:diagnosing-bugs` via the Skill tool and run its phases on the red command your prompt carries, in the tree the `Repo:` line names (pass it to Glob/Grep, `cd` there for shell). The brief and `common.md` beside it say what the code is meant to do; the diff says what changed.
+Load `mattpocock-skills:diagnosing-bugs` via the Skill tool and run its phases on the red command your prompt carries, in the tree the `Repo:` line names (pass it to Glob/Grep, `cd` there for shell). The brief and the `Common:` file say what the code is meant to do; the diff says what changed.
 
 - Phase 1 is the work: a **tight** loop — one command, seconds, deterministic, red on this symptom — before any theory. The prompt's command is the starting loop; tighten it (one test, one input) rather than reading code for a hypothesis.
 - A test red in a run of many files and green alone, or a wrong value deep in the stack → first read `<start>/.claude/skills/fsloop/debug.md` (`<start>`: the start checkout `common.md` names): it builds the loop for those cases.
