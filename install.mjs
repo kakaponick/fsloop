@@ -12,7 +12,8 @@ if (!existsSync(join(target, ".git"))) {
 const src = join(dirname(fileURLToPath(import.meta.url)), "claude");
 const claude = join(target, ".claude");
 
-cpSync(src, claude, { recursive: true });
+// The skill's own tests stay here: a project's runner would pick them up as its own.
+cpSync(src, claude, { recursive: true, filter: (path) => !path.endsWith(".test.mjs") });
 console.log(`copied skill, agents, hooks → ${claude}`);
 
 const settingsPath = join(claude, "settings.json");
@@ -36,13 +37,21 @@ const gitPath = spawnSync("git", ["-C", target, "rev-parse", "--git-path", "info
 if (gitPath.status === 0) {
   const rel = gitPath.stdout.trim();
   const exclude = isAbsolute(rel) ? rel : join(target, rel);
-  const excluded = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
-  if (!/^\/?\.claude\/fsloop\/?$/m.test(excluded)) {
+  // The run folders stay out of git; the facts file is the project's and is committed.
+  const lines = (existsSync(exclude) ? readFileSync(exclude, "utf8") : "").split(/\r?\n/);
+  const kept = lines.filter((l) => !/^\/?\.claude\/fsloop\/?$/.test(l.trim()));
+  const want = [".claude/fsloop/*", "!.claude/fsloop/facts.md"];
+  const missing = want.filter((w) => !kept.some((l) => l.trim() === w));
+  if (missing.length || kept.length !== lines.length) {
+    while (kept.length && !kept.at(-1).trim()) kept.pop();
     mkdirSync(dirname(exclude), { recursive: true });
-    appendFileSync(exclude, `${excluded && !excluded.endsWith("\n") ? "\n" : ""}.claude/fsloop/\n`);
-    console.log("added .claude/fsloop/ → .git/info/exclude");
+    writeFileSync(exclude, [...kept, ...missing].join("\n") + "\n");
+    console.log(`.git/info/exclude: ${want.join(", ")}`);
   }
 }
+
+if (existsSync(join(claude, "fsloop.md")) && !existsSync(join(claude, "fsloop", "facts.md")))
+  console.log("move the facts file: git mv .claude/fsloop.md .claude/fsloop/facts.md — fsloop reads it only there");
 
 const spike = join(target, ".spike");
 for (const d of ["data", "sessions", "toolkits"]) mkdirSync(join(spike, d), { recursive: true });

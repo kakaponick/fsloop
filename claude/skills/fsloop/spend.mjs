@@ -190,7 +190,7 @@ if (shotsDir && existsSync(shotsDir)) {
   const byStage = new Map();
   for (const f of readdirSync(shotsDir)) {
     if (!f.endsWith(".png")) continue;
-    const stage = f.match(/^(baseline|review|assess-p\d+|[uf]\d+(?:-r\d+)?)/)?.[1] ?? "—";
+    const stage = f.match(/^(p\d+-(?:baseline|final)|baseline|review|assess-p\d+|[uf]\d+(?:-r\d+)?)/)?.[1] ?? "—";
     byStage.set(stage, (byStage.get(stage) ?? 0) + 1);
   }
   out.push("", "| Этап | Файлов на диске |", "| --- | --- |");

@@ -15,6 +15,7 @@
 | `claude/skills/fsloop/assess.md` | оценка и повторные проходы при `N` |
 | `claude/skills/fsloop/json-merge.mjs`, `merge.attributes` | merge-драйвер i18n-каталогов по ключам: юниты, дописывающие ключи в один JSON, не конфликтуют |
 | `claude/skills/fsloop/spike-lease.mjs` | аренда аккаунтов из `.spike/sessions/` и зеркало `.spike/` в worktree — [опционально](#spike-lease-опционально) |
+| `claude/skills/fsloop/fsl.mjs` | хранитель папки прогона: `save` сохраняет отчёт каждого запуска агента, `gate` проверяет, что шаг завершён, `build` собирает `run.json` — [подробнее](#папка-прогона) |
 | `claude/skills/fsloop/spend.mjs` | расход токенов по сабагентам сессии, для отчёта |
 | `claude/skills/fsloop/debug.md` | приёмы `fsloop-debug`: тест красный в общем прогоне и зелёный один, неверное значение глубоко в стеке |
 | `claude/skills/fsloop/find-polluter.mjs` | бисекция тест-файла, который загрязняет состояние жертвы; любой раннер с JUnit-отчётом (`--run`), для bun — без настройки |
@@ -45,7 +46,7 @@ node fsloop/install.mjs <путь к репо проекта>
 Установщик:
 - копирует `claude/` в `<repo>/.claude/`;
 - добавляет хук `spike-guard` в `.claude/settings.json`;
-- добавляет `.spike/` в `.gitignore`, а `.claude/fsloop/` в `.git/info/exclude`;
+- добавляет `.spike/` в `.gitignore`, а в `.git/info/exclude` — `.claude/fsloop/*` и `!.claude/fsloop/facts.md`: папки прогонов не попадают в git, файл фактов попадает;
 - создаёт `.spike/{data,sessions,toolkits}` и шаблон `README.md`.
 
 Повторный запуск обновляет файлы и не дублирует хук.
@@ -54,7 +55,7 @@ node fsloop/install.mjs <путь к репо проекта>
 
 fsloop берёт всё про проект из его `CLAUDE.md` (и файлов правил, которые тот называет) и из манифеста пакетов: установку, проверку типов, линт, тесты (один файл и весь набор), гарды каталогов, сборку, генерацию и применение миграций, запуск воркера, основную ветку, машинный лок, инструменты скриншотов, строгие правила. Всё это он записывает в `common.md` прогона, и агенты читают только его. Чего в проекте нет — решение, оно попадает в отчёт. Чем подробнее `CLAUDE.md`, тем меньше догадок.
 
-**Файл фактов `.claude/fsloop.md`** (необязательный) закрепляет всё это явно, и прогон берёт его как есть, ничего не выводя заново: заполненную таблицу ролей-команд из SKILL.md → Project facts, карту ролей UI (`law/ui.md` → Roles: какой компонент — статус-точка, тултип-глоссарий, адаптивный тулбар, таблица…) и то, чего документация проекта не говорит, а прогон должен знать. С ним поведение fsloop в проекте одинаково от прогона к прогону.
+**Файл фактов `.claude/fsloop/facts.md`** (необязательный, коммитится) закрепляет всё это явно, и прогон берёт его как есть, ничего не выводя заново: заполненную таблицу ролей-команд из SKILL.md → Project facts, карту ролей UI (`law/ui.md` → Roles: какой компонент — статус-точка, тултип-глоссарий, адаптивный тулбар, таблица…) и то, чего документация проекта не говорит, а прогон должен знать. С ним поведение fsloop в проекте одинаково от прогона к прогону.
 
 **Закон.** fsloop несёт свою планку: `law/` — UX, UI, код, тесты. Она действует в любом репо; правила проекта (`CLAUDE.md` и файлы, которые он называет) уточняют или переопределяют её там, где говорят о том же. Ссылки в находках — по номеру: `ux 1`, `table #10`, `tests 6`, `code` → Idempotent. Правило с пометкой *default* — выбор для плотного рабочего инструмента; `PRODUCT.md` или `DESIGN.md` другого продукта может его заменить.
 
@@ -95,12 +96,50 @@ node .claude/skills/fsloop/spike-lease.mjs status
 /fsloop spike <question>    только исследование, без коммита
 ```
 
-Маленькая цель (меньше 3 юнитов) идёт в режиме inline прямо в текущей рабочей копии. Остальные — в worktree `../fsl/<run id>`, с полосами `../fsl/<run id>-u<k>` для параллельных юнитов. Состояние прогона (журнал, брифы, кадры, отчёт) лежит в `.claude/fsloop/<run id>/`.
+Маленькая цель (меньше 3 юнитов) идёт в режиме inline прямо в текущей рабочей копии. Остальные — в worktree `../fsl/<run id>`, с полосами `../fsl/<run id>-u<k>` для параллельных юнитов. Состояние прогона лежит в `.claude/fsloop/runs/<run id>/`.
 
 Коммиты прогона несут трейлеры `Fsloop-Run`, `Fsloop-Step`, `Fsloop-Pass`, поэтому `git log --grep='Fsloop-Run: <id>'` показывает весь прогон. В конце fsloop пушит в основную ветку. Если `CLAUDE.md` запрещает агенту такой пуш, ветка `fsl/<run id>` уходит в origin, и отчёт называет её для слияния.
+
+## Папка прогона
+
+Всё, что прогон сделал и решил, лежит в `.claude/fsloop/runs/<run id>/` по одной раскладке (SKILL.md → Run folder). Её читает и интерфейс.
+
+```
+common.md              памятка агентам; в начале Run/Mode/N/K/Start/Worktree и ## Goal
+journal.md             решения оркестратора: | # | stage | question | decision | why | refs |
+units.md               состояние задач: | unit | pass | state | tree | title |
+units/<u1|f1>/         brief.md, commit.txt, tests.log, логи проверки и слияния
+launches.md            каждый запуск агента: кто, модель, транскрипт, отчёт
+reports/<launch>.md    итоговый блок каждого запуска, дословно
+findings/<stage>.md    решение по каждой находке: | finding | decision | ref | repeat | why |
+passes.md              с N: | pass | critical+major | outcome | why |
+surfaces/, shots/, logs/
+gates.jsonl, run.json  итоги проверок шагов; весь прогон одним документом
+report.md
+```
+
+Прогон — это цепочка шагов `p<проход>-<шаг>`: `map`, `spike`, `decompose`, `units`, `review`, `fix`, затем `verdict` (без N) или `assess` (с N), потом `integrate` и `finish`. Шаг считается завершённым, только когда `fsl.mjs gate` его пропустил, и следующий начинается только после этого. Проверка красная, если:
+
+- отчёт запуска не сохранён;
+- у находки нет строки с решением, у решения нет причины, или у `dropped`, `declined`, `duplicate` нет ссылки;
+- находка «в работу» не названа в `## Closes` ни одного брифа;
+- в брифе нет одного из разделов;
+- коммит задачи без трейлеров;
+- с N число critical+major в `passes.md` не совпадает с находками, или итог прохода не следует правилу;
+- перед пушем (`integrate`) осталась открытой critical или major находка ревью. Пуш тогда не делается, а прогон всё равно завершается отчётом.
+
+```
+node .claude/skills/fsloop/fsl.mjs save  <run folder> <stage> <agent id | output_file>
+node .claude/skills/fsloop/fsl.mjs gate  <run folder> <stage>
+node .claude/skills/fsloop/fsl.mjs build <run folder>
+```
+
+Id находки — `<запуск>#<id>` (`p1-review-critic-code#code-3`). Статус каждой находки (`closed`, `open`, `fixed`, `queued`, `candidate`…) `run.json` вычисляет:
+- по вердикту проверяющего критика;
+- с N — по колонке `repeat` оценки: если оценка нашла то же самое, исправление не сработало.
 
 ## Проверка скриптов
 
 ```
-node --test claude/skills/fsloop/find-polluter.test.mjs
+node --test claude/skills/fsloop/find-polluter.test.mjs claude/skills/fsloop/fsl.test.mjs
 ```
