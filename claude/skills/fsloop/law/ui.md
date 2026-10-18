@@ -1,21 +1,21 @@
 # UI Law
 
-How to build UI — fsloop's base law for every surface a run builds or judges; it overrides generic design instinct. Users, voice and anti-references — `PRODUCT.md`; tokens, color, type, density and the look of components — `DESIGN.md`; clarity and flow — `law/ux.md` (law 0 first); how to build — this file. Cite a rule by its section or number: `ui #10`, `ui` → Widths.
+How to build UI — fsloop's base law for every surface a run builds or judges; it overrides generic design instinct. Users, voice and anti-references — `PRODUCT.md`; tokens, color, type, density and the look of components — `DESIGN.md`; clarity and flow — `law/ux.md` (law 0 first); how to build — this file; data tables — `law/table.md`. Cite a rule by its section: `ui` → Widths.
 
-**Precedence.** `PRODUCT.md` → `DESIGN.md` → the project's UI rules (`common.md` names them) → this file → `law/ux.md` (law 0 excepted, as ux.md says). The project's rules refine or override a rule here where both speak. A rule marked *default* is the choice for a dense working tool — an operator console, an admin, a dashboard; a product whose `PRODUCT.md` or `DESIGN.md` states another (a consumer app, a touch-first surface) overrides it, and that statement is the rule. impeccable works under this law: a point the law contradicts is void, never a finding or a candidate. Every surface keeps the world `DESIGN.md` commits; a new visual direction, a brand change, impeccable's direction roll and decision page run only with the user at the keyboard.
+**Precedence** — of the whole law, the one statement of it. Every law file (`code`, `tests`, `ui`, `table`, `ux`) is refined or overridden by the project's rule file on the same subject, as `common.md` names them, where both speak; where the project is silent the law stands. The design law runs `PRODUCT.md` → `DESIGN.md` → the project's UI rules and UX laws → `law/ui.md` and `law/table.md` → `law/ux.md`, with one exception: `ux 0` outranks every form rule — a new user's question is never left open, and it is closed in a form the rules above allow. A rule marked *default* is the choice for a dense working tool — an operator console, an admin, a dashboard; a product whose `PRODUCT.md` or `DESIGN.md` states another (a consumer app, a touch-first surface) overrides it, and that statement is the rule. impeccable works under this law: a point the law contradicts is void, never a finding or a candidate. Every surface keeps the world `DESIGN.md` commits; a new visual direction, a brand change, impeccable's direction roll and decision page run only with the user at the keyboard.
 
 **The law grows with the code.** `PRODUCT.md` and `DESIGN.md` describe the product as built, so the change that alters what they describe updates them in the same commit:
 - **`PRODUCT.md`** — a new surface adds its Surfaces row: the one question it answers. A surface whose question changes rewrites its row. Users, purpose and success criteria change only from the user's words.
 - **`DESIGN.md`** — a new or changed token, a shared component's look or variant, a new shared component, or a new named rule updates its section; then the sidecar `.impeccable/design.json` is refreshed with impeccable `document`, the sidecar alone.
-- **The role map** (Roles below) — a component that comes to play a role is added to it in the same commit.
+- **The role map** (Roles below) — a component that comes to play a role is named under the implementer's NOTES; the orchestrator records it (`ui.md` → A new surface).
 
 A change that leaves any of them behind the code breaks this rule.
 
-**The change on screen.** A frame shows what changed in its context, as its user meets it — what leads, hierarchy, density, consistency with its neighbours. Its scope is the smallest view that holds the change and its surroundings: the page's layout or structure → the page's first viewport, or the full page when the change runs below it; a dialog, panel or menu → opened over its page by the steps that open it; a change inside one region (a column, a toolbar, a card) → that region's container. A component's states and interactions are proven by the code and the tests. Inside an fsloop run frames are its orchestrator's alone (`ui.md` → Frames).
+**On screen.** A component's states and interactions are proven by the code and the tests; a run's frames are `ui.md` → Frames.
 
 ## Roles
 
-The rules below name the parts of an interface by **role**, not by component: the project's role map says which component plays each — the project's UI rules or `.claude/fsloop.md` → Roles, quoted in `common.md`. A role the map leaves empty is filled once, by the rule «Existing component first»: the search for a component that already plays it, else one shared component under the project's component folder, recorded in the map and `DESIGN.md` — never a one-off at a call site. A project with no UI has no map.
+The rules below name the parts of an interface by **role**, not by component: the project's role map says which component plays each — the project's UI rules or `.claude/fsloop.md` → Roles, quoted in `common.md`. A role the map leaves empty is filled once, by the rule «Existing component first»: the search for a component that already plays it, else one shared component under the project's component folder, recorded in `DESIGN.md` — never a one-off at a call site. A project with no UI has no map.
 
 | role | what it is |
 |---|---|
@@ -28,9 +28,9 @@ The rules below name the parts of an interface by **role**, not by component: th
 | empty state | why a view is empty and what to do next; a table's own variant |
 | fact list | the label–value table of an object page (`ux 9`), with its fold row |
 | page header | the toolbar strip: navigation, title or breadcrumb, controls, the toolbar fact |
-| adaptive toolbar | a one-line toolbar whose items collapse into a `…` overflow (#14) |
-| status bar | the page's bottom strip: pagination or counts, data age (#8) |
-| data table | the table machinery of #1–15: server source, view state, columns menu, sortable header, row context menu, selection, pagination, search with history, column widths, pinned action |
+| adaptive toolbar | a one-line toolbar whose items collapse into a `…` overflow (`table #14`) |
+| status bar | the page's bottom strip: pagination or counts, data age (`table #8`) |
+| data table | the table machinery of `law/table.md`: server source, view state, columns menu, sortable header, row context menu, selection, pagination, search with history, column widths, pinned action |
 | what's-new registry | where a new page or control announces itself, when the product keeps one |
 
 ## Layout Paradigm — content-out, never space-in
@@ -58,8 +58,8 @@ Light and dark are equal first-class surfaces when the product has both. *Defaul
 
 - **Status color is a dot, never a badge** — the status dot: a dot in the signal tone and the label in regular text. A badge, pill, border, fill or text in a status color to show a state is a defect. A badge stays only for neutral tags (role, kind). Tones come from one shared map, never the raw palette.
 
-- **Widths** — never full width on a button, input, select or any compound trigger; never an unbounded flexible text input — cap it.
-  - Toolbar filter, combobox and popover triggers hug their content — no floor, no fixed width; a dialog's combobox may floor; collapsed into the `…` overflow, controls span its width (#14).
+- **Widths** — a button, input, select or compound trigger sizes to its content; a flexible text input has a cap.
+  - Toolbar filter, combobox and popover triggers hug their content — no floor, no fixed width; a dialog's combobox may floor; collapsed into the `…` overflow, controls span its width (`table #14`).
   - Inline table-cell editors — a floor **and** a cap, inner truncation; never a hard width, never a bare floor.
   - Search inputs: flexible with a cap in toolbars; a fixed width matching the field in dialogs.
   - Primary calls to action never span their container — right-aligned at content width in dialog footers; icon-only with a tooltip in toolbars with three or more controls.
@@ -68,7 +68,7 @@ Light and dark are equal first-class surfaces when the product has both. *Defaul
 
 - **Constrain sparse content** — anything that isn't a full-parity table or a dense row feed never runs edge-to-edge: the smallest centered cap the content fills, narrower for single-column forms. No lone centered island — give it a grid neighbour; no mostly-empty flexible column.
 
-- **Never stretch content-sized cards to uniform height** — masonry or start-aligned; equal height only for structurally uniform stat tiles.
+- **Content-sized cards keep their own height** — masonry or start-aligned; equal height only for structurally uniform stat tiles.
 
 - **Truncation only for variable-length content in a hard-capped container** — never a defensive default; removing the width cap removes the truncation.
 
@@ -76,7 +76,7 @@ Light and dark are equal first-class surfaces when the product has both. *Defaul
 
 - **Type, density and component sizes come from `DESIGN.md`** — set once in the shared components and the theme, chosen at a call site by the component's size prop, never by a height or size override; a container never sizes primary text smaller than the body size. Controls that sit together share one height — mixed heights in one group are a visible defect.
 
-- **Row actions live in the context menu** (#4) — no actions column.
+- **Row actions live in the context menu** (`table #4`) — no actions column.
 
 - **Persisted preferences have one source of truth** — the persisted store, never mirrored into local state with a sync effect (the async load races the persist and overwrites). Persisted state renders on first paint — no flash of the default then a snap; fix the source of truth, never mask it with a loading gate.
 
@@ -90,56 +90,16 @@ Light and dark are equal first-class surfaces when the product has both. *Defaul
 
 - **Dialogs return focus** — a dialog returns focus to its opener on close; an opener gone by the close names where focus lands. Motion lives in the dialog primitive, never at a call site; navigations, refreshes and search-param changes stay still.
 
-- **Modal overflow never ships** — a dialog never scrolls sideways; its height is capped and scrolls inside; a long textarea is capped and scrolls; a table in a modal scrolls in its own bounded, bordered container with truncated cells (#10); flex children with user text may shrink and truncate. The smallest dialog width that fits.
+- **A dialog fits its viewport** — it scrolls only vertically, its height capped and scrolling inside; a long textarea is capped and scrolls; a table in a modal scrolls in its own bounded, bordered container with truncated cells (`table #10`); flex children with user text may shrink and truncate. The smallest dialog width that fits.
 
-- **Wheel** — *default:* on desktop the wheel is a navigation input, not only a scroll: whatever the user steps through by ‹ › or ←/→ — a table's pages (#1), a viewer walking a list item by item, a carousel, a step-by-step result — also steps by the wheel, on the scroll body that holds the current item. The wheel scrolls a long item first and steps only past its edge, one step per gesture, stopping at the ends; a sequence of one keeps the wheel for scrolling. The ‹ › sit in one stable place, and focus opens on the stepped region so ←/→ work at once.
+- **Wheel** — *default:* on desktop the wheel is a navigation input, not only a scroll: whatever the user steps through by ‹ › or ←/→ — a table's pages (`table #1`), a viewer walking a list item by item, a carousel, a step-by-step result — also steps by the wheel, on the scroll body that holds the current item. The wheel scrolls a long item first and steps only past its edge, one step per gesture, stopping at the ends; a sequence of one keeps the wheel for scrolling. The ‹ › sit in one stable place, and focus opens on the stepped region so ←/→ work at once.
 
 ## Page chrome — toolbar and status bar
 
-- **Toolbar** is the page header strip: navigation, title or breadcrumb, then its controls, with the toolbar fact at the right; on a page with a table its root is the adaptive toolbar (#14).
+- **Toolbar** is the page header strip: navigation, title or breadcrumb, then its controls, with the toolbar fact at the right; on a page with a table its root is the adaptive toolbar (`table #14`).
 - **A toolbar fact is compact** (`ux 1`): the status dot, then `count state · cause` in six words at most, the count one word. The count is the button to its list; the cause is optional, and where it has a fix it is the link to it. The header takes its own short string; a longer sentence for a settings line or a dialog lives under another. Every fact the page can raise together fits beside its toolbar at the narrowest desktop width the product supports (`DESIGN.md`; none → 1280 px) — the facts keep their width up to half the strip while the toolbar folds its filters into `…`; a clipped fact is a lost fact (`ux 2`). A fact a change adds or rewords gets a test pinning its words at the widest count.
 - **The page's main actions live in the toolbar** — the few the page exists for, acting on the page's own object: resume, cancel or replace on an order; add or run on a list. They sit in the right cluster, appear whenever the state allows them, and collapse into `…` when the strip is narrow. A user looks for «what can I do with this page» in one stable place; a button inside a fact block, a banner or next to a status moves with the text around it.
-- **Stays in the body:** actions on a row or a selection (the context menu, #4) and a link that is part of an explanatory message.
+- **Stays in the body:** actions on a row or a selection (the context menu, `table #4`) and a link that is part of an explanatory message.
 - A destructive toolbar action confirms in a dialog; one that cannot run now is the blocked action with its reason.
-- **Status bar** is the page's bottom strip, under all the page content, on pages with or without a table: pagination or counts, and data age (#8). It holds no actions.
+- **Status bar** is the page's bottom strip, under all the page content, on pages with or without a table: pagination or counts, and data age (`table #8`). It holds no actions.
 
-## Table Requirements
-
-Every data table implements #1–15 in full — a bare table with hard-coded rows is never enough. **Parity is the contract, not a reference's chrome**; the project's reference table, when its rules name one, is the idiom to copy.
-
-**Tables are server-side** (*default*, `ux 6`). Rows come from a server source; sort, filters and search run in the query; the client holds only view state. Never sort, filter or search the fetched page on the client.
-
-### Contract vs. chrome
-
-Mandatory toolbar controls: the columns menu (#3), at least one filter (#11), search (#12). After them come the page's main actions (Page chrome). Nothing beyond those: dead chrome breaks `PRODUCT.md` — a manual Refresh only when something outside this UI changes the data; Run-all, config or Add only when that flow exists; a column only with a real data source, never one that renders «—» for every row.
-
-### Required features
-
-1. **Pagination** — in the status bar (#8), with wheel paging on the table's own container (Conventions → Wheel) and `←`/`→`/`Home`/`End`. Rows per page: Fill / 50 / 100 / All — Fill computes from the viewport and the row height. Pagination switched off in the columns menu → a counts strip in the same slot. **The scroll container is height-bounded and owns both axes** — a horizontal scroll with no height bound is a defect: its bar lands below the fold. Bounding also pins the horizontal bar above the status bar, keeps the sticky header on the table and anchors wheel paging.
-2. **Sortable headers** — every meaningful column. A click toggles `asc ⇄ desc`; a different column starts at `desc`; sorting resets to page 1. Field and direction persist with the view. The order itself runs in the query. Status columns sort by severity rank, not alphabet.
-3. **Column visibility and order** — one shared columns menu, never a hand-rolled dropdown: an icon-only trigger named by its accessible label, a checkbox row per toggleable column, drag-to-reorder with a keyboard path, the pagination toggle and Reset (shown only when something differs from the defaults). One state owns visibility **and** order; placement lives in one tested module, never re-derived. The primary identifier is always visible; column labels are strings of the catalog, never literals; the default order is the markup order, so the default view never reorders itself on first paint.
-4. **Row context menu** — wraps every row. Its header is the row's title; everything else earns its place by the row's need: a link out when the row's object lives at an address outside the product (a new tab), a copy of the value users paste elsewhere (joined by newlines for a selection), an action the header carries better than an item. An item earns its place by doing what neither another item, the header nor the row already does (`ux 2`); single-only and multi-only items are marked; a destructive item confirms. The row the menu opened on is highlighted. **The menu acts on every selected row the table knows, never the current page** — selection keeps rows from other pages, and ids it cannot resolve degrade the header to «28 of 30 selected»; a test pins this.
-5. **Multi-select** — a header checkbox with an indeterminate state, a per-row checkbox in a narrow first column, drag-select, a muted selected-row tone; selection persists across pages.
-6. **Density** — header and row heights from `DESIGN.md`, set once in the shared table, never per table; a stacked identifier with a sub-label is the one taller row kind.
-7. **State persistence layering** — persisted per table: search, filters, sort, column visibility and order, pagination on/off, column widths; measured, never stored: Fill's row height; in memory: the current page, the rows-per-page mode, the selection. The page resets to 1 on a search, filter or sort change; the selection clears on a search change. Table state persists nowhere else — the one server-persisted preference is #13's pinned action.
-8. **Status bar** — the page's bottom strip, always last under the content: pagination when enabled, otherwise the counts strip — status dots with their counts and labels, then `{shown} of {total}` — and the data's age.
-9. **Right-align numeric columns** — counts, percentages, durations: header and cell right-aligned, tabular figures, a fixed width sized to the widest value.
-10. **A cell never wraps — one line, truncated** — the table has a fixed layout; wrapping or word-breaking in a cell is a defect. A long value truncates against its column width; the full value comes back by widening the column (#15), the context menu or copy. A stacked identifier with a sub-label is two single-line elements, not a wrap. Truncation needs a bounded box. **Truncation is the outlier net, not the plan — size every column to its content.** A fixed width clears the longest localized header (one language may run ~30% past another) plus the sort icon **and** the widest ordinary value (a date and time at the table's type size). A clipped header or a value painting over its neighbour is a defect. A column is as wide as its covering header (`ux 1`) and its ordinary values need, and the table as wide as its columns: past the page it scrolls sideways in its own container (#1). Widths live once per table and reach head **and** cell; the table's minimum width sums them; a test holds every header to its width.
-11. **Filters** — at least one select for the most-sliced dimension. Triggers hug their content. Option counts are over the **unfiltered** set, rendered by the select's count slot, never as option children a portal copies into the closed trigger. An «all» value means no filter. Filters persist; a change resets the page; predicates run in the query.
-12. **Search with history** — the shared search with its history, never a bare input, keyed per table; after the filters, flexible with a cap. Matching: the term splits into tokens, OR-matched in the query — a row passes if any token matches any field; never branch on the token count (a pasted column of values is a search). Hits are highlighted. A change resets the page and clears the selection.
-13. **Left-click pinned row action** — every context-menu table lets a left click run the user's pinned item. The default pin is the action users take on a row most often — where a row's object has its own page, Open. Every non-destructive single-row action stays pinnable; a pinned action that confirms goes through the shared confirmation. The pin is the one server-persisted, per-user table preference.
-14. **Adaptive toolbars — one line, overflow into `…`** — every toolbar root is the adaptive toolbar, never a wrapping flex row; what no longer fits collapses into a `…` popover.
-    - Every item has a required, stable id.
-    - Items drop right to left in markup order, ordinary items first, sticky ones after them; pinned ones never collapse. Pin only a bounded set that must stay reachable (search, the right cluster); an open-ended number of controls is sticky.
-    - Search is pinned and flexible, its minimum width the floor of its whole cluster.
-    - The right cluster collapses one control at a time; an item wraps a whole button group, never its members.
-    - A control holding a non-default filter value marks the `…` trigger, so a user is never filtered by an invisible control.
-    - Inside the `…` popover every collapsed control is a full-width row — a button becomes a menu row with its icon and its accessible label as text — and ↑/↓/Home/End move between them; the row styling lives once in the toolbar, never per call site. A row whose control shows no name of its own carries a label.
-    - Packing lives in one pure, tested module — never re-derived, never a second measurement path.
-15. **Resizable columns for unpredictable-width content** — variable columns (address, name, error text, free text) get a resize handle; bounded columns (status dot, date, duration, count, switch) keep a fixed width and never do.
-    - Widths live in one persisted map per table — never per-column keys, local state or a bespoke drag.
-    - Defaults and per-column bounds are module-level constants — an inline literal is a new reference every render and defeats row memoization.
-    - **One width-free column absorbs the slack** — under a fixed layout, excess width spreads proportionally and handles drift; leave a natural remainder column width-free, or a trailing spacer absorbs it.
-    - The handle sits in the sortable header's end slot: drag, keyboard nudge, double-click reset; its pointer-down stops propagation, or it starts drag-select.
-    - **The handle is always visible, never hover-revealed** — a permanent hairline at the column edge that thickens on hover, focus and drag.
-    - Clamping and merging live in one tested module — never re-derived.

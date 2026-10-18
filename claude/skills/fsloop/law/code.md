@@ -1,6 +1,6 @@
 # Code Law
 
-fsloop's base law for every change a run makes or judges, server and client. The project's code rules (`common.md` names them) refine or override it where both speak and name what each role is in this repo — the queue, the scheduler, the secret store, the logger, the settings. A rule whose subject the project does not have (no background work, no secrets) does not apply. Cite a rule by its name: `code` → Idempotent.
+fsloop's base law for every change a run makes or judges, server and client; precedence — `law/ui.md` → Precedence. The project's code rules (`common.md` names them) name what each role is in this repo — the queue, the scheduler, the secret store, the logger, the settings. A rule whose subject the project does not have (no background work, no secrets) does not apply. Cite a rule by its name: `code` → Idempotent.
 
 - **Work state lives in the database.** Background work and the resources it holds — a queue, a lease — are tables: a lease has a TTL and a heartbeat, an expired one returns to the queue; process memory holds nothing, a restart loses nothing.
 - **An executor is a pure function over its job.** Everything comes in as arguments — no request, session or framework context inside; its test calls it directly.

@@ -1,6 +1,6 @@
 # Tests Law
 
-Every second of a test is paid by every run of every agent, and an unstable test lies both green and red. A test checks behaviour; it does not wait for time. fsloop's base law for every test a run writes or judges; the project's test rules (`common.md` names them) refine or override it where both speak, and name its guards — the checks that turn red by themselves. Cite a rule by its number: `tests 6`.
+Every second of a test is paid by every run of every agent, and an unstable test lies both green and red. A test checks behaviour; it does not wait for time. fsloop's base law for every test a run writes or judges; precedence — `law/ui.md` → Precedence; the guards — `common.md` → guards. Cite a rule by its number: `tests 6`.
 
 ## Shape
 
@@ -24,5 +24,5 @@ The test sits beside its module, built with factory helpers. A pure function is 
 ## Budget and health
 
 10. **Budget.** One test — up to 5 s. A file longer than 3 s — on average up to 1 s per test. Longer only with an entry in the project's allow list with its reason, and that entry is committed by a human.
-11. **A flake is a defect, not a reason to rerun.** A failed file is rerun alone where the tooling can: `broken` — it fails alone too; `flaky` — it fails only in the shared run. Both are red. A red line is work in the same turn: the flake is fixed. Rerunning until green instead of fixing is never done.
+11. **A flake is a defect, not a reason to rerun.** A failed file is rerun alone where the tooling can: `broken` — it fails alone too; `flaky` — it fails only in the shared run. Both are red; a flake is fixed where it lives, not rerun — inside an fsloop run, one in a file the run did not touch is a candidate (SKILL.md step 7).
 12. **Baseline.** Where the project keeps a timing baseline, it is written only after a clean full run: the suite honestly grew in the task — the baseline file goes into the same commit. A red run never writes the baseline, and neither does a loaded machine.
