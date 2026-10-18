@@ -39,14 +39,14 @@ Once per pass, after the briefs are drafted and before the first lane opens, whe
 
 ## The shot server
 
-Frames are taken in `<wt>` — the start checkout in the inline mode — and the server serves its live code. The project's screenshot tooling (its doc or `CLAUDE.md` names it) fills four roles, recorded in `common.md` → shots:
+Frames are taken in `<wt>` — the start checkout in the inline mode — and the server serves its live code. The config's `## Shots` (`/fsloop init` proves it) fills four roles — else the screenshot tooling the project's doc or `CLAUDE.md` names — recorded in `common.md` → shots:
 
 - **Raise** — a throwaway database for the tree, seeded from a fixture shaped after the production shape, and a free port. A raise over a running shot server stops it first.
 - **Serve** — the tree's dev server against that database on that port, every other external key blanked. Most dev servers refuse a second instance in one tree.
 - **Shoot** — one frame of a route or a dialog to a PNG at the capture defaults; a page whose rows read a live process (a worker heartbeat) refreshes it first, when the tooling can.
 - **Teardown** — the server stopped and, at Finish, the shot database dropped.
 
-The dev database, production and every live account stay outside: the shot database is its own. A project with no such tooling gets the minimum: Serve is its dev-server command on a free port over the tree's own throwaway data, Shoot is `npx playwright screenshot --viewport-size=1440,900 <url> <png>` (an installed Playwright, a decision), and a page that needs data no seed provides goes to its critic without a frame, a decision.
+The dev database, production and every live account stay outside: the shot database is its own. A project with neither gets `shot.mjs` beside this file, over its dev server and the tree's own throwaway data — Serve `node <start>/.claude/skills/fsloop/shot.mjs serve`, Shoot `shot.mjs shoot` (with `login` first when a page needs a session), Teardown `shot.mjs stop` by the pid Serve recorded — a decision, and the report suggests `/fsloop init`; a page that needs data no seed provides goes to its critic without a frame, a decision.
 
 - **A capture** — yours, one command list per fixture: raise with it, serve in the background, one shoot for every surface the fixture shapes, teardown, its log `logs/p<p>-<moment>-capture.log`; frames under `<run folder>/shots/`. You view none of them.
 - **Raise or serve refuses** — another dev server holds the tree, or its lock is unreadable: the surface goes to its critic without a frame, a decision; the critic judges from code and says so.

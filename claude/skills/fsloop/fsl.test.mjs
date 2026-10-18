@@ -23,9 +23,11 @@ function put(path, text) {
 function transcript(agentId, { agent, description, final, model = "claude-opus-5-5", prompt = "Repo: /repo" }) {
   const dir = join(projects, "C--repo", "session-1", "subagents");
   const lines = [
-    { type: "user", message: { role: "user", content: prompt } },
-    { type: "assistant", message: { model, content: [{ type: "tool_use", id: "t1", name: "Read", input: {} }] } },
-    { type: "assistant", message: { model, content: [{ type: "text", text: final }] } },
+    { type: "user", timestamp: "2026-10-18T10:00:00.000Z", message: { role: "user", content: prompt } },
+    // The tool call is written as two entries of one message, the usage repeated on both.
+    { type: "assistant", timestamp: "2026-10-18T10:00:05.000Z", message: { id: "m1", model, content: [{ type: "text", text: "Reading." }], usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 1000, cache_read_input_tokens: 0 } } },
+    { type: "assistant", timestamp: "2026-10-18T10:00:06.000Z", message: { id: "m1", model, content: [{ type: "tool_use", id: "t1", name: "Read", input: {} }], usage: { input_tokens: 10, output_tokens: 40, cache_creation_input_tokens: 1000, cache_read_input_tokens: 0 } } },
+    { type: "assistant", timestamp: "2026-10-18T10:01:30.000Z", message: { id: "m2", model, content: [{ type: "text", text: final }], usage: { input_tokens: 2, output_tokens: 300, cache_creation_input_tokens: 200, cache_read_input_tokens: 1000 } } },
   ];
   put(join(dir, `agent-${agentId}.jsonl`), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
   put(join(dir, `agent-${agentId}.meta.json`), JSON.stringify({ agentType: agent, description }));
@@ -147,6 +149,15 @@ describe("save", () => {
     assert.equal(launches.length, 1);
     assert.equal(launches[0].agent, "fsloop-critic");
     assert.equal(launches[0].model, "claude-opus-5-5");
+  });
+
+  test("each launch records its time and tokens, a message counted once though written in parts", () => {
+    common();
+    transcript("sp1", { agent: "fsloop-critic", description: "critic code", final: "LENS: code" });
+    save(run, "p1-review", "sp1");
+    const launch = build(collect(run)).launches[0];
+    assert.equal(launch.seconds, 90);
+    assert.deepEqual(launch.spend, { input: 12, output: 340, cacheWrite: 1200, cacheRead: 1000 });
   });
 
   test("a second launch with the same description gets a numbered id", () => {
@@ -518,6 +529,62 @@ describe("integrate and finish", () => {
     put(join(run, "passes.md"), table(["pass", "critical+major", "outcome", "why"], [["p1", "1", "next", "the suite is red"]]));
     green("p1-fix");
     assert.deepEqual(gate(collect(run), "p1-assess"), ["findings/p1-assess.md p1-assess-own#2: the run's own finding needs a severity column — critical, major or minor"]);
+  });
+});
+
+describe("init", () => {
+  function project() {
+    const start = join(root, "repo");
+    put(join(run, "common.md"), ["Run: ab12cd34", "Mode: init", "N: —", "K: 1", `Start: ${start}`, `Worktree: ${start}`, "", "## Goal", "init"].join("\n"));
+    return start;
+  }
+  const roles = ["default", "install", "type-check", "lint", "test, one file", "unit tests", "guards", "suite", "build", "migrate", "worker", "machine lock", "production shape", "shots", "find-polluter", "impeccable"];
+  const commands = (skip = []) =>
+    table(
+      ["role", "command", "verified"],
+      roles
+        .filter((r) => !skip.includes(r))
+        .map((r) => [r, r === "worker" ? "— none: no job runner" : `npm run ${r}`, r === "worker" ? "—" : r === "type-check" ? "exit 2 · 14 s · 3 errors on main" : "exit 0 · 4 s"]),
+    );
+  const config = (shots, skip) =>
+    [
+      "# fsloop — config",
+      "",
+      "Verified: 2026-10-18 · 9c16146 · run ab12cd34",
+      "",
+      "## Commands",
+      "",
+      commands(skip),
+      "## Shared catalogs",
+      "",
+      "- messages/*.json — guard test/i18n.test.ts",
+      "",
+      "## Roles",
+      "",
+      table(["role", "component"], [["status dot", "components/status-dot.tsx"]]),
+      "## Shots",
+      "",
+      shots,
+    ].join("\n");
+
+  test("the config is done when every command role has its run's outcome and the shots are proven by three frames read ok", () => {
+    const start = project();
+    const proofLine = "Proof: shots/init-public.png, shots/init-authed.png, shots/init-dialog.png";
+    put(join(start, ".claude", "fsloop", "config.md"), config(`- Shoot: node .claude/skills/fsloop/shot.mjs shoot …\n${proofLine}`, ["impeccable"]));
+    for (const f of ["init-public", "init-authed", "init-dialog"]) put(join(run, "shots", `${f}.png`), "png");
+    transcript("pr", {
+      agent: "general-purpose",
+      description: "shots proof",
+      final: "FRAME: shots/init-public.png ok — the landing page\nFRAME: shots/init-authed.png bad — a login form\nFRAME: shots/init-dialog.png ok — the delete dialog over the list",
+    });
+    save(run, "init", "pr");
+    assert.deepEqual(gate(collect(run), "init"), ['config.md Commands: no row "impeccable"', "config.md Shots: shots/init-authed.png — the proof reads it bad"]);
+  });
+
+  test("shots may be none with a reason; a config from another run is not this one's", () => {
+    const start = project();
+    put(join(start, ".claude", "fsloop", "config.md"), config("none — a CLI with no UI").replace("run ab12cd34", "run 00000000"));
+    assert.deepEqual(gate(collect(run), "init"), ['config.md: no "Verified: <date> · <sha> · run ab12cd34" line']);
   });
 });
 

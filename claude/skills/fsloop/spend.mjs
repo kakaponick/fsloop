@@ -27,7 +27,7 @@ function resolveSubagentDirs(arg) {
 }
 
 const SHOT_TOOL = /screenshot/i;
-const SHOT_INPUT = /\b(?:bun|npm run|pnpm|yarn) shot\b(?!:)|shot\.ts|puppeteer|playwright screenshot|\.screenshot\(/;
+const SHOT_INPUT = /\b(?:bun|npm run|pnpm|yarn) shot\b(?!:)|shot\.ts|shot\.mjs shoot|puppeteer|playwright screenshot|\.screenshot\(/;
 
 function collect(path) {
   const byId = new Map();

@@ -135,7 +135,7 @@ export function parseCommon(text) {
 }
 
 export function parseStage(stage) {
-  if (stage === "integrate" || stage === "finish") return { pass: null, step: stage };
+  if (stage === "integrate" || stage === "finish" || stage === "init") return { pass: null, step: stage };
   const m = /^p(\d+)-(\w+)$/.exec(stage);
   if (!m || !STEPS.includes(m[2])) return null;
   return { pass: Number(m[1]), step: m[2] };
@@ -216,6 +216,8 @@ function findByDescription(dirs, description, runId) {
 export function readTranscript(path) {
   const messages = [];
   let model = null;
+  let first = null;
+  let lastAt = null;
   for (const line of read(path).split("\n")) {
     if (!line.trim()) continue;
     let e;
@@ -224,17 +226,32 @@ export function readTranscript(path) {
     } catch {
       continue;
     }
+    const at = Date.parse(e.timestamp ?? "");
+    if (!Number.isNaN(at)) {
+      first ??= at;
+      lastAt = at;
+    }
     if (e.type !== "assistant" || !Array.isArray(e.message?.content)) continue;
     model ??= e.message.model ?? null;
-    // One API message is written as several entries, one per content block, under one id.
+    // One API message is written as several entries, one per content block, under one id; each repeats
+    // the usage so far, so the message's usage is the largest seen (as spend.mjs counts it).
     const id = e.message.id ?? e.uuid ?? Symbol();
     let m = messages.at(-1);
-    if (!m || m.id !== id) messages.push((m = { id, text: [], toolUse: false }));
+    if (!m || m.id !== id) messages.push((m = { id, text: [], toolUse: false, usage: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 } }));
     for (const b of e.message.content) {
       if (b?.type === "text" && b.text.trim()) m.text.push(b.text.trim());
       if (b?.type === "tool_use") m.toolUse = true;
     }
+    const u = e.message.usage;
+    if (u) {
+      m.usage.input = Math.max(m.usage.input, u.input_tokens ?? 0);
+      m.usage.output = Math.max(m.usage.output, u.output_tokens ?? 0);
+      m.usage.cacheWrite = Math.max(m.usage.cacheWrite, u.cache_creation_input_tokens ?? 0);
+      m.usage.cacheRead = Math.max(m.usage.cacheRead, u.cache_read_input_tokens ?? 0);
+    }
   }
+  const spend = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
+  for (const m of messages) for (const k of Object.keys(spend)) spend[k] += m.usage[k];
   let meta = {};
   if (path.endsWith(".jsonl"))
     try {
@@ -247,6 +264,8 @@ export function readTranscript(path) {
     model,
     agent: meta.agentType ?? null,
     description: meta.description ?? null,
+    seconds: first !== null ? Math.round((lastAt - first) / 1000) : null,
+    spend,
   };
 }
 
@@ -272,6 +291,8 @@ export function collect(runDir) {
     model: cell(r, "model"),
     transcript: cell(r, "transcript"),
     report: cell(r, "report"),
+    seconds: Number(cell(r, "seconds")) || null,
+    spend: Object.fromEntries(["input", "output", "cache write", "cache read"].map((k) => [k.replace(" w", "W").replace(" r", "R"), Number(cell(r, k)) || 0])),
   }));
 
   const findings = new Map();
@@ -595,7 +616,8 @@ function checkLanded(run, units, stage, commitMessage) {
 /** What still stands between `stage` and done; empty → green. */
 export function gate(run, stage, { commitMessage = defaultCommitMessage } = {}) {
   const parsed = parseStage(stage);
-  if (!parsed) return [`unknown stage "${stage}" — p<n>-{${STEPS.join("|")}}, integrate or finish`];
+  if (!parsed) return [`unknown stage "${stage}" — p<n>-{${STEPS.join("|")}}, integrate, finish or init`];
+  if (parsed.step === "init") return [...checkLaunches(run, stage), ...checkInit(run)];
   const { pass, step } = parsed;
   const problems = [...prerequisites(run, stage), ...checkLaunches(run, stage), ...checkDecisions(run, stage)];
   const ofPass = (prefix) => run.units.filter((u) => u.pass === pass && u.id.startsWith(prefix));
@@ -669,6 +691,51 @@ export function gate(run, stage, { commitMessage = defaultCommitMessage } = {}) 
 }
 
 const HOLDS_PUSH = ["open", "queued", "in-progress", "undecided", "fixed"];
+
+/** The roles of SKILL.md → Project facts: the config's Commands table has a row for each. */
+export const COMMAND_ROLES = ["default", "install", "type-check", "lint", "test, one file", "unit tests", "guards", "suite", "build", "migrate", "worker", "machine lock", "production shape", "shots", "find-polluter", "impeccable"];
+
+const sectionOf = (text, heading) => {
+  const m = new RegExp(`^## ${heading}\\s*\\r?\\n([\\s\\S]*?)(?=^## |(?![\\s\\S]))`, "m").exec(text);
+  return m ? m[1].trim() : null;
+};
+
+/** init.md → Done: the config this run verified, each command with the outcome of its run, the shot recipe proven. */
+function checkInit(run) {
+  // The config is written in the worktree and lands in the start checkout with the push.
+  const tree = run.common.worktree ?? run.common.start;
+  const path = tree ? join(tree, ".claude", "fsloop", "config.md") : null;
+  const text = path ? read(path) : "";
+  if (!text) return [`no ${path ?? "config.md — common.md has no Start:"}`];
+  const problems = [];
+  if (!new RegExp(`^Verified: .*\\brun ${run.id}\\b`, "m").test(text)) problems.push(`config.md: no "Verified: <date> · <sha> · run ${run.id}" line`);
+  const commands = sectionOf(text, "Commands");
+  if (commands === null) problems.push("config.md: no ## Commands");
+  else {
+    const rows = parseTable(commands);
+    for (const role of COMMAND_ROLES) {
+      const row = rows.find((r) => cell(r, "role") === role);
+      if (!row) problems.push(`config.md Commands: no row "${role}"`);
+      else if (NONE.test(cell(row, "verified")) && !/^—/.test(cell(row, "command")))
+        problems.push(`config.md Commands ${role}: verified is empty — the exit and time of its run, or why it was not run`);
+    }
+  }
+  for (const heading of ["Shared catalogs", "Roles"]) if (!sectionOf(text, heading)) problems.push(`config.md: no ## ${heading}, or it is empty — write — with why`);
+  const shots = sectionOf(text, "Shots");
+  if (!shots) problems.push("config.md: no ## Shots");
+  else if (!/^none\s+—/im.test(shots)) {
+    const frames = [...new Set(shots.match(/shots\/init-[\w.-]+\.png/g) ?? [])];
+    if (frames.length < 3) problems.push("config.md Shots: a Proof line naming three frames shots/init-*.png, or none — <why>");
+    const proof = run.launches.filter((l) => l.stage === "init" && l.description === "shots proof").at(-1);
+    const verdicts = proof ? Object.fromEntries([...read(join(run.runDir, proof.report)).matchAll(/^FRAME:\s*(\S+)\s+(ok|bad)\b/gm)].map((m) => [m[1], m[2]])) : {};
+    for (const f of frames) {
+      if (!existsSync(join(run.runDir, f))) problems.push(`config.md Shots: ${f} is not in the run folder`);
+      else if (!proof) problems.push(`config.md Shots: no "shots proof" launch saved to read ${f}`);
+      else if (verdicts[f] !== "ok") problems.push(`config.md Shots: ${f} — the proof reads it ${verdicts[f] ?? "not at all"}`);
+    }
+  }
+  return problems;
+}
 
 /** The pass rule of assess.md: what outcome the count permits. */
 export function allowedOutcomes(run, pass, n) {
@@ -834,8 +901,12 @@ export function save(runDir, stage, ref, descriptionGiven) {
   }
   const report = `reports/${id}.md`;
   if (!existsSync(launchesPath))
-    writeFileSync(launchesPath, "| launch | stage | agent | description | model | transcript | report |\n|---|---|---|---|---|---|---|\n");
-  const row = [id, stage, t.agent ?? "—", description, t.model ?? "—", transcript, report].map(escapeCell);
+    writeFileSync(
+      launchesPath,
+      "| launch | stage | agent | description | model | seconds | input | output | cache write | cache read | transcript | report |\n|---|---|---|---|---|---|---|---|---|---|---|---|\n",
+    );
+  const { input, output, cacheWrite, cacheRead } = t.spend;
+  const row = [id, stage, t.agent ?? "—", description, t.model ?? "—", t.seconds ?? "—", input, output, cacheWrite, cacheRead, transcript, report].map(escapeCell);
   appendFileSync(launchesPath, `| ${row.join(" | ")} |\n`);
   return { id, report, existed: false };
 }
@@ -848,7 +919,7 @@ const USAGE = `usage:
   node fsl.mjs gate   <run folder> <stage>   is the stage done? exit 1 when not
   node fsl.mjs report <run folder>           write the run folder's tables into report.md
   node fsl.mjs build  <run folder>           write run.json
-stage: p<n>-{${STEPS.join("|")}} | integrate | finish`;
+stage: p<n>-{${STEPS.join("|")}} | integrate | finish | init`;
 
 function main(argv) {
   const [command, dir, ...rest] = argv;
