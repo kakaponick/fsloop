@@ -682,13 +682,17 @@ describe("init", () => {
     assert.deepEqual(gate(collect(run), "init"), ['config.md: no "Verified: <date> · <sha> · run ab12cd34" line', "config.md: no ## Design, or it is empty — write - none — <why>"]);
   });
 
-  test("a green init closes its run", () => {
+  test("init closes on its green gate and the land list's push, not before", () => {
     const start = project();
     put(join(start, ".claude", "fsloop", "config.md"), config({ shots: "- none — a CLI with no UI" }));
     const r = collect(run);
     assert.deepEqual(gate(r, "init"), []);
     put(join(run, "gates.jsonl"), JSON.stringify({ stage: "init", green: true, at: "t", problems: [] }) + "\n");
-    assert.equal(build(collect(run)).closed, true);
+    put(join(run, "logs", "land.log.lines"), "1 commit — exit 0 — 1 file\n2 push — exit 1 — rejected\n");
+    assert.deepEqual([build(collect(run)).closed, build(collect(run)).outcome.pushed], [false, false], "a rejected push leaves init open");
+    put(join(run, "logs", "land.log.lines"), "1 commit — exit 0 — 1 file\n2 push — exit 1 — rejected\n3 push — exit 0 — main -> main\n");
+    const json = build(collect(run));
+    assert.deepEqual([json.closed, json.outcome.pushed, json.outcome.goalMet], [true, true, true]);
   });
 });
 describe("cli", () => {

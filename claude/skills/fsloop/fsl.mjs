@@ -1305,15 +1305,23 @@ function nowOf(run, stages, closed) {
   };
 }
 
+/** Init lands by its own list (init.md → Gate, land): its `push` line, else null. */
+const initPushLine = (run) =>
+  read(join(run.runDir, "logs", "land.log.lines"))
+    .split(/\r?\n/)
+    .filter((l) => /^\d+ push\b/.test(l))
+    .at(-1) ?? null;
+
 function outcomeOf(run, findings, closed) {
-  const pushLine = read(join(run.runDir, "logs", "push.log.lines")).trim().split(/\r?\n/).filter(Boolean).at(-1) ?? null;
+  const pushLine =
+    run.common.mode === "init" ? initPushLine(run) : (read(join(run.runDir, "logs", "push.log.lines")).trim().split(/\r?\n/).filter(Boolean).at(-1) ?? null);
   const pushed = Boolean(pushLine && /exit 0\b/.test(pushLine));
   const g = lastGate(run, "integrate");
   const held = heldPush(g) ? g.problems.map((p) => /^(\S+?):/.exec(p)?.[1]).filter(Boolean) : [];
   const deploy = run.deploys.at(-1) ?? null;
   const left = findings.some((f) => ["critical", "major"].includes(f.severity) && [...GAVE_UP, "repeated"].includes(f.effectiveStatus));
   // Met in full: pushed, nothing held, the deploy ok when checked, no critical or major finding left standing.
-  const goalMet = !closed ? null : run.common.mode === "init" ? true : pushed && !held.length && (!deploy || deploy.verdict === "ok") && !left;
+  const goalMet = !closed ? null : run.common.mode === "init" ? pushed : pushed && !held.length && (!deploy || deploy.verdict === "ok") && !left;
   return { pushed, pushLine, held, deploy, goalMet };
 }
 
@@ -1389,8 +1397,8 @@ export function build(run) {
   });
 
   const stages = stagesOf(run);
-  // A run is closed by its last stage: finish, or init for /fsloop init.
-  const closed = isGreen(run, "finish") || isGreen(run, "init");
+  // A run is closed by its last stage: finish; /fsloop init by its gate and then its land list's push at exit 0.
+  const closed = isGreen(run, "finish") || (isGreen(run, "init") && /exit 0\b/.test(initPushLine(run) ?? ""));
   const startedAt = run.common.started ?? run.launches.map((l) => l.startedAt).filter(Boolean).sort()[0] ?? null;
   return {
     version: VERSION,

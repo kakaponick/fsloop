@@ -6,7 +6,7 @@ Read on `/fsloop init`. Init writes the project's config, `.claude/fsloop/config
 
 Init is a run of its own, with one stage, `init`. SKILL.md holds: Run id, Run folder, Worktree, Launch records, Command lists (step 3's run one role each with no exit tail — a red is recorded, not stopped on; every other list keeps it), Background commands, Models, Commit message. Its tracked changes are `config.md` and what step 4 writes: `PRODUCT.md`, `DESIGN.md`, and under `.impeccable/` all but the decision page's `questions/` and `mocks/`. Everything else it makes lives in the run folder, the throwaway databases it drops, and `~/.fsloop`.
 
-1. **Bootstrap.** Run id, worktree with its env files and its install — run as a step 3 role, its log `logs/init-install.log` —, `common.md`: its six head lines (`Mode: init`, `N: —`, `K: 1`), `## Goal` `init`, the existing config verbatim under `## Project`.
+1. **Bootstrap.** Run id, worktree with its env files and its install — run as a step 3 role, its log `logs/init-install.log` —, `common.md`: its head lines (SKILL.md → Project facts; `Mode: init`, `N: —`, `K: 1`), then `fsl.mjs build`, `## Goal` `init`, the existing config verbatim under `## Project`.
 
 2. **Survey.** One `Explore` (`model: sonnet`, description `map`), `Repo: <wt>`, tables only, the existing config's answer first. The env files hold the developer's live values: an env file is read as its names, `sed 's/=.*//' <env file>`, never the file itself.
    - **commands** — per role of SKILL.md → Project facts, the candidates and where each is stated (`CLAUDE.md`, the rule files it names, package scripts, CI), and one small test file for `test, one file`;
