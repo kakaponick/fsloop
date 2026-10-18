@@ -15,7 +15,9 @@
 | `claude/skills/fsloop/json-merge.mjs`, `merge.attributes` | merge-драйвер i18n-каталогов по ключам: юниты, дописывающие ключи в один JSON, не конфликтуют |
 | `claude/skills/fsloop/spike-lease.mjs` | аренда аккаунтов из `.spike/sessions/` и зеркало `.spike/` в worktree — [опционально](#spike-lease-опционально) |
 | `claude/skills/fsloop/spend.mjs` | расход токенов по сабагентам сессии, для отчёта |
-| `claude/agents/` | `fsloop-implement`, `fsloop-debug`, `fsloop-critic`, `spike-researcher`, `prod-check` |
+| `claude/skills/fsloop/debug.md` | приёмы `fsloop-debug`: тест красный в общем прогоне и зелёный один, неверное значение глубоко в стеке |
+| `claude/skills/fsloop/find-polluter.mjs` | бисекция тест-файла, который загрязняет состояние жертвы; любой раннер с JUnit-отчётом (`--run`), для bun — без настройки |
+| `claude/agents/` | `fsloop-implement`, `fsloop-debug`, `fsloop-critic`, `spike-researcher`, `prod-check`, `cold-read` (холодное чтение новых UI-строк) |
 | `claude/hooks/spike-guard.mjs` | блок ручных ссылок, копий сессий и удаления аренды |
 
 ## Требования
@@ -50,6 +52,8 @@ node fsloop/install.mjs <путь к репо проекта>
 ## Проект
 
 fsloop берёт всё про проект из его `CLAUDE.md` (и файлов правил, которые тот называет) и из манифеста пакетов: установку, проверку типов, линт, тесты (один файл и весь набор), гарды каталогов, сборку, генерацию и применение миграций, запуск воркера, основную ветку, машинный лок, инструменты скриншотов, строгие правила. Всё это он записывает в `common.md` прогона, и агенты читают только его. Чего в проекте нет — решение, оно попадает в отчёт. Чем подробнее `CLAUDE.md`, тем меньше догадок.
+
+Кадры UI снимает только оркестратор и только дважды: baseline на Map и final на Review. Агенты не открывают ни браузер, ни dev-сервер: состояния доказывают тестами, а кадр читают по пути.
 
 Для UI fsloop читает `PRODUCT.md` и `DESIGN.md` (это файлы impeccable), а также правила UI/UX, если `CLAUDE.md` их называет. Кадры снимает инструмент скриншотов проекта, если `CLAUDE.md` описывает четыре роли: поднять базу из фикстуры, запустить dev-сервер, снять кадр, погасить. Без такого инструмента — dev-сервер и `npx playwright screenshot`.
 
@@ -89,3 +93,9 @@ node .claude/skills/fsloop/spike-lease.mjs status
 Маленькая цель (меньше 3 юнитов) идёт в режиме inline прямо в текущей рабочей копии. Остальные — в worktree `../fsl/<run id>`, с полосами `../fsl/<run id>-u<k>` для параллельных юнитов. Состояние прогона (журнал, брифы, кадры, отчёт) лежит в `.claude/fsloop/<run id>/`.
 
 Коммиты прогона несут трейлеры `Fsloop-Run`, `Fsloop-Step`, `Fsloop-Pass`, поэтому `git log --grep='Fsloop-Run: <id>'` показывает весь прогон. В конце fsloop пушит в основную ветку. Если `CLAUDE.md` запрещает агенту такой пуш, ветка `fsl/<run id>` уходит в origin, и отчёт называет её для слияния.
+
+## Проверка скриптов
+
+```
+node --test claude/skills/fsloop/find-polluter.test.mjs
+```

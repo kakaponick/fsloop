@@ -8,7 +8,7 @@ A **pass** is steps 3–6 of SKILL.md, then Assess. The first pass builds the go
 
 ## Craft assessment
 
-The design instrument for a surface the goal makes or reshapes, at each Assess: the baseline's launch (`ui.md` → Baseline) on the surface as the pass left it, its last frame by path, description `assess<p> craft <surface>`, saved to `<run folder>/craft/assess<p>-<surface>.md`. Its `AUDIT:` scores and its critical and major findings are the surface's count, the same assessment at every stage, so baseline → now compares; a new surface's count starts at the first Assess.
+The design instrument for a surface the goal makes or reshapes, at each Assess: the baseline's launch (`ui.md` → Baseline) on the surface as the pass left it, the pass's final frame by path and the fix patches since, description `assess<p> craft <surface>`, saved to `<run folder>/craft/assess<p>-<surface>.md`. Its `AUDIT:` scores and its critical and major findings are the surface's count, the same assessment at every stage, so baseline → now compares; a new surface's count starts at the first Assess.
 
 ## Assess
 
