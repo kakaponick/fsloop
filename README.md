@@ -15,7 +15,7 @@
 | `claude/skills/fsloop/assess.md` | оценка и повторные проходы при `N` |
 | `claude/skills/fsloop/json-merge.mjs`, `merge.attributes` | merge-драйвер i18n-каталогов по ключам: юниты, дописывающие ключи в один JSON, не конфликтуют |
 | `claude/skills/fsloop/spike-lease.mjs` | аренда аккаунтов из `.spike/sessions/` и зеркало `.spike/` в worktree — [опционально](#spike-lease-опционально) |
-| `claude/skills/fsloop/fsl.mjs` | хранитель папки прогона: `save` сохраняет отчёт каждого запуска агента, `gate` проверяет, что шаг завершён, `build` собирает `run.json` — [подробнее](#папка-прогона) |
+| `claude/skills/fsloop/fsl.mjs` | хранитель папки прогона: `save` сохраняет отчёт каждого запуска агента, `gate` проверяет, что шаг завершён, `report` пишет таблицы отчёта, `build` собирает `run.json` — [подробнее](#папка-прогона) |
 | `claude/skills/fsloop/spend.mjs` | расход токенов по сабагентам сессии, для отчёта |
 | `claude/skills/fsloop/debug.md` | приёмы `fsloop-debug`: тест красный в общем прогоне и зелёный один, неверное значение глубоко в стеке |
 | `claude/skills/fsloop/find-polluter.mjs` | бисекция тест-файла, который загрязняет состояние жертвы; любой раннер с JUnit-отчётом (`--run`), для bun — без настройки |
@@ -125,18 +125,27 @@ report.md
 - находка «в работу» не названа в `## Closes` ни одного брифа;
 - в брифе нет одного из разделов;
 - коммит задачи без трейлеров;
+- на вопрос исполнителя «на суд» (`to judge:`) нет ответа критика с его id и нет строки журнала, что он оставлен открытым;
 - с N число critical+major в `passes.md` не совпадает с находками, или итог прохода не следует правилу;
-- перед пушем (`integrate`) осталась открытой critical или major находка ревью. Пуш тогда не делается, а прогон всё равно завершается отчётом.
+- перед пушем (`integrate`) осталась открытой critical или major находка ревью, вердикта, последней проверки слияния или собственная находка прогона (красная проверка, которую не смогли починить). Пуш тогда не делается, а прогон всё равно завершается отчётом;
+- в `report.md` нет таблиц, которые пишет `fsl.mjs report`.
 
 ```
-node .claude/skills/fsloop/fsl.mjs save  <run folder> <stage> <agent id | output_file | "описание запуска">
-node .claude/skills/fsloop/fsl.mjs gate  <run folder> <stage>
-node .claude/skills/fsloop/fsl.mjs build <run folder>
+node .claude/skills/fsloop/fsl.mjs save   <run folder> <stage> <agent id | output_file | "описание запуска"> ["описание"]
+node .claude/skills/fsloop/fsl.mjs gate   <run folder> <stage>
+node .claude/skills/fsloop/fsl.mjs report <run folder>
+node .claude/skills/fsloop/fsl.mjs build  <run folder>
 ```
 
 Id находки — `<запуск>#<id>` (`p1-review-critic-code#code-3`). Статус каждой находки (`closed`, `open`, `fixed`, `queued`, `candidate`…) `run.json` вычисляет:
 - по вердикту проверяющего критика;
 - с N — по колонке `repeat` оценки: если оценка нашла то же самое, исправление не сработало.
+
+В `run.json` также:
+- вопросы «на суд» (`<запуск>#judge-<n>`) с ответом критика;
+- оценки каждого экрана по проходам: «до → p1 → p2», audit и critique.
+
+`fsl.mjs report` вписывает в `report.md` таблицы из папки прогона: решения, задачи, находки со статусом, вопросы «на суд», кандидаты, проходы и оценки экранов. Таблицы перегенерируются на месте, руками их не правят.
 
 ## Проверка скриптов
 

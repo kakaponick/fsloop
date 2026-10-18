@@ -82,6 +82,10 @@ export function parseFinding(line) {
   return { id, category, severity, confidence, cause, location, rule, action, raw: line };
 }
 
+/** An implementer's or debugger's NOTES lines `to judge: <decision> — <why>`, in order. */
+export const judgeQuestions = (block) =>
+  (block.NOTES?.items ?? []).map((i) => /^to judge:\s*(.+)$/i.exec(i)?.[1]).filter(Boolean);
+
 export function parseVerdict(line) {
   const m = /^(\S+) (resolved|partial|unresolved)\b\s*(?:—\s*)?(.*)$/.exec(line);
   return m ? { id: m[1], result: m[2], evidence: m[3] } : null;
@@ -273,6 +277,8 @@ export function collect(runDir) {
   const findings = new Map();
   const verdicts = [];
   const audits = [];
+  const judges = [];
+  const judged = [];
   for (const l of launches) {
     const text = read(join(runDir, l.report));
     l.reportMissing = !text.trim();
@@ -291,6 +297,31 @@ export function collect(runDir) {
     }
     for (const line of [block.AUDIT?.value, ...(block.AUDIT?.items ?? [])])
       if (line && !NONE.test(line)) audits.push({ launch: l.id, stage: l.stage, line });
+    for (const text of judgeQuestions(block)) {
+      const id = `${l.id}#judge-${judges.filter((j) => j.launch === l.id).length + 1}`;
+      judges.push({ id, launch: l.id, stage: l.stage, text });
+    }
+    for (const line of block.JUDGED?.items ?? []) {
+      const m = /^(\S+#judge-\d+)\s+(.*)$/.exec(line);
+      if (m) judged.push({ id: m[1], text: m[2], result: /— upheld\b/.test(m[2]) ? "upheld" : /\bfinding\b/.test(m[2]) ? "finding" : null, launch: l.id, stage: l.stage });
+    }
+  }
+
+  // A surface's scores across the run: one `craft <surface>` launch at Map's baseline and at each Assess.
+  const surfaces = {};
+  for (const a of audits) {
+    const surface = /^craft (.+)$/.exec(launches.find((l) => l.id === a.launch)?.description ?? "")?.[1];
+    if (!surface) continue;
+    const audit = /\baudit (\d+)\/(\d+)/.exec(a.line);
+    const critique = /\bcritique (\d+)\/(\d+)/.exec(a.line);
+    (surfaces[surface] ??= []).push({
+      stage: a.stage,
+      launch: a.launch,
+      audit: audit ? Number(audit[1]) : null,
+      auditMax: audit ? Number(audit[2]) : null,
+      critique: critique ? Number(critique[1]) : null,
+      critiqueMax: critique ? Number(critique[2]) : null,
+    });
   }
 
   const decisions = new Map();
@@ -366,10 +397,13 @@ export function collect(runDir) {
     })
     .filter(Boolean);
 
-  return { runDir, id, common, launches, findings, verdicts, audits, decisions, rowsByStage, units, journal, passes, gates };
+  return { runDir, id, common, launches, findings, verdicts, audits, surfaces, judges, judged, decisions, rowsByStage, units, journal, passes, gates };
 }
 
 const lastGate = (run, stage) => run.gates.filter((g) => g.stage === stage).at(-1) ?? null;
+export const HELD = "— it holds the push";
+/** A red integrate gate whose every line is a held finding: the push waits, the run finishes. */
+export const heldPush = (g) => Boolean(g && !g.green && g.problems?.length && g.problems.every((p) => p.endsWith(HELD)));
 const isGreen = (run, stage) => lastGate(run, stage)?.green === true;
 const closers = (run, findingId) => run.units.filter((u) => u.closes.includes(findingId));
 
@@ -399,9 +433,12 @@ function prerequisites(run, stage) {
     if (N && outcome === "next") return [...need.map((s) => `${s} is not green`), `p${last} outcome is next — pass ${last + 1} first`];
     return need.map((s) => `${s} is not green`);
   }
-  // A red integrate is a held push — the run still finishes, its report says why.
-  if (step === "finish") return lastGate(run, "integrate") ? [] : ["integrate has no gate yet"];
-  const gated = (s) => run.gates.some((g) => g.stage === s) || run.launches.some((l) => l.stage === s);
+  if (step === "finish") {
+    if (isGreen(run, "integrate") || heldPush(lastGate(run, "integrate"))) return [];
+    return [lastGate(run, "integrate") ? "integrate is red for more than held findings — settle the rest, gate it again" : "integrate has no gate yet"];
+  }
+  // A later pass may skip Map and Spike: a step it ran has a launch or a green gate, a red attempt alone is no run.
+  const gated = (s) => run.gates.some((g) => g.stage === s && g.green) || run.launches.some((l) => l.stage === s);
   const previousAssess = () => {
     const prev = `p${pass - 1}-assess`;
     if (!isGreen(run, prev)) return [`${prev} is not green`];
@@ -597,12 +634,23 @@ export function gate(run, stage, { commitMessage = defaultCommitMessage } = {}) 
     const lastCritic = lastIntegrateCritic(run);
     for (const f of run.findings.values()) {
       if (!["critical", "major"].includes(f.severity) || !/-(review|verdict)$|^integrate$/.test(f.stage)) continue;
-      if (f.stage === "integrate" && f.launch !== lastCritic) continue;
+      if (f.stage === "integrate" && !f.own && f.launch !== lastCritic) continue;
       const { status } = statusOf(run, f, run.decisions.get(f.id));
-      if (HOLDS_PUSH.includes(status)) problems.push(`${f.id}: ${f.severity}, ${status} — it holds the push`);
+      if (HOLDS_PUSH.includes(status)) problems.push(`${f.id}: ${f.severity}, ${status} ${HELD}`);
     }
   }
-  if (step === "finish" && !existsSync(join(run.runDir, "report.md"))) problems.push("no report.md");
+  if (step === "review") {
+    // Each question an implementer left to Review is answered by a critic, or recorded open in the journal.
+    const answered = new Set(run.judged.filter((j) => j.stage === stage).map((j) => j.id));
+    for (const q of run.judges.filter((j) => j.stage === `p${pass}-units`))
+      if (!answered.has(q.id) && !run.journal.some((r) => r.refs.includes(q.id)))
+        problems.push(`${q.id}: to judge "${q.text}" — no JUDGED line opens with its id, no journal row refs it`);
+  }
+  if (step === "finish") {
+    const report = read(join(run.runDir, "report.md"));
+    if (!report) problems.push("no report.md");
+    else if (!report.includes(TABLES_START)) problems.push("report.md has no tables of fsl.mjs report — run it");
+  }
   return problems;
 }
 
@@ -639,7 +687,7 @@ function statusOf(run, f, decision) {
   if (!decision) return { status: "undecided" };
   if (decision.decision !== "fix") return { status: decision.decision };
   if (f.stage === "integrate")
-    return f.launch === lastIntegrateCritic(run) ? { status: "queued" } : { status: "closed", checkedBy: lastIntegrateCritic(run) };
+    return f.own || f.launch === lastIntegrateCritic(run) ? { status: "queued" } : { status: "closed", checkedBy: lastIntegrateCritic(run) };
   const by = closers(run, f.id);
   if (!by.length) return { status: "queued" };
   const unit = by.at(-1);
@@ -685,12 +733,53 @@ export function build(run) {
         ...statusOf(run, f, d),
       };
     }),
+    surfaces: run.surfaces,
+    judges: run.judges.map((q) => {
+      const answer = run.judged.filter((j) => j.id === q.id).at(-1);
+      const journal = run.journal.find((r) => r.refs.includes(q.id));
+      return { ...q, answer: answer ?? null, journal: journal?.n ?? null };
+    }),
     audits: run.audits,
     journal: run.journal,
   };
 }
 
 const writeRunJson = (runDir) => writeFileSync(join(runDir, "run.json"), JSON.stringify(build(collect(runDir)), null, 2) + "\n");
+
+// ── report ────────────────────────────────────────────────────────────────────────────────────
+
+export const TABLES_START = "<!-- fsl.mjs report: from the run folder; regenerated, never edited -->";
+const TABLES_END = "<!-- /fsl.mjs report -->";
+
+const mdTable = (header, rows) =>
+  rows.length
+    ? [`| ${header.join(" | ")} |`, `|${header.map(() => "---").join("|")}|`, ...rows.map((r) => `| ${r.map(escapeCell).join(" | ")} |`)].join("\n")
+    : "—";
+
+/** The report's tables that the run folder already holds, written between markers in report.md. */
+export function reportTables(json) {
+  const sections = [
+    ["Decisions", mdTable(["#", "stage", "question", "decision", "why"], json.journal.map((r) => [r.n, r.stage, r.question, r.decision, r.why]))],
+    ["Units", mdTable(["unit", "pass", "title", "kind", "state", "sha", "closes"], json.units.map((u) => [u.id, u.pass, u.title, u.kind, u.state === "blocked" ? `blocked: ${u.blockedWhy}` : u.state, u.sha ?? "—", u.closes.join(" ") || "—"]))],
+    ["Findings", mdTable(["finding", "severity", "rule", "decision", "unit", "status"], json.findings.map((f) => [f.id, f.severity ?? "—", f.rule ?? f.raw, f.decision ?? "—", f.unit ?? "—", f.status]))],
+    ["To judge", mdTable(["question", "asked", "answer"], json.judges.map((q) => [q.id, q.text, q.answer ? q.answer.text : q.journal ? `open — journal #${q.journal}` : "—"]))],
+    ["Candidates", mdTable(["finding", "why"], json.findings.filter((f) => f.decision === "candidate").map((f) => [f.id, f.why]))],
+  ];
+  if (json.N) sections.push(["Passes", mdTable(["pass", "critical+major", "outcome", "why"], json.passes.map((p) => [`p${p.pass}`, p.criticalMajor, p.outcome, p.why]))]);
+  const scores = Object.entries(json.surfaces).map(([s, row]) => [s, row.map((r) => `${r.stage} ${r.audit ?? "?"}/${r.auditMax ?? "?"} · ${r.critique ?? "?"}/${r.critiqueMax ?? "?"}`).join(" → ")]);
+  if (scores.length) sections.push(["Surfaces (audit · critique)", mdTable(["surface", "baseline → now"], scores)]);
+  return [TABLES_START, ...sections.map(([h, t]) => `\n## ${h}\n\n${t}`), "", TABLES_END].join("\n");
+}
+
+export function writeReport(runDir) {
+  const path = join(runDir, "report.md");
+  const tables = reportTables(build(collect(runDir)));
+  const text = read(path);
+  const start = text.indexOf(TABLES_START);
+  const end = text.indexOf(TABLES_END);
+  const next = start >= 0 && end > start ? text.slice(0, start) + tables + text.slice(end + TABLES_END.length) : `${text.trimEnd()}${text ? "\n\n" : ""}${tables}\n`;
+  writeFileSync(path, next);
+}
 
 // ── save ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -742,8 +831,9 @@ export function save(runDir, stage, ref, descriptionGiven) {
 const USAGE = `usage:
   node fsl.mjs save  <run folder> <stage> <agent id | output_file | "<description>"> ["<description>"]
                      file a launch's final block; by description on Resume; the last argument names a launch with no meta file
-  node fsl.mjs gate  <run folder> <stage>    is the stage done? exit 1 when not
-  node fsl.mjs build <run folder>            write run.json
+  node fsl.mjs gate   <run folder> <stage>   is the stage done? exit 1 when not
+  node fsl.mjs report <run folder>           write the run folder's tables into report.md
+  node fsl.mjs build  <run folder>           write run.json
 stage: p<n>-{${STEPS.join("|")}} | integrate | finish`;
 
 function main(argv) {
@@ -759,6 +849,7 @@ function main(argv) {
     try {
       const r = save(runDir, stage, ref, description);
       console.log(`${r.existed ? "already saved" : "saved"} ${r.id} → ${r.report}`);
+      for (const q of collect(runDir).judges.filter((j) => j.launch === r.id)) console.log(`to judge ${q.id}: ${q.text}`);
     } catch (e) {
       console.error(`save: ${e.message}`);
       return 1;
@@ -781,6 +872,12 @@ function main(argv) {
     console.log(`GATE ${stage} red — ${problems.length}`);
     for (const p of problems) console.log(`- ${p}`);
     return 1;
+  }
+  if (command === "report") {
+    writeReport(runDir);
+    writeRunJson(runDir);
+    console.log(`tables → ${join(runDir, "report.md")}`);
+    return 0;
   }
   if (command === "build") {
     writeRunJson(runDir);

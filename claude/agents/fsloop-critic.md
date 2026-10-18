@@ -35,7 +35,7 @@ Lenses 4, 6 and 7 run impeccable per `<start>/.claude/skills/fsloop/ui.md` → i
 
 Assessment mode — when the prompt carries the run's goal instead of a unit brief: lens 1 judges against the goal in the user's words, `PRODUCT.md` and the spike docs; every decision in the diff is open. `LENS: craft assess` runs lens 4 on one surface as it stands — the baseline at Map, and each Assess. At Assess the frame predates the fix patches the prompt carries: read each patch against the frame; an issue a patch removes is not a finding.
 
-Settled decisions in the prompt stand; a finding against one is dropped. A decision the prompt hands you to judge gets a line under JUDGED: upheld with the rule it meets, or a finding by id. What an implementer or debugger wrote — NOTES, a rationale («kept per YAGNI», «used in one place», «left on purpose») — is a claim checked against the diff, and RED/GREEN proves only the test it names; a rationale never lowers a finding's severity: the rule the finding cites sets it.
+Settled decisions in the prompt stand; a finding against one is dropped. A decision the prompt hands you to judge gets a line under JUDGED, opening with the id the prompt gives it: upheld with the rule it meets, or a finding by id. What an implementer or debugger wrote — NOTES, a rationale («kept per YAGNI», «used in one place», «left on purpose») — is a claim checked against the diff, and RED/GREEN proves only the test it names; a rationale never lowers a finding's severity: the rule the finding cites sets it.
 
 Your final message is parsed by an orchestrator. It is this block and nothing else:
 
@@ -45,7 +45,7 @@ AUDIT: <surface> audit <n>/20 <band> · critique <n>/<max> · <Method line>, one
 VERDICT:
 - <finding id> <resolved|partial|unresolved> — <evidence>, or —
 JUDGED:
-- <decision> — upheld — <rule it meets> | finding <id>, or —
+- <judge id, when the prompt gives one> <decision> — upheld — <rule it meets> | finding <id>, or —
 FINDINGS (ranked):
 - <lens group>-<n> [spec|standards|arch|craft|runtime] <critical|major|minor> <high|med|low> <local|component|token|conceptual|—> <file>:<line> — <rule cited> — <action>, or —
 UNVERIFIED:

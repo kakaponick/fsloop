@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { build, collect, gate, parseBlock, parseBrief, parseFinding, parseTable, save } from "./fsl.mjs";
+import { build, collect, gate, parseBlock, parseBrief, parseFinding, parseTable, save, writeReport } from "./fsl.mjs";
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "fsl.mjs");
 
@@ -402,7 +402,14 @@ describe("a whole run", () => {
     pass("p1-verdict");
 
     pass("integrate");
-    put(join(run, "report.md"), "# ab12cd34\n");
+    put(join(run, "report.md"), "# ab12cd34\n\n## Spikes\n\n—\n");
+    assert.deepEqual(gate(collect(run), "finish"), ["report.md has no tables of fsl.mjs report — run it"]);
+    writeReport(run);
+    writeReport(run);
+    const report = readFileSync(join(run, "report.md"), "utf8");
+    assert.equal(report.split("## Findings").length, 2, "regenerating replaces the tables, never appends twice");
+    assert.match(report, /^# ab12cd34\n\n## Spikes\n/);
+    assert.match(report, /\| p1-review-critic-code#code-1 \| major \| code → Idempotent \| fix \| f1 \| closed \|/);
     pass("finish");
 
     const json = build(collect(run));
@@ -427,9 +434,48 @@ describe("integrate and finish", () => {
     put(join(run, "units", "f1", "brief.md"), brief({ closes: "p1-review-critic-code#code-1" }));
     green("p1-verdict");
     assert.deepEqual(gate(collect(run), "integrate"), ["p1-review-critic-code#code-1: major, open — it holds the push"]);
-    put(join(run, "gates.jsonl"), readOr(join(run, "gates.jsonl")) + JSON.stringify({ stage: "integrate", green: false, at: "t", problems: [] }) + "\n");
+    const integrateGate = (problems) => put(join(run, "gates.jsonl"), readOr(join(run, "gates.jsonl")) + JSON.stringify({ stage: "integrate", green: false, at: "t", problems }) + "\n");
     put(join(run, "report.md"), "# ab12cd34\n");
+    writeReport(run);
+    integrateGate(["p1-verdict is not green", "p1-review-critic-code#code-1: major, open — it holds the push"]);
+    assert.deepEqual(gate(collect(run), "finish"), ["integrate is red for more than held findings — settle the rest, gate it again"]);
+    integrateGate(["p1-review-critic-code#code-1: major, open — it holds the push"]);
     assert.deepEqual(gate(collect(run), "finish"), []);
+  });
+
+  test("a red check the run could not fix is its own finding, and it holds the push", () => {
+    common();
+    green("p1-verdict");
+    put(join(run, "findings", "integrate.md"), table(["finding", "decision", "ref", "repeat", "severity", "why"], [["integrate-own#1", "open", "—", "—", "major", "suite: lib/a.test.ts red after fix and debug"]]));
+    assert.deepEqual(gate(collect(run), "integrate"), ["integrate-own#1: major, open — it holds the push"]);
+  });
+
+  test("every question an implementer left to Review is answered by its id, or recorded open", () => {
+    common();
+    transcript("j1", { agent: "fsloop-implement", description: "u1 implement", final: "RESULT: done\nNOTES:\n- kept the old loader\n- to judge: edited use-page.ts outside the manifest — the width hook lives there\n- to judge: test written after the cell" });
+    save(run, "p1-units", "j1");
+    transcript("j2", { agent: "fsloop-critic", description: "critic code", final: "LENS: code\nJUDGED:\n- p1-units-u1-implement#judge-1 outside the manifest — upheld — criterion 1 needs that hook\nFINDINGS (ranked):\n- —" });
+    save(run, "p1-review", "j2");
+    green("p1-units");
+    assert.deepEqual(gate(collect(run), "p1-review"), ['p1-units-u1-implement#judge-2: to judge "test written after the cell" — no JUDGED line opens with its id, no journal row refs it']);
+    put(join(run, "journal.md"), table(["#", "stage", "question", "decision", "why", "refs"], [["1", "p1-review", "test after the cell", "left open", "no critic ruled", "p1-units-u1-implement#judge-2"]]));
+    const r = collect(run);
+    assert.deepEqual(gate(r, "p1-review"), []);
+    const judges = build(r).judges;
+    assert.equal(judges[0].answer.result, "upheld");
+    assert.equal(judges[1].journal, "1");
+  });
+
+  test("a surface's scores line up from Map's baseline to each Assess", () => {
+    common({ N: 2 });
+    transcript("s1", { agent: "fsloop-critic", description: "craft cabinets", final: "LENS: craft assess\nAUDIT: Cabinets list (`app/ads-accounts/`) audit 15/20 Good · critique 24/40 Acceptable\nFINDINGS (ranked):\n- —" });
+    transcript("s2", { agent: "fsloop-critic", description: "craft cabinets", final: "LENS: craft assess\nAUDIT: Cabinets list `/ads-accounts` audit 16/20 Good · critique 28/40 · Method: dual-agent\nFINDINGS (ranked):\n- —" });
+    save(run, "p1-map", "s1");
+    save(run, "p1-assess", "s2");
+    assert.deepEqual(
+      build(collect(run)).surfaces.cabinets.map(({ stage, audit, critique }) => [stage, audit, critique]),
+      [["p1-map", 15, 24], ["p1-assess", 16, 28]],
+    );
   });
 
   test("the merge's critic runs again after a fix: only its last report holds the push", () => {

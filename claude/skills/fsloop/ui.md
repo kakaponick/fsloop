@@ -27,7 +27,7 @@ The one source of these mechanics for every launch with a UI part — its agent 
 
 ## Baseline
 
-At Map, for every reshaped surface: capture its baseline frame (The shot server → A capture), then one `fsloop-critic` with `LENS: craft assess` per surface, all in one message, description `craft <surface>` — `Repo: <wt>` (the start checkout in the inline mode), the goal in the user's words, the surface by its primary component file or route directory, its frame by path; no brief, no settled decisions, no prior findings. Decide every finding in `findings/p<p>-map.md`: each critical and major one `fix` — a defect in its unit's brief, under its problem and its `## Closes` (SKILL.md step 3), its ORDER command joining that unit's pass; the rest per SKILL.md → Findings. A new surface has no baseline.
+At Map, for every reshaped surface: capture its baseline frame (The shot server → A capture), then one `fsloop-critic` with `LENS: craft assess` per surface, all in one message, description `craft <surface>` — `Repo: <wt>` (the start checkout in the inline mode), the goal in the user's words, the surface by its primary component file or route directory, its frame by path; no brief, no settled decisions, no prior findings. Decide every finding in `findings/p<p>-map.md`: each critical and major one `fix` — a defect in its unit's brief, under its problem and its `## Closes` (SKILL.md step 3), its ORDER command joining that unit's pass; each minor `candidate`; a voided or duplicate one per SKILL.md → Findings. A new surface has no baseline.
 
 ## A new surface
 
