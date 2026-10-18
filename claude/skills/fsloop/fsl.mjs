@@ -1,21 +1,28 @@
 #!/usr/bin/env node
 // The run folder's one reader. `save` files a launch's final block, `gate` checks that a stage is
-// done, `build` writes run.json — what a UI reads. Everything here is derived from the run folder's
-// files and git; nothing is kept in memory between calls.
+// done, `report` writes the report's tables, `build` writes run.json and summary.json — what a UI
+// reads. Everything is derived from the run folder's files, the transcripts Claude Code keeps and git;
+// the only state fsl.mjs adds is decisions.jsonl, the history the editable findings files lose.
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+/** run.json's shape; bumped on every change to it. */
+export const VERSION = 2;
 export const STEPS = ["map", "spike", "decompose", "units", "review", "fix", "verdict", "assess"];
 export const DECISIONS = ["fix", "candidate", "dropped", "declined", "duplicate", "open"];
 export const OUTCOMES = ["converged", "stalled", "next", "cap"];
 export const BRIEF_SECTIONS = ["problem", "seams", "done-criteria", "files", "reference", "settled", "closes"];
+export const HUMAN_VERDICTS = ["agree", "disagree", "wrong-severity", "false-positive"];
 const SEVERITIES = ["critical", "major", "minor"];
 const NONE = /^(—|-|none)?$/i;
 
 const read = (path) => (existsSync(path) ? readFileSync(path, "utf8") : "");
+const compact = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null && v !== undefined && v !== false && !(Array.isArray(v) && !v.length)));
+const orNull =(s) => (s === undefined || s === null || NONE.test(String(s).trim()) ? null : String(s).trim());
 
 // ── markdown ──────────────────────────────────────────────────────────────────────────────────
 
@@ -45,41 +52,72 @@ export function parseTable(text) {
   return rows;
 }
 
+/** The first header of a table file, lower-cased; null when it has none. */
+function tableHeader(text) {
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i + 1 < lines.length; i++)
+    if (lines[i].trim().startsWith("|") && !isSeparator(lines[i]) && isSeparator(lines[i + 1])) return splitRow(lines[i]).map((h) => h.toLowerCase());
+  return null;
+}
+
 const cell = (row, ...names) => {
   for (const n of names) if (row[n] !== undefined) return row[n].replace(/[`*]/g, "").trim();
   return "";
 };
 
-/** `- ` items under each `NAME:` header of an agent's final block, keyed by NAME. */
-export function parseBlock(text) {
+const HEAD = /^([A-Z][A-Z ]*[A-Z])(?: \([^)]*\))?:\s*(.*)$/;
+
+/** Each `NAME:` section of an agent's final block: its value and its `- ` items, with their line numbers. */
+function blockSections(text) {
   const sections = {};
   let current = null;
-  for (const raw of text.split(/\r?\n/)) {
+  text.split(/\r?\n/).forEach((raw, i) => {
     const line = raw.trimEnd();
-    if (/^```/.test(line.trim())) continue;
-    const head = /^([A-Z][A-Z ]*[A-Z])(?: \([^)]*\))?:\s*(.*)$/.exec(line);
+    if (/^```/.test(line.trim())) return;
+    const head = HEAD.exec(line);
     if (head) {
       current = head[1];
-      sections[current] = { value: head[2].trim(), items: [] };
-      continue;
+      sections[current] = { value: head[2].trim(), items: [], lines: [] };
+      return;
     }
     const item = /^(?:- |\d+\. )(.*)$/.exec(line);
-    if (item && current && !NONE.test(item[1].trim())) sections[current].items.push(item[1].trim());
-  }
+    if (item && current && !NONE.test(item[1].trim())) {
+      sections[current].items.push(item[1].trim());
+      sections[current].lines.push(i + 1);
+    }
+  });
   return sections;
 }
 
-/** One `FINDINGS:` line of fsloop-critic: `<id> [lens] <severity> <confidence> <cause> <file:line> — <rule> — <action>`. */
-/** A finding line opens with its id (`code-3`, `craft-12`); any other line under FINDINGS is prose. */
+/** `- ` items under each `NAME:` header of an agent's final block, keyed by NAME. */
+export function parseBlock(text) {
+  return Object.fromEntries(Object.entries(blockSections(text)).map(([k, { value, items }]) => [k, { value, items }]));
+}
+
+/** A finding line opens with its id (`code-3`, `craft-12`); any other line under FINDINGS is no finding. */
 export const FINDING_ID = /^[a-z][\w-]*-\d+$/i;
 
+const FINDING_LINE = /^(\S+) \[([\w-]+)\] (critical|major|minor) (high|med|low) (\S+) (\S+) — (.+?) — (.+)$/;
+// The same grammar as a writer may bend it: markdown around the id, ASCII dashes, extra spaces, capitals.
+const FINDING_LOOSE = /^(\S+)\s+\[([\w-]+)\]\s+(critical|major|minor)\s+(high|med|low)\s+(\S+)\s+(\S+)\s+(?:—|--?)\s+(.+?)\s+(?:—|--?)\s+(.+)$/i;
+
+/** One `FINDINGS:` line of fsloop-critic: `<id> [lens] <severity> <confidence> <cause> <file:line> — <rule> — <action>`.
+ * `parsed` is `strict` when the line keeps that grammar, `loose` when its fields were recovered or only some were. */
 export function parseFinding(line) {
-  const tokens = line.split(/\s+/);
-  const id = tokens[0];
-  const strict = /^\S+ \[([\w-]+)\] (critical|major|minor) (high|med|low) (\S+) (\S+) — (.+?) — (.+)$/.exec(line);
-  if (!strict) return { id, severity: tokens.slice(1, 4).find((t) => SEVERITIES.includes(t)) ?? null, raw: line };
-  const [, category, severity, confidence, cause, location, rule, action] = strict;
-  return { id, category, severity, confidence, cause, location, rule, action, raw: line };
+  const strict = FINDING_LINE.exec(line);
+  if (strict && FINDING_ID.test(strict[1])) {
+    const [, id, category, severity, confidence, cause, location, rule, action] = strict;
+    return { id, parsed: "strict", category, severity, confidence, cause, location, rule, action, raw: line };
+  }
+  const clean = line.replace(/^[*_`]+([^*_`\s]+)[*_`]+:?/, "$1");
+  const id = clean.split(/\s+/)[0].replace(/[*_`:.,]+$/, "");
+  const loose = FINDING_LOOSE.exec(clean);
+  if (loose) {
+    const [, , category, severity, confidence, cause, location, rule, action] = loose;
+    return { id, parsed: "loose", category, severity: severity.toLowerCase(), confidence: confidence.toLowerCase(), cause, location, rule, action, raw: line };
+  }
+  const tokens = clean.split(/\s+/);
+  return { id, parsed: "loose", severity: tokens.slice(1, 4).find((t) => SEVERITIES.includes(t.toLowerCase()))?.toLowerCase() ?? null, raw: line };
 }
 
 /** An implementer's or debugger's NOTES lines `to judge: <decision> — <why>`, in order. */
@@ -87,8 +125,29 @@ export const judgeQuestions = (block) =>
   (block.NOTES?.items ?? []).map((i) => /^to judge:\s*(.+)$/i.exec(i)?.[1]).filter(Boolean);
 
 export function parseVerdict(line) {
-  const m = /^(\S+) (resolved|partial|unresolved)\b\s*(?:—\s*)?(.*)$/.exec(line);
+  const m = /^[*`]*([^\s*`]+)[*`]* (resolved|partial|unresolved)\b\s*(?:—\s*)?(.*)$/.exec(line);
   return m ? { id: m[1], result: m[2], evidence: m[3] } : null;
+}
+
+/** prod-check's block: `VERDICT: <ok|degraded|failed> — <line>`, `SHA: <sha> · DEPLOYED: <time>`, `ANOMALIES:`;
+ * the colon was once missing, so both forms read. */
+export function parseDeploy(text) {
+  const v = /^VERDICT:?[ \t]+(ok|degraded|failed)\b[ \t]*(?:—[ \t]*)?(.*)$/m.exec(text);
+  if (!v) return null;
+  const sha = /^SHA:?[ \t]+([0-9a-f]{7,40})\b(?:.*?\bDEPLOYED:?[ \t]+(.+))?$/im.exec(text);
+  const lines = text.split(/\r?\n/);
+  const at = lines.findIndex((l) => /^ANOMALIES:?(\s|$)/.test(l));
+  const anomalies = [];
+  if (at >= 0) {
+    const value = lines[at].replace(/^ANOMALIES:?\s*/, "").trim();
+    if (!NONE.test(value)) anomalies.push(value);
+    for (const l of lines.slice(at + 1)) {
+      const item = /^(?:- |\d+\. )(.*)$/.exec(l.trim());
+      if (!item) break;
+      if (!NONE.test(item[1].trim())) anomalies.push(item[1].trim());
+    }
+  }
+  return { verdict: v[1], line: v[2].trim() || null, sha: sha?.[1] ?? null, deployedAt: sha?.[2]?.trim() ?? null, anomalies };
 }
 
 /** `Kind:`, `Blocked by:` and the `## <section>` bodies of a brief. */
@@ -113,12 +172,12 @@ export function parseBrief(text) {
   };
 }
 
-const findingIds = (text) => [...new Set(text.match(/[\p{L}\p{N}._-]+#[\p{L}\p{N}._-]+/gu) ?? [])];
+const findingIds = (text) => [...new Set(text.match(/[\p{L}\p{N}._-]+#[\p{L}\p{N}._~-]+/gu) ?? [])];
 
 // A Git Bash path (/c/Users/…) is not one `git -C` takes on Windows.
 const nativePath = (p) => (p && process.platform === "win32" ? p.replace(/^\/([a-z])\//i, (_, d) => `${d.toUpperCase()}:/`) : p);
 
-/** The header lines of common.md (`Run:`, `Mode:`, `N:`, `K:`, `Start:`, `Worktree:`) and its `## Goal`. */
+/** The head lines of common.md (`Run:`, `Mode:`, `N:`, `K:`, `Start:`, `Worktree:`, `Started:`, each `Session:`) and its `## Goal`. */
 export function parseCommon(text) {
   const field = (k) => new RegExp(`^${k}:\\s*(.+)$`, "m").exec(text)?.[1].trim() ?? null;
   const n = field("N");
@@ -130,6 +189,8 @@ export function parseCommon(text) {
     K: Number(field("K")) || null,
     start: nativePath(field("Start")),
     worktree: nativePath(field("Worktree")),
+    started: field("Started"),
+    sessions: [...text.matchAll(/^Session:\s*(\S+)/gm)].map((m) => m[1]),
     goal,
   };
 }
@@ -141,6 +202,22 @@ export function parseStage(stage) {
   return { pass: Number(m[1]), step: m[2] };
 }
 
+/** Init first, then each pass's steps in order, then integrate and finish. */
+const stageKey = (stage) => {
+  const p = parseStage(stage);
+  if (!p) return [9];
+  if (p.step === "init") return [0];
+  if (p.step === "integrate") return [2];
+  if (p.step === "finish") return [3];
+  return [1, p.pass, STEPS.indexOf(p.step)];
+};
+export const compareStages = (a, b) => {
+  const x = stageKey(a);
+  const y = stageKey(b);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] ?? -1) !== (y[i] ?? -1)) return (x[i] ?? -1) - (y[i] ?? -1);
+  return 0;
+};
+
 export const slug = (text) =>
   text
     .toLowerCase()
@@ -151,6 +228,34 @@ export const slug = (text) =>
 
 const projectsRoot = () =>
   process.env.FSL_PROJECTS_ROOT ?? join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), "projects");
+
+const agentIdOf = (path) => /agent-([^.\\/]+)\.jsonl$/.exec(path ?? "")?.[1] ?? null;
+const isoOf = (ms) => (ms === null || ms === undefined || Number.isNaN(ms) ? null : new Date(ms).toISOString());
+
+/** The first line of a file, reading no further than `limit` bytes — a transcript runs to megabytes. */
+export function firstLine(path, limit = 1 << 20) {
+  let fd;
+  try {
+    fd = openSync(path, "r");
+  } catch {
+    return "";
+  }
+  try {
+    const chunks = [];
+    const buf = Buffer.alloc(64 * 1024);
+    for (let pos = 0; pos < limit; ) {
+      const n = readSync(fd, buf, 0, Math.min(buf.length, limit - pos), pos);
+      if (!n) break;
+      const nl = buf.subarray(0, n).indexOf(10);
+      chunks.push(Buffer.from(buf.subarray(0, nl >= 0 ? nl : n)));
+      if (nl >= 0) break;
+      pos += n;
+    }
+    return Buffer.concat(chunks).toString("utf8");
+  } finally {
+    closeSync(fd);
+  }
+}
 
 /** The launch's lasting transcript: `subagents/agent-<id>.jsonl` under ~/.claude/projects, found by
  * agent id — the `output_file` an Agent call returns is a temporary copy that may be gone or empty. */
@@ -184,25 +289,40 @@ function subagentDirs() {
   return dirs;
 }
 
+/** A session's own transcript and its sub-agents' folder, wherever its project folder is. */
+function sessionPaths(session) {
+  const root = projectsRoot();
+  if (!existsSync(root)) return null;
+  for (const project of readdirSync(root)) {
+    const main = join(root, project, `${session}.jsonl`);
+    const subagents = join(root, project, session, "subagents");
+    if (existsSync(main) || existsSync(subagents)) return { main: existsSync(main) ? main : null, subagents: existsSync(subagents) ? subagents : null };
+  }
+  return null;
+}
+
+// The path as it sits in the JSON line: either slash, backslashes escaped.
+const namesRun = (runId) => new RegExp(`[\\\\/]+${runId.replace(/[^\w-]/g, "")}[\\\\/]+common\\.md`);
+
+const readMeta = (path) => {
+  try {
+    return JSON.parse(read(path) || "{}");
+  } catch {
+    return {};
+  }
+};
+
 /** On Resume the agent id may be lost with the session: the launch is the newest transcript whose
  * meta carries this description and whose prompt names this run (`Common: <run folder>/common.md`). */
 function findByDescription(dirs, description, runId) {
-  // The path as it sits in the JSON line: either slash, backslashes escaped.
-  const names = new RegExp(`[\\\\/]+${runId.replace(/[^\w-]/g, "")}[\\\\/]+common\\.md`);
+  const names = namesRun(runId);
   let best = null;
   for (const dir of dirs) {
     for (const file of readdirSync(dir)) {
       if (!file.endsWith(".meta.json")) continue;
-      let meta;
-      try {
-        meta = JSON.parse(read(join(dir, file)));
-      } catch {
-        continue;
-      }
-      if (meta.description !== description) continue;
+      if (readMeta(join(dir, file)).description !== description) continue;
       const path = join(dir, file.replace(/\.meta\.json$/, ".jsonl"));
-      const first = read(path).split("\n", 1)[0];
-      if (!names.test(first)) continue;
+      if (!names.test(firstLine(path))) continue;
       const mtime = statSync(path).mtimeMs;
       if (!best || mtime > best.mtime) best = { path, mtime };
     }
@@ -210,14 +330,52 @@ function findByDescription(dirs, description, runId) {
   return best?.path ?? null;
 }
 
-/** The final message, model, agent type and description of a transcript. A launch is finished when
- * its meta says so, or — older transcripts carry no such flag — when its last message calls no tool;
+const emptySpend = () => ({ input: 0, output: 0, cacheWrite: 0, cacheRead: 0 });
+
+/** The tokens of a transcript's messages. One API message is written as several entries, one per content
+ * block, under one id; each repeats the usage so far, so the message's usage is the largest seen. */
+function addUsage(messages, e) {
+  const id = e.message.id ?? e.uuid ?? Symbol();
+  let m = messages.at(-1);
+  if (!m || m.id !== id) messages.push((m = { id, text: [], toolUse: false, usage: emptySpend() }));
+  const u = e.message.usage;
+  if (u) {
+    m.usage.input = Math.max(m.usage.input, u.input_tokens ?? 0);
+    m.usage.output = Math.max(m.usage.output, u.output_tokens ?? 0);
+    m.usage.cacheWrite = Math.max(m.usage.cacheWrite, u.cache_creation_input_tokens ?? 0);
+    m.usage.cacheRead = Math.max(m.usage.cacheRead, u.cache_read_input_tokens ?? 0);
+  }
+  return m;
+}
+
+const sumSpend = (messages) => {
+  const spend = emptySpend();
+  for (const m of messages) for (const k of Object.keys(spend)) spend[k] += m.usage[k];
+  return spend;
+};
+
+/** The tokens of a long transcript (the orchestrator's own), parsing only the lines that carry usage. */
+function spendOf(path) {
+  const messages = [];
+  for (const line of read(path).split("\n")) {
+    if (!line.includes('"usage"')) continue;
+    try {
+      const e = JSON.parse(line);
+      if (e.type === "assistant" && e.message) addUsage(messages, e);
+    } catch {}
+  }
+  return sumSpend(messages);
+}
+
+/** The final message, model, agent type, description, times and tokens of a transcript. A launch is finished
+ * when its meta says so, or — older transcripts carry no such flag — when its last message calls no tool;
  * an unfinished one has no final message, whatever text it wrote on the way. */
 export function readTranscript(path) {
   const messages = [];
   let model = null;
   let first = null;
   let lastAt = null;
+  let agentId = null;
   for (const line of read(path).split("\n")) {
     if (!line.trim()) continue;
     let e;
@@ -226,6 +384,7 @@ export function readTranscript(path) {
     } catch {
       continue;
     }
+    agentId ??= e.agentId ?? null;
     const at = Date.parse(e.timestamp ?? "");
     if (!Number.isNaN(at)) {
       first ??= at;
@@ -233,30 +392,13 @@ export function readTranscript(path) {
     }
     if (e.type !== "assistant" || !Array.isArray(e.message?.content)) continue;
     model ??= e.message.model ?? null;
-    // One API message is written as several entries, one per content block, under one id; each repeats
-    // the usage so far, so the message's usage is the largest seen (as spend.mjs counts it).
-    const id = e.message.id ?? e.uuid ?? Symbol();
-    let m = messages.at(-1);
-    if (!m || m.id !== id) messages.push((m = { id, text: [], toolUse: false, usage: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 } }));
+    const m = addUsage(messages, e);
     for (const b of e.message.content) {
       if (b?.type === "text" && b.text.trim()) m.text.push(b.text.trim());
       if (b?.type === "tool_use") m.toolUse = true;
     }
-    const u = e.message.usage;
-    if (u) {
-      m.usage.input = Math.max(m.usage.input, u.input_tokens ?? 0);
-      m.usage.output = Math.max(m.usage.output, u.output_tokens ?? 0);
-      m.usage.cacheWrite = Math.max(m.usage.cacheWrite, u.cache_creation_input_tokens ?? 0);
-      m.usage.cacheRead = Math.max(m.usage.cacheRead, u.cache_read_input_tokens ?? 0);
-    }
   }
-  const spend = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
-  for (const m of messages) for (const k of Object.keys(spend)) spend[k] += m.usage[k];
-  let meta = {};
-  if (path.endsWith(".jsonl"))
-    try {
-      meta = JSON.parse(read(path.replace(/\.jsonl$/, ".meta.json")) || "{}");
-    } catch {}
+  const meta = path.endsWith(".jsonl") ? readMeta(path.replace(/\.jsonl$/, ".meta.json")) : {};
   const last = messages.at(-1);
   const finished = meta.finished === undefined ? Boolean(last && !last.toolUse && last.text.length) : meta.finished === true;
   return {
@@ -264,88 +406,209 @@ export function readTranscript(path) {
     model,
     agent: meta.agentType ?? null,
     description: meta.description ?? null,
+    agentId: agentId ?? agentIdOf(path),
+    startedAt: isoOf(first),
+    endedAt: isoOf(lastAt),
     seconds: first !== null ? Math.round((lastAt - first) / 1000) : null,
-    spend,
+    spend: sumSpend(messages),
   };
+}
+
+/** The sub-agents a launch started — the craft critic's critique A and B, an implementer's cold-read — and theirs,
+ * found beside it by the `parentAgentId` their meta carries, with their tokens summed. */
+export function childSpend(transcript) {
+  const id = agentIdOf(transcript);
+  const sum = { launches: 0, ...emptySpend() };
+  if (!id) return sum;
+  const dir = dirname(transcript);
+  const parentOf = new Map();
+  for (const file of readdirSync(dir)) {
+    if (!file.endsWith(".meta.json")) continue;
+    const parent = readMeta(join(dir, file)).parentAgentId;
+    if (parent) parentOf.set(file.replace(/^agent-/, "").replace(/\.meta\.json$/, ""), parent);
+  }
+  for (const child of parentOf.keys()) {
+    let p = parentOf.get(child);
+    for (let depth = 0; p && p !== id && depth < 32; depth++) p = parentOf.get(p);
+    if (p !== id) continue;
+    const t = readTranscript(join(dir, `agent-${child}.jsonl`));
+    sum.launches++;
+    for (const k of Object.keys(t.spend)) sum[k] += t.spend[k];
+  }
+  return sum;
 }
 
 // ── the run folder ────────────────────────────────────────────────────────────────────────────
 
 function git(start, args) {
-  const r = spawnSync("git", ["-C", start, ...args], { encoding: "utf8" });
+  const r = spawnSync("git", ["-C", start, ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   return r.status === 0 ? r.stdout : null;
 }
 
 const defaultCommitMessage = (start, sha) => (start ? git(start, ["log", "-1", "--format=%B", sha]) : null);
 
-/** Everything the run folder holds, parsed and joined. */
-export function collect(runDir) {
+/** The run's commits as git holds them now — a rebase or a pull rewrites the shas units.md recorded. Inline: the
+ * start checkout's HEAD; worktree: the run branch, or every ref once it is gone. Null when git cannot answer. */
+function runCommits(common, id, runGit) {
+  if (!common.start) return null;
+  const branch = `fsl/${id}`;
+  const refs = common.mode === "inline" ? ["HEAD"] : runGit(common.start, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]) !== null ? [branch] : ["--all"];
+  const out = runGit(common.start, ["log", ...refs, "--reverse", "-z", "-F", `--grep=Fsloop-Run: ${id}`, "--format=%H%x1f%cI%x1f%s%x1f%B"]);
+  if (out === null) return null;
+  const commits = [];
+  for (const record of out.split("\0")) {
+    if (!record.trim()) continue;
+    const [sha, at, subject, body = ""] = record.replace(/^\n+/, "").split("\x1f");
+    const trailer = (k) => [...body.matchAll(new RegExp(`^${k}:[ \\t]*(.+)$`, "gm"))].map((m) => m[1].trim());
+    if (!trailer("Fsloop-Run").includes(id)) continue;
+    const step = trailer("Fsloop-Step")[0] ?? null;
+    const pass = /^(\d+)/.exec(trailer("Fsloop-Pass")[0] ?? "")?.[1];
+    commits.push({ sha, subject, at, step, unit: /^([uf]\d+)\b/.exec(step ?? "")?.[1] ?? null, pass: pass ? Number(pass) : null, closes: findingIds(trailer("Fsloop-Closes").join(" ")) });
+  }
+  return commits;
+}
+
+function readJsonl(path) {
+  return read(path)
+    .split("\n")
+    .filter((l) => l.trim())
+    .map((l) => {
+      try {
+        return JSON.parse(l);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
+const CHECK_LINE = /^(\d+)\s+(.+?)\s+—\s+exit\s+(-?\d+)\b\s*(?:—\s*)?(.*)$/;
+
+/** The `COMMANDS` lines a command list leaves in its `<log>.lines` files. */
+function checkLines(dir, prefix) {
+  if (!existsSync(dir)) return [];
+  const out = [];
+  for (const file of readdirSync(dir).filter((f) => f.endsWith(".lines")).sort())
+    for (const line of read(join(dir, file)).split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      const m = CHECK_LINE.exec(line.trim());
+      out.push(m ? { file: `${prefix}${file}`, n: Number(m[1]), label: m[2], exit: Number(m[3]), line: m[4] || null } : { file: `${prefix}${file}`, n: null, label: null, exit: null, line: line.trim() });
+    }
+  return out;
+}
+
+/** Frames under shots/: `p<p>-<moment>-<surface>.png`, init's `init-<name>.png`. */
+function shotsOf(runDir) {
+  const dir = join(runDir, "shots");
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(".png"))
+    .sort()
+    .map((f) => {
+      const p = /^p(\d+)-([a-z]+)-(.+)\.png$/.exec(f);
+      if (p) return { path: `shots/${f}`, pass: Number(p[1]), moment: p[2], surface: p[3] };
+      const init = /^init-(.+)\.png$/.exec(f);
+      return { path: `shots/${f}`, pass: null, moment: init ? "init" : null, surface: init?.[1] ?? null };
+    });
+}
+
+/** A folder of an older version, `.claude/fsloop/<id>/`: only its report is read. */
+const isLegacy = (runDir) => basename(dirname(resolve(runDir))) === "fsloop";
+const samePath = (a, b) => {
+  const norm = (p) => resolve(p).replace(/\\/g, "/").replace(/\/+$/, "");
+  return process.platform === "win32" ? norm(a).toLowerCase() === norm(b).toLowerCase() : norm(a) === norm(b);
+};
+
+const opensFindings = (l) => ["fsloop-implement", "fsloop-debug"].includes(l.agent) || /^(?:[uf]\d+ (?:implement|debug)|integrate (?:fix|debug))$/.test(l.description);
+
+/** Everything the run folder holds, parsed and joined. `git` is injectable, as `gate`'s commitMessage is. */
+export function collect(runDir, { git: runGit = git } = {}) {
   const common = parseCommon(read(join(runDir, "common.md")));
   const id = common.run ?? basename(runDir);
 
-  const launches = parseTable(read(join(runDir, "launches.md"))).map((r) => ({
-    id: cell(r, "launch"),
-    stage: cell(r, "stage"),
-    agent: cell(r, "agent"),
-    description: cell(r, "description"),
-    model: cell(r, "model"),
-    transcript: cell(r, "transcript"),
-    report: cell(r, "report"),
-    seconds: Number(cell(r, "seconds")) || null,
-    spend: Object.fromEntries(["input", "output", "cache write", "cache read"].map((k) => [k.replace(" w", "W").replace(" r", "R"), Number(cell(r, k)) || 0])),
-  }));
+  const launches = parseTable(read(join(runDir, "launches.md"))).map((r) => {
+    const transcript = cell(r, "transcript");
+    const description = cell(r, "description");
+    const num = (k) => Number(cell(r, k)) || 0;
+    return {
+      id: cell(r, "launch"),
+      stage: cell(r, "stage"),
+      agent: cell(r, "agent"),
+      description,
+      model: cell(r, "model"),
+      unit: /^([uf]\d+)\b/.exec(description)?.[1] ?? null,
+      agentId: orNull(cell(r, "agent id")) ?? agentIdOf(transcript),
+      startedAt: orNull(cell(r, "started")),
+      endedAt: orNull(cell(r, "ended")),
+      seconds: Number(cell(r, "seconds")) || null,
+      spend: {
+        input: num("input"),
+        output: num("output"),
+        cacheWrite: num("cache write"),
+        cacheRead: num("cache read"),
+        // A row saved before the column existed: unknown, not zero.
+        children: r.children === undefined ? null : { launches: num("children"), input: num("children input"), output: num("children output"), cacheWrite: num("children cache write"), cacheRead: num("children cache read") },
+      },
+      transcript,
+      transcriptGone: Boolean(transcript) && !existsSync(transcript),
+      report: cell(r, "report"),
+    };
+  });
 
   const findings = new Map();
   const verdicts = [];
   const audits = [];
   const judges = [];
   const judged = [];
+  const deploys = [];
   for (const l of launches) {
     const text = read(join(runDir, l.report));
     l.reportMissing = !text.trim();
-    const block = parseBlock(text);
-    l.lens = block.LENS?.value || null;
-    l.result = block.RESULT?.value || null;
-    for (const line of block["FINDINGS"]?.items ?? []) {
+    const block = blockSections(text);
+    l.unparsed = [];
+    // Every line is kept: a local id met twice in one report is told apart by position (`code-1`, `code-1~2`).
+    const take = (local, f) => {
+      let key = local;
+      for (let k = 2; findings.has(`${l.id}#${key}`); k++) key = `${local}~${k}`;
+      findings.set(`${l.id}#${key}`, { ...f, id: `${l.id}#${key}`, local: key, launch: l.id, stage: l.stage, own: false });
+    };
+    const unparsed = (section, k, text) => l.unparsed.push({ id: `${l.id}#line-${block[section].lines[k]}`, section, line: block[section].lines[k], text });
+    block.FINDINGS?.items.forEach((line, k) => {
       const f = parseFinding(line);
-      if (!FINDING_ID.test(f.id)) continue;
-      const gid = `${l.id}#${f.id}`;
-      findings.set(gid, { ...f, id: gid, local: f.id, launch: l.id, stage: l.stage });
-    }
-    for (const line of block.VERDICT?.items ?? []) {
+      if (FINDING_ID.test(f.id)) take(f.id, f);
+      else unparsed("FINDINGS", k, line);
+    });
+    // An implementer's or debugger's OPEN line is above the bar (SKILL.md → Bar): a finding, decided like the critics'.
+    const openLines = opensFindings(l);
+    if (openLines) block.OPEN?.items.forEach((line, k) => take(`open-${k + 1}`, { parsed: "loose", severity: null, raw: line }));
+    block.VERDICT?.items.forEach((line, k) => {
       const v = parseVerdict(line);
       if (v) verdicts.push({ ...v, launch: l.id, stage: l.stage });
-    }
+      else unparsed("VERDICT", k, line);
+    });
     for (const line of [block.AUDIT?.value, ...(block.AUDIT?.items ?? [])])
       if (line && !NONE.test(line)) audits.push({ launch: l.id, stage: l.stage, line });
-    for (const text of judgeQuestions(block)) {
-      const id = `${l.id}#judge-${judges.filter((j) => j.launch === l.id).length + 1}`;
-      judges.push({ id, launch: l.id, stage: l.stage, text });
+    for (const q of judgeQuestions(block)) {
+      const qid = `${l.id}#judge-${judges.filter((j) => j.launch === l.id).length + 1}`;
+      judges.push({ id: qid, launch: l.id, stage: l.stage, text: q });
     }
     for (const line of block.JUDGED?.items ?? []) {
-      const m = /^(\S+#judge-\d+)\s+(.*)$/.exec(line);
-      if (m) judged.push({ id: m[1], text: m[2], result: /— upheld\b/.test(m[2]) ? "upheld" : /\bfinding\b/.test(m[2]) ? "finding" : null, launch: l.id, stage: l.stage });
+      const m = /^[*`]*(\S+#judge-\d+)[*`]*\s+(.*)$/.exec(line);
+      if (!m) continue;
+      const named = /\bfinding\s+([^\s,;]+?)[.,;]?(?:\s|$)/.exec(m[2])?.[1] ?? null;
+      const finding = named ? (named.includes("#") ? named : `${l.id}#${named}`) : null;
+      const result = /— upheld\b/.test(m[2]) ? "upheld" : named || /\bfinding\b/.test(m[2]) ? "finding" : null;
+      judged.push({ id: m[1], text: m[2], result, finding, launch: l.id, stage: l.stage });
     }
-  }
-
-  // A surface's scores across the run: one `craft <surface>` launch at Map's baseline and at each Assess.
-  const surfaces = {};
-  for (const a of audits) {
-    const surface = /^craft (.+)$/.exec(launches.find((l) => l.id === a.launch)?.description ?? "")?.[1];
-    if (!surface) continue;
-    const audit = /\baudit (\d+)\/(\d+)/.exec(a.line);
-    const critique = /\bcritique (\d+)\/(\d+)/.exec(a.line);
-    (surfaces[surface] ??= []).push({
-      stage: a.stage,
-      launch: a.launch,
-      audit: audit ? Number(audit[1]) : null,
-      auditMax: audit ? Number(audit[2]) : null,
-      critique: critique ? Number(critique[1]) : null,
-      critiqueMax: critique ? Number(critique[2]) : null,
-    });
+    if (l.description === "prod check" || l.agent === "prod-check") {
+      const d = parseDeploy(text);
+      if (d) deploys.push({ ...d, launch: l.id });
+    }
+    l.block = Object.fromEntries(Object.entries(block).filter(([name]) => name !== "FINDINGS" && !(openLines && name === "OPEN")).map(([name, { value, items }]) => [name, { value, items }]));
   }
 
   const decisions = new Map();
+  const repeaters = new Map();
   const findingsDir = join(runDir, "findings");
   const rowsByStage = {};
   if (existsSync(findingsDir)) {
@@ -359,17 +622,23 @@ export function collect(runDir) {
         repeat: cell(r, "repeat"),
         why: cell(r, "why"),
         severity: cell(r, "severity").toLowerCase(),
+        evidence: cell(r, "evidence"),
       }));
       for (const row of rowsByStage[stage]) {
         if (!decisions.has(row.finding)) decisions.set(row.finding, row);
+        if (!NONE.test(row.repeat) && !repeaters.has(row.repeat)) repeaters.set(row.repeat, row.finding);
         // The run's own finding — a red suite line, a failed end-to-end step — has no report to come from.
         const own = new RegExp(`^${stage}-own#(\\S+)$`).exec(row.finding);
+        const severity = SEVERITIES.includes(row.severity) ? row.severity : null;
         if (own && !findings.has(row.finding))
-          findings.set(row.finding, { id: row.finding, local: own[1], launch: null, stage, severity: SEVERITIES.includes(row.severity) ? row.severity : null, raw: row.why, own: true });
+          findings.set(row.finding, { id: row.finding, local: own[1], launch: null, stage, severity, evidence: orNull(row.evidence), own: true, parsed: null });
+        const open = findings.get(row.finding);
+        if (open && /#open-\d+$/.test(open.id) && severity) open.severity = severity;
       }
     }
   }
 
+  const commits = runCommits(common, id, runGit);
   const units = parseTable(read(join(runDir, "units.md"))).map((r) => {
     const unit = cell(r, "unit");
     const state = cell(r, "state");
@@ -377,16 +646,22 @@ export function collect(runDir) {
     const blocked = /^blocked\b:?\s*(.*)$/i.exec(state);
     const briefPath = join("units", unit, "brief.md");
     const briefText = read(join(runDir, briefPath));
+    const own = commits?.filter((c) => c.unit === unit).map((c) => c.sha) ?? [];
     return {
       id: unit,
       pass: Number(cell(r, "pass").replace(/^p/, "")) || 1,
       state: committed ? "committed" : blocked ? "blocked" : state || "unknown",
-      sha: committed?.[1] ?? null,
+      // git's sha when the commit is found by its trailer; units.md's as written otherwise.
+      sha: own.at(-1) ?? committed?.[1] ?? null,
+      recordedSha: committed?.[1] ?? null,
+      commits: own,
       blockedWhy: blocked?.[1] ?? null,
       tree: cell(r, "tree"),
       title: cell(r, "title"),
       brief: briefText ? briefPath.replace(/\\/g, "/") : null,
       ...(briefText ? parseBrief(briefText) : { kind: "", blockedBy: [], sections: null, closes: [] }),
+      launches: launches.filter((l) => l.unit === unit).map((l) => l.id),
+      checks: checkLines(join(runDir, "units", unit), ""),
     };
   });
 
@@ -406,28 +681,142 @@ export function collect(runDir) {
     why: cell(r, "why"),
   }));
 
-  const gates = read(join(runDir, "gates.jsonl"))
-    .split("\n")
-    .filter(Boolean)
-    .map((l) => {
-      try {
-        return JSON.parse(l);
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean);
+  const gates = readJsonl(join(runDir, "gates.jsonl"));
+  const decisionLog = readJsonl(join(runDir, "decisions.jsonl"));
+  const human = readJsonl(join(runDir, "human.jsonl")).filter((h) => HUMAN_VERDICTS.includes(h.verdict) && (h.finding || h.launch || h.journal));
 
-  return { runDir, id, common, launches, findings, verdicts, audits, surfaces, judges, judged, decisions, rowsByStage, units, journal, passes, gates };
+  // A VERDICT line names a finding by its id, or by the short id its pass's review gave it once.
+  for (const v of verdicts) {
+    if (findings.has(v.id)) v.matched = v.id;
+    else if (v.stage.endsWith("-verdict")) {
+      const review = v.stage.replace(/-verdict$/, "-review");
+      const same = [...findings.values()].filter((f) => f.stage === review && f.local.replace(/~\d+$/, "") === v.id);
+      v.matched = same.length === 1 ? same[0].id : null;
+    } else v.matched = null;
+  }
+
+  // Surface slugs as Map named them: the `craft <surface>` launches, the frames, the SHAPE files.
+  const known = new Set([
+    ...launches.map((l) => /^craft (.+)$/.exec(l.description)?.[1]).filter(Boolean),
+    ...shotsOf(runDir).map((s) => s.surface).filter(Boolean),
+    ...(existsSync(join(runDir, "surfaces")) ? readdirSync(join(runDir, "surfaces")).filter((f) => f.endsWith(".md")).map((f) => f.replace(/\.md$/, "")) : []),
+  ]);
+  const surfaces = {};
+  for (const a of audits) {
+    const audit = /\baudit (\d+)\/(\d+)/.exec(a.line);
+    const critique = /\bcritique (\d+)\/(\d+)/.exec(a.line);
+    a.surface = null;
+    if (!audit && !critique) continue;
+    // Map's baseline and each Assess name the surface in the description; Review's critic on each AUDIT line.
+    const named = /^craft (.+)$/.exec(launches.find((l) => l.id === a.launch)?.description ?? "")?.[1];
+    const text = slug(a.line.split(/\s+(?:audit|critique)\s+\d/)[0]);
+    a.surface = named ?? ([...known].filter((k) => text === k || text.startsWith(`${k}-`) || text.endsWith(`-${k}`) || text.includes(`-${k}-`)).sort((x, y) => y.length - x.length)[0] ?? text);
+    (surfaces[a.surface] ??= []).push({
+      stage: a.stage,
+      launch: a.launch,
+      audit: audit ? Number(audit[1]) : null,
+      auditMax: audit ? Number(audit[2]) : null,
+      critique: critique ? Number(critique[1]) : null,
+      critiqueMax: critique ? Number(critique[2]) : null,
+    });
+  }
+
+  // The orchestrator: the sessions common.md names, the newest one's launches still in flight.
+  const sessions = common.sessions.map((s) => ({ id: s, paths: sessionPaths(s) }));
+  const running = runningLaunches(id, launches, sessions.at(-1)?.paths?.subagents);
+  const mains = sessions.map((s) => s.paths?.main).filter(Boolean);
+  const orchestrator = {
+    sessions: sessions.map((s) => ({ id: s.id, transcript: s.paths?.main ?? null, transcriptGone: !s.paths?.main })),
+    spend: mains.length ? mains.map(spendOf).reduce((a, b) => Object.fromEntries(Object.keys(a).map((k) => [k, a[k] + b[k]]))) : null,
+  };
+
+  let updated = 0;
+  const touch = (path) => {
+    try {
+      updated = Math.max(updated, statSync(path).mtimeMs);
+    } catch {}
+  };
+  for (const f of ["common.md", "journal.md", "units.md", "launches.md", "passes.md", "gates.jsonl", "decisions.jsonl", "human.jsonl", "report.md"]) touch(join(runDir, f));
+  for (const d of ["findings", "logs", "reports"]) if (existsSync(join(runDir, d))) for (const f of readdirSync(join(runDir, d))) touch(join(runDir, d, f));
+
+  return {
+    runDir,
+    id,
+    common,
+    mirror: Boolean(common.start) && !samePath(join(common.start, ".claude", "fsloop", "runs", id), runDir),
+    launches,
+    findings,
+    verdicts,
+    audits,
+    surfaces,
+    judges,
+    judged,
+    deploys,
+    decisions,
+    repeaters,
+    rowsByStage,
+    units,
+    commits,
+    journal,
+    passes,
+    gates,
+    decisionLog,
+    human,
+    shots: shotsOf(runDir),
+    logs: checkLines(join(runDir, "logs"), "logs/"),
+    running,
+    orchestrator,
+    updatedAt: isoOf(updated || null),
+  };
+}
+
+/** The orchestrator's launches not saved yet: top-level transcripts of its session whose prompt names this run. */
+function runningLaunches(runId, launches, dir) {
+  if (!dir) return [];
+  const saved = new Set(launches.map((l) => l.agentId).filter(Boolean));
+  const names = namesRun(runId);
+  const out = [];
+  for (const file of readdirSync(dir)) {
+    if (!file.endsWith(".meta.json")) continue;
+    const agentId = file.replace(/^agent-/, "").replace(/\.meta\.json$/, "");
+    if (saved.has(agentId)) continue;
+    const meta = readMeta(join(dir, file));
+    if (meta.parentAgentId) continue;
+    const path = join(dir, `agent-${agentId}.jsonl`);
+    const first = firstLine(path);
+    if (!names.test(first)) continue;
+    const stat = statSync(path);
+    const startedAt = /"timestamp":"([^"]+)"/.exec(first)?.[1] ?? isoOf(stat.birthtimeMs);
+    // A launch relaunched under its description and saved since is no longer in flight.
+    if (launches.some((l) => l.description === meta.description && l.startedAt && l.startedAt >= startedAt)) continue;
+    out.push({ agentId, description: meta.description ?? null, agent: meta.agentType ?? null, startedAt, lastAt: isoOf(stat.mtimeMs), finished: typeof meta.finished === "boolean" ? meta.finished : null });
+  }
+  return out.sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""));
 }
 
 const refsOf = (row) => row.refs.split(/[\s,;]+/).filter(Boolean);
+const journalRow = (run, ref) => run.journal.find((r) => `j${r.n}` === ref) ?? null;
 const lastGate = (run, stage) => run.gates.filter((g) => g.stage === stage).at(-1) ?? null;
 export const HELD = "— it holds the push";
 /** A red integrate gate whose every line is a held finding: the push waits, the run finishes. */
 export const heldPush = (g) => Boolean(g && !g.green && g.problems?.length && g.problems.every((p) => p.endsWith(HELD)));
 const isGreen = (run, stage) => lastGate(run, stage)?.green === true;
 const closers = (run, findingId) => run.units.filter((u) => u.closes.includes(findingId));
+
+/** What a ref or a journal ref names: `j<n>` a journal row, `law:<file> <rule>`, a finding, a question to judge,
+ * an unparsed report line, a unit, a launch, a pass — else free text. */
+export function refKind(run, ref) {
+  if (orNull(ref) === null) return null;
+  if (/^j\d+$/.test(ref)) return "journal";
+  if (/^law:\S+\s+\S/.test(ref)) return "law";
+  if (/#judge-\d+$/.test(ref)) return "judge";
+  if (/#line-\d+$/.test(ref)) return "line";
+  if (run.findings.has(ref)) return "finding";
+  if (run.units.some((u) => u.id === ref)) return "unit";
+  if (run.launches.some((l) => l.id === ref)) return "launch";
+  if (/^p\d+$/.test(ref)) return "pass";
+  return "text";
+}
 
 /** Critical and major assess findings above the bar — the count the pass rule runs on. */
 export function weight(run, pass) {
@@ -497,6 +886,22 @@ function checkLaunches(run, stage) {
   return run.launches.filter((l) => l.stage === stage && l.reportMissing).map((l) => `${l.id}: report ${l.report} is missing or empty`);
 }
 
+/** A FINDINGS or VERDICT line no grammar reads is settled by a journal row whose refs name its `#line-<k>`. */
+function checkUnparsed(run, stage) {
+  return run.launches
+    .filter((l) => l.stage === stage)
+    .flatMap((l) => l.unparsed)
+    .filter((u) => !run.journal.some((r) => refsOf(r).includes(u.id)))
+    .map((u) => `${u.id}: "${u.text}" under ${u.section} is no ${u.section === "VERDICT" ? "verdict" : "finding"} line — a journal row refs it with what it is, or relaunch`);
+}
+
+/** A journal row is cited as `j<n>`: two rows under one `#` make that ambiguous. */
+function checkJournal(run) {
+  const count = new Map();
+  for (const r of run.journal) count.set(r.n, (count.get(r.n) ?? 0) + 1);
+  return [...count].filter(([n, k]) => !n || k > 1).map(([n, k]) => (n ? `journal.md: # ${n} on ${k} rows — j${n} must name one` : "journal.md: a row with no #"));
+}
+
 function checkDecisions(run, stage) {
   const problems = [];
   const expected = [...run.findings.values()].filter((f) => f.stage === stage);
@@ -515,10 +920,11 @@ function checkDecisions(run, stage) {
       problems.push(`${where}: no such finding in a ${stage} report`);
       continue;
     }
-    if (stage === "integrate" && run.findings.get(row.finding).own && row.decision === "fix")
+    const f = run.findings.get(row.finding);
+    if (stage === "integrate" && f.own && row.decision === "fix")
       problems.push(`${where}: a check Integrate can still fix is no finding — the run's own is open, or a candidate when flaky`);
-    if (run.findings.get(row.finding).own && !run.findings.get(row.finding).severity)
-      problems.push(`${where}: the run's own finding needs a severity column — critical, major or minor`);
+    if (f.own && !f.severity) problems.push(`${where}: the run's own finding needs a severity column — critical, major or minor`);
+    if (f.own && !f.evidence) problems.push(`${where}: the run's own finding needs an evidence column — the log line that shows it, logs/<log>.lines:<n>`);
     if (!DECISIONS.includes(row.decision)) problems.push(`${where}: decision "${row.decision}" is not one of ${DECISIONS.join(" · ")}`);
     if (!row.why || NONE.test(row.why)) problems.push(`${where}: why is empty`);
     if (row.decision === "fix") {
@@ -532,8 +938,13 @@ function checkDecisions(run, stage) {
     }
     if (row.decision === "duplicate" && (!run.findings.has(row.ref) || row.ref === row.finding))
       problems.push(`${where}: duplicate needs the finding it repeats as ref`);
-    if (["dropped", "declined"].includes(row.decision) && NONE.test(row.ref))
-      problems.push(`${where}: ${row.decision} needs a ref — the journal row or finding it rests on`);
+    if (["dropped", "declined"].includes(row.decision)) {
+      const kind = refKind(run, row.ref);
+      if (!kind) problems.push(`${where}: ${row.decision} needs a ref — j<n> (the journal row), the finding it rests on, or law:<file> <rule>`);
+      else if (kind === "journal" && !journalRow(run, row.ref)) problems.push(`${where}: ref ${row.ref} — journal.md has no row # ${row.ref.slice(1)}`);
+      else if (!["journal", "finding", "law"].includes(kind) || row.ref === row.finding)
+        problems.push(`${where}: ref "${row.ref}" is not j<n>, another finding's id or law:<file> <rule>`);
+    }
     if (row.repeat && !NONE.test(row.repeat)) {
       const earlier = run.decisions.get(row.repeat);
       if (!run.findings.has(row.repeat) || row.repeat === row.finding) problems.push(`${where}: repeat ${row.repeat} is no finding`);
@@ -613,13 +1024,18 @@ function checkLanded(run, units, stage, commitMessage) {
   return problems;
 }
 
+// Statuses a run gave up on: they hold the push. A `fixed` finding holds it until some check saw it (closedBy).
+const GAVE_UP = ["open", "blocked", "unresolved"];
+const SETTLED = ["closed", "candidate", "dropped", "declined", "duplicate"];
+const holdsPushScope = (f) => Boolean(f) && ["critical", "major"].includes(f.severity) && /-(review|verdict)$|^integrate$/.test(f.stage);
+
 /** What still stands between `stage` and done; empty → green. */
 export function gate(run, stage, { commitMessage = defaultCommitMessage } = {}) {
   const parsed = parseStage(stage);
   if (!parsed) return [`unknown stage "${stage}" — p<n>-{${STEPS.join("|")}}, integrate, finish or init`];
   if (parsed.step === "init") return [...checkLaunches(run, stage), ...checkInit(run)];
   const { pass, step } = parsed;
-  const problems = [...prerequisites(run, stage), ...checkLaunches(run, stage), ...checkDecisions(run, stage)];
+  const problems = [...prerequisites(run, stage), ...checkLaunches(run, stage), ...checkUnparsed(run, stage), ...checkDecisions(run, stage), ...checkJournal(run)];
   const ofPass = (prefix) => run.units.filter((u) => u.pass === pass && u.id.startsWith(prefix));
 
   if (step === "map" && !run.launches.some((l) => l.stage === stage)) problems.push(`${stage}: no launch saved — Map's report goes through save`);
@@ -659,16 +1075,20 @@ export function gate(run, stage, { commitMessage = defaultCommitMessage } = {}) 
   }
   // Green here is the push's precondition: a critical or major finding of a review, a verdict or the
   // merge still open after Fix holds it (SKILL.md step 7). Assess findings are the passes' to judge.
-  // The merge's critic is a check run again after each fix: only its last report speaks.
+  // A finding a later one repeats speaks through the end of that chain; within this scope, the later one speaks.
   if (step === "integrate") {
-    const lastCritic = lastIntegrateCritic(run);
     for (const f of run.findings.values()) {
-      if (!["critical", "major"].includes(f.severity) || !/-(review|verdict)$|^integrate$/.test(f.stage)) continue;
-      if (f.stage === "integrate" && !f.own && f.launch !== lastCritic) continue;
-      const { status } = statusOf(run, f, run.decisions.get(f.id));
-      if (!HOLDS_PUSH.includes(status)) continue;
+      if (!holdsPushScope(f)) continue;
+      let s = statusOf(run, f);
+      if (s.status === "repeated") {
+        const e = effectiveOf(run, f.id, (id) => statusOf(run, run.findings.get(id)));
+        if (holdsPushScope(run.findings.get(e.id))) continue;
+        s = e;
+      }
+      if (SETTLED.includes(s.status) || (s.status === "fixed" && s.closedBy)) continue;
       // Only a finding the run gave up on holds the push; one still on its way to a fix is work left.
-      problems.push(status === "open" ? `${f.id}: ${f.severity}, open ${HELD}` : `${f.id}: ${f.severity}, ${status} — settle it before the push`);
+      if (GAVE_UP.includes(s.status)) problems.push(`${f.id}: ${f.severity}, ${s.status} ${HELD}`);
+      else if (HOLDS_PUSH.includes(s.status)) problems.push(`${f.id}: ${f.severity}, ${s.status} — settle it before the push`);
     }
   }
   // Each question an implementer left to judge is answered by the next critic, or recorded open in the journal:
@@ -679,8 +1099,6 @@ export function gate(run, stage, { commitMessage = defaultCommitMessage } = {}) 
     for (const q of run.judges.filter((j) => j.stage === asked))
       if (!answered.has(q.id) && !run.journal.some((r) => refsOf(r).includes(q.id)))
         problems.push(`${q.id}: to judge "${q.text}" — no JUDGED line opens with its id, no journal row refs it`);
-  }
-  if (step === "review") {
   }
   if (step === "finish") {
     const report = read(join(run.runDir, "report.md"));
@@ -766,86 +1184,343 @@ export function allowedOutcomes(run, pass, n) {
 }
 
 function verdictOf(run, findingId) {
-  const f = run.findings.get(findingId);
-  const exact = run.verdicts.filter((v) => v.id === findingId);
-  if (exact.length) return exact.at(-1);
-  // A verdict that echoes the short id (`code-3`) counts only for its own pass's review, and only
-  // when that review has one finding by that id.
-  if (!f || !f.stage.endsWith("-review")) return null;
-  const verdictStage = f.stage.replace(/-review$/, "-verdict");
-  const local = run.verdicts.filter((v) => v.id === f.local && v.stage === verdictStage);
-  const sameLocal = [...run.findings.values()].filter((x) => x.local === f.local && x.stage === f.stage);
-  return local.length && sameLocal.length === 1 ? local.at(-1) : null;
+  return run.verdicts.filter((v) => v.matched === findingId).at(-1) ?? null;
+}
+
+// ── statuses ──────────────────────────────────────────────────────────────────────────────────
+//
+// status — the finding's own fate:
+//   undecided · candidate · dropped · declined · duplicate · open   (no row, or the row's decision)
+//   queued       decided fix; no unit takes it yet (at Integrate: no `integrate fix` launch saved after it)
+//   in-progress  its unit is drafted or being built
+//   blocked      its unit is blocked
+//   fixed        landed; `closedBy` says what saw it since: not-reraised (a later critic of the built result
+//                did not raise it again — Review of a u-unit's surface, or Assess), integrate-recheck (the
+//                merge's critic ran after the fix), or null (nothing yet)
+//   closed       a verdict scored it resolved — closedBy verdict; the only proof that reads the finding itself
+//   unresolved   a verdict scored it partial or unresolved
+//   repeated     a later finding names it under `repeat`: the fix did not hold
+// effectiveStatus — the fate of what a duplicate repeats, or of the finding that repeated it, to the chain's end;
+// supersededBy names that end when it is another finding.
+
+const isFixLaunch = (l) => /^integrate (?:fix|debug)$/.test(l.description);
+
+function statusOf(run, f) {
+  const d = run.decisions.get(f.id);
+  if (!d) return { status: "undecided" };
+  if (d.decision !== "fix") return { status: d.decision };
+  const repeated = run.repeaters.has(f.id);
+  if (f.stage === "integrate") {
+    const at = run.launches.findIndex((l) => l.id === f.launch);
+    const fix = run.launches.findIndex((l, i) => i > at && isFixLaunch(l));
+    if (fix < 0) return { status: "queued" };
+    if (repeated) return { status: "repeated" };
+    const recheck = run.launches.find((l, i) => i > fix && l.stage === "integrate" && l.description.startsWith("critic "));
+    return recheck ? { status: "fixed", closedBy: "integrate-recheck", checkedBy: recheck.id } : { status: "fixed" };
+  }
+  let by = closers(run, f.id);
+  // An OPEN line taken by the unit that raised it names that unit as ref; no brief lists it.
+  if (!by.length && /^[uf]\d+$/.test(d.ref)) by = run.units.filter((u) => u.id === d.ref);
+  if (!by.length) return { status: "queued" };
+  const unit = by.at(-1);
+  if (unit.state === "blocked") return { status: "blocked", unit: unit.id };
+  if (unit.state !== "committed") return { status: "in-progress", unit: unit.id };
+  const verdict = verdictOf(run, f.id);
+  if (verdict) return { status: verdict.result === "resolved" ? "closed" : "unresolved", closedBy: verdict.result === "resolved" ? "verdict" : null, checkedBy: verdict.launch, unit: unit.id, verdict };
+  if (repeated) return { status: "repeated", unit: unit.id };
+  // A critic that read the built result after the unit landed and raised it no more — weaker than a verdict.
+  const checks = [...(unit.id.startsWith("u") ? [`p${unit.pass}-review`] : []), ...(run.common.N ? [`p${unit.pass}-assess`] : [])].filter((s) => s !== f.stage && isGreen(run, s));
+  if (checks.length) return { status: "fixed", closedBy: "not-reraised", checkedBy: checks.at(-1), unit: unit.id };
+  return { status: "fixed", unit: unit.id };
+}
+
+/** The status at the end of a finding's duplicate and repeat chain, with that finding's id. */
+function effectiveOf(run, id, status, seen = new Set()) {
+  const own = { id, ...status(id) };
+  if (seen.has(id)) return own;
+  seen.add(id);
+  const d = run.decisions.get(id);
+  if (d?.decision === "duplicate" && run.findings.has(d.ref)) return effectiveOf(run, d.ref, status, seen);
+  const next = run.repeaters.get(id);
+  if (next && run.findings.has(next)) return effectiveOf(run, next, status, seen);
+  return own;
 }
 
 // ── build ─────────────────────────────────────────────────────────────────────────────────────
 
-const lastIntegrateCritic = (run) => run.launches.filter((l) => l.stage === "integrate" && l.description.startsWith("critic ")).at(-1)?.id;
+let generatorHash = null;
+const generator = () => ({ fsl: (generatorHash ??= createHash("sha1").update(readFileSync(fileURLToPath(import.meta.url))).digest("hex").slice(0, 12)) });
 
-function statusOf(run, f, decision) {
-  if (!decision) return { status: "undecided" };
-  if (decision.decision !== "fix") return { status: decision.decision };
-  if (f.stage === "integrate")
-    return f.own || f.launch === lastIntegrateCritic(run) ? { status: "queued" } : { status: "closed", checkedBy: lastIntegrateCritic(run) };
-  const by = closers(run, f.id);
-  if (!by.length) return { status: "queued" };
-  const unit = by.at(-1);
-  if (unit.state === "blocked") return { status: "open", unit: unit.id, why: `${unit.id} blocked` };
-  if (unit.state !== "committed") return { status: "in-progress", unit: unit.id };
-  const verdict = verdictOf(run, f.id);
-  if (verdict) return { status: verdict.result === "resolved" ? "closed" : "open", unit: unit.id, verdict };
-  const repeatedBy = [...run.decisions.values()].find((d) => d.repeat === f.id);
-  if (repeatedBy) return { status: "open", unit: unit.id, repeatedBy: repeatedBy.finding };
-  const assess = `p${unit.pass}-assess`;
-  if (run.common.N && isGreen(run, assess)) return { status: "closed", unit: unit.id, checkedBy: assess };
-  return { status: "fixed", unit: unit.id };
+/** The stage after `stage` in this run's order; the first when none is done. */
+function nextStage(run, stage) {
+  if (!stage) return run.common.mode === "init" ? "init" : "p1-map";
+  const { pass, step } = parseStage(stage);
+  if (step === "init" || step === "finish") return null;
+  if (step === "integrate") return "finish";
+  const N = run.common.N;
+  if (step === (N ? "assess" : "verdict")) return N && run.passes.find((p) => p.pass === pass)?.outcome === "next" ? `p${pass + 1}-decompose` : "integrate";
+  let i = STEPS.indexOf(step) + 1;
+  if (STEPS[i] === (N ? "verdict" : "assess")) i++;
+  return `p${pass}-${STEPS[i]}`;
+}
+
+/** Each stage the run reached — gated, launched or with a findings file — in the run's order, each gate kept. */
+function stagesOf(run) {
+  const names = [...new Set([...run.gates.map((g) => g.stage), ...run.launches.map((l) => l.stage), ...Object.keys(run.rowsByStage)])].filter(parseStage).sort(compareStages);
+  const out = [];
+  for (const stage of names) {
+    const attempts = run.gates.filter((g) => g.stage === stage).map(({ at, green, problems }) => ({ at, green, problems: problems ?? [] }));
+    const last = attempts.at(-1);
+    const prev = out.at(-1);
+    const prevDone = prev ? (prev.attempts.filter((a) => a.green).at(-1) ?? prev.attempts.at(-1))?.at : null;
+    const firstLaunch = run.launches.filter((l) => l.stage === stage && l.startedAt).map((l) => l.startedAt).sort()[0] ?? null;
+    out.push({
+      stage,
+      green: last ? last.green : null,
+      at: last?.at ?? null,
+      problems: last?.problems ?? [],
+      startedAt: (prev ? prevDone : run.common.started) ?? firstLaunch,
+      attempts,
+    });
+  }
+  return out;
+}
+
+function nowOf(run, stages, closed) {
+  if (closed) return { stage: null, since: null, waitingOn: null };
+  // The held push leaves integrate red, yet done: Finish follows it.
+  const done = (s) => s.green === true || (s.stage === "integrate" && heldPush(lastGate(run, "integrate")));
+  const lastDone = stages.filter(done).at(-1) ?? null;
+  const ahead = stages.filter((s) => !done(s) && (!lastDone || compareStages(s.stage, lastDone.stage) > 0)).at(-1);
+  const stage = ahead?.stage ?? nextStage(run, lastDone?.stage ?? null);
+  const entry = stages.find((s) => s.stage === stage);
+  return {
+    stage,
+    since: entry?.startedAt ?? lastDone?.at ?? run.common.started ?? null,
+    waitingOn: {
+      running: run.running.length,
+      units: run.units.filter((u) => !["committed", "blocked"].includes(u.state)).map((u) => ({ id: u.id, state: u.state })),
+      lastRedGate: entry && entry.green === false ? { at: entry.at, problems: entry.problems } : null,
+    },
+  };
+}
+
+function outcomeOf(run, findings, closed) {
+  const pushLine = read(join(run.runDir, "logs", "push.log.lines")).trim().split(/\r?\n/).filter(Boolean).at(-1) ?? null;
+  const pushed = Boolean(pushLine && /exit 0\b/.test(pushLine));
+  const g = lastGate(run, "integrate");
+  const held = heldPush(g) ? g.problems.map((p) => /^(\S+?):/.exec(p)?.[1]).filter(Boolean) : [];
+  const deploy = run.deploys.at(-1) ?? null;
+  const left = findings.some((f) => ["critical", "major"].includes(f.severity) && [...GAVE_UP, "repeated"].includes(f.effectiveStatus));
+  // Met in full: pushed, nothing held, the deploy ok when checked, no critical or major finding left standing.
+  const goalMet = !closed ? null : run.common.mode === "init" ? true : pushed && !held.length && (!deploy || deploy.verdict === "ok") && !left;
+  return { pushed, pushLine, held, deploy, goalMet };
 }
 
 export function build(run) {
-  const stages = [];
-  for (const g of run.gates) {
-    const i = stages.findIndex((s) => s.stage === g.stage);
-    if (i >= 0) stages.splice(i, 1);
-    stages.push(g);
-  }
+  const statusCache = new Map();
+  const status = (id) => {
+    if (!statusCache.has(id)) statusCache.set(id, statusOf(run, run.findings.get(id)));
+    return statusCache.get(id);
+  };
+  const humanFor = (key, id) => {
+    const lines = run.human.filter((h) => String(h[key]).replace(/^j(?=\d)/, "") === String(id)).map(({ verdict, note, at }) => ({ verdict, note: note ?? null, at: at ?? null }));
+    return lines.length ? lines : null;
+  };
+  const history = new Map();
+  for (const e of run.decisionLog)
+    (history.get(e.finding) ?? history.set(e.finding, []).get(e.finding)).push(compact({ decision: e.to, ref: e.ref, repeat: e.repeat, why: e.why, at: e.at }));
+  // The versions of a finding's row before the one it holds now, and when that one was first seen.
+  const versions = (id, d) => {
+    const all = history.get(id) ?? [];
+    const last = all.at(-1);
+    const current = d && last && last.decision === d.decision && (last.ref ?? null) === orNull(d.ref) && (last.repeat ?? null) === orNull(d.repeat);
+    return current ? { history: all.slice(0, -1), decidedAt: last.at } : { history: all, decidedAt: null };
+  };
+  const duplicates = new Map();
+  for (const [id, d] of run.decisions) if (d.decision === "duplicate") (duplicates.get(d.ref) ?? duplicates.set(d.ref, []).get(d.ref)).push(id);
+
+  const findings = [...run.findings.values()].map((f) => {
+    const d = run.decisions.get(f.id);
+    const s = status(f.id);
+    const e = effectiveOf(run, f.id, status);
+    const kind = d ? refKind(run, d.ref) : null;
+    const j = kind === "journal" ? journalRow(run, d.ref) : null;
+    // The bulk of a big run's run.json: a key whose value is null, false or empty is left out.
+    return compact({
+      id: f.id,
+      local: f.local,
+      launch: f.launch,
+      stage: f.stage,
+      pass: parseStage(f.stage)?.pass ?? null,
+      own: f.own,
+      parsed: f.parsed,
+      category: f.category ?? null,
+      severity: f.severity ?? null,
+      confidence: f.confidence ?? null,
+      cause: f.cause ?? null,
+      location: f.location ?? null,
+      rule: f.rule ?? null,
+      action: f.action ?? null,
+      // A strict line is whole in its fields; a loose one keeps its words.
+      raw: f.parsed === "loose" ? f.raw : null,
+      evidence: f.evidence ?? null,
+      decision: d?.decision ?? null,
+      ref: d ? orNull(d.ref) : null,
+      refKind: kind,
+      refJournal: j ? { n: j.n, question: j.question, decision: j.decision, why: j.why } : null,
+      repeat: d ? orNull(d.repeat) : null,
+      why: d ? orNull(d.why) : null,
+      ...versions(f.id, d),
+      journal: run.journal.filter((r) => refsOf(r).includes(f.id)).map((r) => r.n),
+      status: s.status,
+      effectiveStatus: e.status,
+      closedBy: s.closedBy ?? null,
+      unit: s.unit ?? null,
+      commits: run.commits?.filter((c) => c.closes.includes(f.id)).map((c) => c.sha) ?? [],
+      verdict: s.verdict ? { launch: s.verdict.launch, result: s.verdict.result, evidence: s.verdict.evidence } : null,
+      checkedBy: s.checkedBy ?? null,
+      duplicateOf: d?.decision === "duplicate" ? d.ref : null,
+      duplicates: duplicates.get(f.id) ?? [],
+      repeatedBy: run.repeaters.get(f.id) ?? null,
+      supersededBy: e.id !== f.id ? e.id : null,
+      human: humanFor("finding", f.id),
+    });
+  });
+
+  const stages = stagesOf(run);
+  // A run is closed by its last stage: finish, or init for /fsloop init.
+  const closed = isGreen(run, "finish") || isGreen(run, "init");
+  const startedAt = run.common.started ?? run.launches.map((l) => l.startedAt).filter(Boolean).sort()[0] ?? null;
   return {
-    version: 1,
+    version: VERSION,
+    generator: generator(),
     id: run.id,
+    legacy: false,
+    mirror: run.mirror,
     goal: run.common.goal,
     mode: run.common.mode,
     N: run.common.N,
     K: run.common.K,
     start: run.common.start,
     worktree: run.common.worktree,
+    sessions: run.common.sessions,
+    startedAt,
+    updatedAt: run.updatedAt,
+    now: nowOf(run, stages, closed),
+    outcome: outcomeOf(run, findings, closed),
     stages,
-    // A run is closed by its last stage: finish, or init for /fsloop init.
-    closed: isGreen(run, "finish") || isGreen(run, "init"),
+    closed,
     passes: run.passes,
     units: run.units.map(({ sections, ...u }) => u),
-    launches: run.launches.map(({ reportMissing, ...l }) => l),
-    findings: [...run.findings.values()].map((f) => {
-      const d = run.decisions.get(f.id);
-      return {
-        ...f,
-        decision: d?.decision ?? null,
-        ref: d?.ref ?? null,
-        repeat: d?.repeat && !NONE.test(d.repeat) ? d.repeat : null,
-        why: d?.why ?? null,
-        ...statusOf(run, f, d),
-      };
-    }),
-    surfaces: run.surfaces,
+    commits: run.commits,
+    launches: run.launches.map(({ reportMissing, ...l }) => ({ ...l, reportMissing, human: humanFor("launch", l.id) })),
+    running: run.running,
+    orchestrator: run.orchestrator,
+    findings,
+    verdicts: run.verdicts,
     judges: run.judges.map((q) => {
       const answer = run.judged.filter((j) => j.id === q.id).at(-1);
       const journal = run.journal.find((r) => refsOf(r).includes(q.id));
-      return { ...q, answer: answer ?? null, journal: journal?.n ?? null };
+      return { ...q, answer: answer ? { launch: answer.launch, stage: answer.stage, text: answer.text, result: answer.result, finding: answer.finding } : null, journal: journal?.n ?? null };
     }),
+    surfaces: run.surfaces,
     audits: run.audits,
-    journal: run.journal,
+    shots: run.shots,
+    logs: run.logs,
+    journal: run.journal.map((r) => ({ ...r, refs: refsOf(r).map((id) => ({ id, kind: refKind(run, id) })), human: humanFor("journal", r.n) })),
   };
 }
 
-const writeRunJson = (runDir) => writeFileSync(join(runDir, "run.json"), JSON.stringify(build(collect(runDir)), null, 2) + "\n");
+/** The run list's row: what a UI shows before it opens run.json. */
+export function summarize(json) {
+  const count = (xs, key) => xs.reduce((m, x) => ((m[x[key] ?? "none"] = (m[x[key] ?? "none"] ?? 0) + 1), m), {});
+  const spend = emptySpend();
+  for (const l of json.launches ?? []) for (const k of Object.keys(spend)) spend[k] += l.spend[k] + (l.spend.children?.[k] ?? 0);
+  if (json.legacy) return json;
+  return {
+    version: json.version,
+    generator: json.generator,
+    id: json.id,
+    legacy: false,
+    mirror: json.mirror,
+    goal: json.goal,
+    mode: json.mode,
+    N: json.N,
+    start: json.start,
+    startedAt: json.startedAt,
+    updatedAt: json.updatedAt,
+    closed: json.closed,
+    now: json.now,
+    outcome: json.outcome,
+    counts: {
+      launches: json.launches.length,
+      running: json.running.length,
+      units: count(json.units, "state"),
+      commits: json.commits?.length ?? null,
+      findings: { total: json.findings.length, status: count(json.findings, "status"), effectiveStatus: count(json.findings, "effectiveStatus"), severity: count(json.findings, "severity") },
+    },
+    spend: { launches: spend, orchestrator: json.orchestrator.spend },
+  };
+}
+
+/** A folder of an older version holds a report and little else: listed, never parsed as a run. */
+function legacyJson(runDir) {
+  const report = existsSync(join(runDir, "report.md"));
+  let updated = null;
+  try {
+    updated = statSync(join(runDir, report ? "report.md" : ".")).mtimeMs;
+  } catch {}
+  return { version: VERSION, generator: generator(), id: basename(runDir), legacy: true, report: report ? "report.md" : null, updatedAt: isoOf(updated) };
+}
+
+/** Each change of a finding's row since the last one recorded — a findings file is edited in place. */
+function recordDecisions(run, at) {
+  const last = new Map();
+  for (const e of run.decisionLog) last.set(e.finding, e);
+  const changes = [];
+  for (const [finding, row] of run.decisions) {
+    const prev = last.get(finding);
+    const next = { to: row.decision || null, ref: orNull(row.ref), repeat: orNull(row.repeat) };
+    if (prev && prev.to === next.to && prev.ref === next.ref && prev.repeat === next.repeat) continue;
+    changes.push({ finding, stage: row.stage, from: prev?.to ?? null, ...next, why: orNull(row.why), at });
+  }
+  for (const [finding, prev] of last)
+    if (!run.decisions.has(finding) && prev.to !== null) changes.push({ finding, stage: prev.stage, from: prev.to, to: null, ref: null, repeat: null, why: null, at });
+  if (changes.length) appendFileSync(join(run.runDir, "decisions.jsonl"), changes.map((c) => JSON.stringify(c)).join("\n") + "\n");
+  run.decisionLog.push(...changes);
+}
+
+/** Written whole or not at all: a UI reading mid-write never sees half a file. */
+function writeAtomic(path, text) {
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, text);
+  for (let i = 0; ; i++)
+    try {
+      renameSync(tmp, path);
+      return;
+    } catch (e) {
+      // Windows refuses the rename while a reader holds the file open; it lets go within moments.
+      if (i >= 20 || !["EPERM", "EBUSY", "EACCES"].includes(e.code)) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    }
+}
+
+/** run.json and summary.json, after decisions.jsonl took the rows' changes. */
+export function writeRunJson(runDir, { at = new Date().toISOString(), ...opts } = {}) {
+  if (isLegacy(runDir)) {
+    const json = legacyJson(runDir);
+    writeAtomic(join(runDir, "run.json"), JSON.stringify(json) + "\n");
+    writeAtomic(join(runDir, "summary.json"), JSON.stringify(json) + "\n");
+    return json;
+  }
+  const run = collect(runDir, opts);
+  recordDecisions(run, at);
+  const json = build(run);
+  writeAtomic(join(runDir, "run.json"), JSON.stringify(json) + "\n");
+  writeAtomic(join(runDir, "summary.json"), JSON.stringify(summarize(json)) + "\n");
+  return json;
+}
 
 // ── report ────────────────────────────────────────────────────────────────────────────────────
 
@@ -857,12 +1532,16 @@ const mdTable = (header, rows) =>
     ? [`| ${header.join(" | ")} |`, `|${header.map(() => "---").join("|")}|`, ...rows.map((r) => `| ${r.map(escapeCell).join(" | ")} |`)].join("\n")
     : "—";
 
+/** `fixed (not-reraised)`, `repeated → closed (<the finding that carried it>)`. */
+const fate = (f) =>
+  [f.status === "fixed" && f.closedBy ? `fixed (${f.closedBy})` : f.status, f.supersededBy ? `→ ${f.effectiveStatus} (${f.supersededBy})` : ""].filter(Boolean).join(" ");
+
 /** The report's tables that the run folder already holds, written between markers in report.md. */
 export function reportTables(json) {
   const sections = [
     ["Decisions", mdTable(["#", "stage", "question", "decision", "why"], json.journal.map((r) => [r.n, r.stage, r.question, r.decision, r.why]))],
     ["Units", mdTable(["unit", "pass", "title", "kind", "state", "sha", "closes"], json.units.map((u) => [u.id, u.pass, u.title, u.kind, u.state === "blocked" ? `blocked: ${u.blockedWhy}` : u.state, u.sha ?? "—", u.closes.join(" ") || "—"]))],
-    ["Findings", mdTable(["finding", "severity", "rule", "decision", "unit", "status"], json.findings.map((f) => [f.id, f.severity ?? "—", f.rule ?? f.raw, f.decision ?? "—", f.unit ?? "—", f.status]))],
+    ["Findings", mdTable(["finding", "severity", "rule", "decision", "unit", "status"], json.findings.map((f) => [f.id, f.severity ?? "—", f.rule ?? f.raw ?? f.why, f.decision ?? "—", f.unit ?? "—", fate(f)]))],
     ["To judge", mdTable(["question", "asked", "answer"], json.judges.map((q) => [q.id, q.text, q.answer ? q.answer.text : q.journal ? `open — journal #${q.journal}` : "—"]))],
     ["Candidates", mdTable(["finding", "why"], json.findings.filter((f) => f.decision === "candidate").map((f) => [f.id, f.why]))],
   ];
@@ -885,6 +1564,8 @@ export function writeReport(runDir) {
 // ── save ──────────────────────────────────────────────────────────────────────────────────────
 
 const escapeCell = (s) => String(s ?? "—").replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+
+export const LAUNCH_COLUMNS = ["launch", "stage", "agent", "description", "model", "started", "ended", "seconds", "input", "output", "cache write", "cache read", "children", "children input", "children output", "children cache write", "children cache read", "agent id", "transcript", "report"];
 
 export function save(runDir, stage, ref, descriptionGiven) {
   if (!parseStage(stage)) throw new Error(`unknown stage "${stage}"`);
@@ -920,14 +1601,38 @@ export function save(runDir, stage, ref, descriptionGiven) {
     id = `${base}-${k}`;
   }
   const report = `reports/${id}.md`;
-  if (!existsSync(launchesPath))
-    writeFileSync(
-      launchesPath,
-      "| launch | stage | agent | description | model | seconds | input | output | cache write | cache read | transcript | report |\n|---|---|---|---|---|---|---|---|---|---|---|---|\n",
-    );
-  const { input, output, cacheWrite, cacheRead } = t.spend;
-  const row = [id, stage, t.agent ?? "—", description, t.model ?? "—", t.seconds ?? "—", input, output, cacheWrite, cacheRead, transcript, report].map(escapeCell);
-  appendFileSync(launchesPath, `| ${row.join(" | ")} |\n`);
+  try {
+    // Exclusive create: a second save racing the first never writes the header twice.
+    writeFileSync(launchesPath, `| ${LAUNCH_COLUMNS.join(" | ")} |\n|${LAUNCH_COLUMNS.map(() => "---").join("|")}|\n`, { flag: "wx" });
+  } catch (e) {
+    if (e.code !== "EEXIST") throw e;
+  }
+  const c = childSpend(transcript);
+  const values = {
+    launch: id,
+    stage,
+    agent: t.agent,
+    description,
+    model: t.model,
+    started: t.startedAt,
+    ended: t.endedAt,
+    seconds: t.seconds,
+    input: t.spend.input,
+    output: t.spend.output,
+    "cache write": t.spend.cacheWrite,
+    "cache read": t.spend.cacheRead,
+    children: c.launches,
+    "children input": c.input,
+    "children output": c.output,
+    "children cache write": c.cacheWrite,
+    "children cache read": c.cacheRead,
+    "agent id": t.agentId,
+    transcript,
+    report,
+  };
+  // A folder an older fsl.mjs started keeps its header: the row follows it, the columns it lacks left out.
+  const columns = tableHeader(read(launchesPath)) ?? LAUNCH_COLUMNS;
+  appendFileSync(launchesPath, `| ${columns.map((k) => escapeCell(values[k])).join(" | ")} |\n`);
   return { id, report, existed: false };
 }
 
@@ -938,7 +1643,7 @@ const USAGE = `usage:
                      file a launch's final block; by description on Resume; the last argument names a launch with no meta file
   node fsl.mjs gate   <run folder> <stage>   is the stage done? exit 1 when not
   node fsl.mjs report <run folder>           write the run folder's tables into report.md
-  node fsl.mjs build  <run folder>           write run.json
+  node fsl.mjs build  <run folder>           write run.json and summary.json
 stage: p<n>-{${STEPS.join("|")}} | integrate | finish | init`;
 
 function main(argv) {
@@ -986,7 +1691,7 @@ function main(argv) {
   }
   if (command === "build") {
     writeRunJson(runDir);
-    console.log(`run.json → ${join(runDir, "run.json")}`);
+    console.log(`run.json, summary.json → ${runDir}`);
     return 0;
   }
   console.error(USAGE);

@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { build, collect, gate, parseBlock, parseBrief, parseFinding, parseTable, save, writeReport } from "./fsl.mjs";
+import { build, collect, gate, parseBlock, parseBrief, parseDeploy, parseFinding, parseTable, save, writeReport, writeRunJson } from "./fsl.mjs";
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "fsl.mjs");
 
@@ -112,8 +112,14 @@ describe("parsers", () => {
     assert.equal(f.action, "merge the two loaders");
   });
 
-  test("a loose finding line still yields its id and severity", () => {
-    assert.deepEqual(parseFinding("craft-3 minor the header wraps"), { id: "craft-3", severity: "minor", raw: "craft-3 minor the header wraps" });
+  test("a loose finding line still yields its id and severity, marked loose", () => {
+    assert.deepEqual(parseFinding("craft-3 minor the header wraps"), { id: "craft-3", parsed: "loose", severity: "minor", raw: "craft-3 minor the header wraps" });
+  });
+
+  test("a finding line bent by markdown or ASCII dashes keeps every field, marked loose", () => {
+    const f = parseFinding("**code-2** [spec] Major high local a.ts:3 - u1 criterion 2 - add the guard");
+    assert.deepEqual({ ...f, raw: undefined }, { id: "code-2", parsed: "loose", category: "spec", severity: "major", confidence: "high", cause: "local", location: "a.ts:3", rule: "u1 criterion 2", action: "add the guard", raw: undefined });
+    assert.equal(parseFinding("code-1 [spec] major high local a.ts:1 — c — x").parsed, "strict");
   });
 
   test("severity is the finding's own, never a word of its rule", () => {
@@ -157,7 +163,8 @@ describe("save", () => {
     save(run, "p1-review", "sp1");
     const launch = build(collect(run)).launches[0];
     assert.equal(launch.seconds, 90);
-    assert.deepEqual(launch.spend, { input: 12, output: 340, cacheWrite: 1200, cacheRead: 1000 });
+    assert.deepEqual(launch.spend, { input: 12, output: 340, cacheWrite: 1200, cacheRead: 1000, children: { launches: 0, input: 0, output: 0, cacheWrite: 0, cacheRead: 0 } });
+    assert.deepEqual([launch.agentId, launch.startedAt, launch.endedAt, launch.transcriptGone], ["sp1", "2026-10-18T10:00:00.000Z", "2026-10-18T10:01:30.000Z", false]);
   });
 
   test("a second launch with the same description gets a numbered id", () => {
@@ -348,7 +355,7 @@ describe("passes", () => {
     assert.ok(problems.includes("findings/p1-assess.md p1-assess-critic-code#code-1: p2 is past N=1 — open, not fix"));
   });
 
-  test("a fix the next assessment repeats is open; one it does not repeat is closed", () => {
+  test("a fix the next assessment repeats is repeated, its fate the repeat's; one it does not repeat is fixed, not re-raised", () => {
     common({ N: 2 });
     transcript("rv", { agent: "fsloop-critic", description: "critic code", final: critic("code", ["code-1 [spec] major high local a.ts:1 — c — x", "code-2 [spec] major high local b.ts:1 — c — y"]) });
     save(run, "p1-review", "rv");
@@ -361,10 +368,11 @@ describe("passes", () => {
     put(join(run, "passes.md"), table(["pass", "critical+major", "outcome", "why"], [["p1", "1", "next", "1 > 0"]]));
     green("p1-fix", "p1-assess");
     const findings = build(collect(run)).findings;
-    const status = (id) => findings.find((f) => f.id === id).status;
-    assert.equal(status("p1-review-critic-code#code-1"), "open");
-    assert.equal(status("p1-review-critic-code#code-2"), "closed");
-    assert.equal(status("p1-assess-critic-code#code-1"), "queued");
+    const of = (id) => findings.find((f) => f.id === id);
+    const [first, second, again] = [of("p1-review-critic-code#code-1"), of("p1-review-critic-code#code-2"), of("p1-assess-critic-code#code-1")];
+    assert.deepEqual([first.status, first.repeatedBy, first.effectiveStatus, first.supersededBy], ["repeated", "p1-assess-critic-code#code-1", "queued", "p1-assess-critic-code#code-1"]);
+    assert.deepEqual([second.status, second.closedBy, second.checkedBy], ["fixed", "not-reraised", "p1-assess"]);
+    assert.deepEqual([again.status, again.repeat], ["queued", "p1-review-critic-code#code-1"]);
   });
 });
 
@@ -428,14 +436,17 @@ describe("a whole run", () => {
     pass("finish");
 
     const json = build(collect(run));
-    const fate = Object.fromEntries(json.findings.map((f) => [f.id, f.status]));
+    const fate = Object.fromEntries(json.findings.map((f) => [f.id, [f.status, f.closedBy ?? null, f.effectiveStatus]]));
     assert.deepEqual(fate, {
-      "p1-map-craft-cabinets#craft-1": "fixed",
-      "p1-map-craft-cabinets#craft-2": "candidate",
-      "p1-review-critic-code#code-1": "closed",
-      "p1-review-critic-code#code-2": "duplicate",
+      // Review read the surface u1 built and raised it no more: fixed, though no verdict scored it.
+      "p1-map-craft-cabinets#craft-1": ["fixed", "not-reraised", "fixed"],
+      "p1-map-craft-cabinets#craft-2": ["candidate", null, "candidate"],
+      "p1-review-critic-code#code-1": ["closed", "verdict", "closed"],
+      "p1-review-critic-code#code-2": ["duplicate", null, "closed"],
     });
+    assert.deepEqual(json.findings.find((f) => f.local === "code-1").duplicates, ["p1-review-critic-code#code-2"]);
     assert.deepEqual(json.stages.map((s) => s.stage), ["p1-map", "p1-spike", "p1-decompose", "p1-units", "p1-review", "p1-fix", "p1-verdict", "integrate", "finish"]);
+    assert.deepEqual([json.closed, json.now.stage, json.outcome.pushed, json.outcome.goalMet], [true, null, true, true]);
   });
 });
 
@@ -448,21 +459,28 @@ describe("integrate and finish", () => {
     put(join(run, "units.md"), table(["unit", "pass", "state", "tree", "title"], [["f1", "p1", "blocked: no Docker", "—", "fix"]]));
     put(join(run, "units", "f1", "brief.md"), brief({ closes: "p1-review-critic-code#code-1" }));
     green("p1-verdict");
-    assert.deepEqual(gate(collect(run), "integrate"), ["p1-review-critic-code#code-1: major, open — it holds the push"]);
+    assert.deepEqual(gate(collect(run), "integrate"), ["p1-review-critic-code#code-1: major, blocked — it holds the push"]);
     const integrateGate = (problems) => put(join(run, "gates.jsonl"), readOr(join(run, "gates.jsonl")) + JSON.stringify({ stage: "integrate", green: false, at: "t", problems }) + "\n");
     put(join(run, "report.md"), "# ab12cd34\n");
     writeReport(run);
-    integrateGate(["p1-verdict is not green", "p1-review-critic-code#code-1: major, open — it holds the push"]);
+    integrateGate(["p1-verdict is not green", "p1-review-critic-code#code-1: major, blocked — it holds the push"]);
     assert.deepEqual(gate(collect(run), "finish"), ["integrate is red for more than held findings — settle the rest, gate it again"]);
-    integrateGate(["p1-review-critic-code#code-1: major, open — it holds the push"]);
+    integrateGate(["p1-review-critic-code#code-1: major, blocked — it holds the push"]);
     assert.deepEqual(gate(collect(run), "finish"), []);
+    assert.deepEqual(build(collect(run)).outcome, { pushed: false, pushLine: null, held: ["p1-review-critic-code#code-1"], deploy: null, goalMet: null });
   });
 
-  test("a red check the run could not fix is its own finding, and it holds the push", () => {
+  test("a red check the run could not fix is its own finding, with its evidence, and it holds the push", () => {
     common();
     green("p1-verdict");
-    put(join(run, "findings", "integrate.md"), table(["finding", "decision", "ref", "repeat", "severity", "why"], [["integrate-own#1", "open", "—", "—", "major", "suite: lib/a.test.ts red after fix and debug"]]));
+    put(join(run, "findings", "integrate.md"), table(["finding", "decision", "ref", "repeat", "severity", "evidence", "why"], [["integrate-own#1", "open", "—", "—", "major", "—", "suite: lib/a.test.ts red after fix and debug"]]));
+    assert.deepEqual(gate(collect(run), "integrate"), [
+      "findings/integrate.md integrate-own#1: the run's own finding needs an evidence column — the log line that shows it, logs/<log>.lines:<n>",
+      "integrate-own#1: major, open — it holds the push",
+    ]);
+    put(join(run, "findings", "integrate.md"), table(["finding", "decision", "ref", "repeat", "severity", "evidence", "why"], [["integrate-own#1", "open", "—", "—", "major", "logs/integrate-checks.log.lines:3", "suite: lib/a.test.ts red after fix and debug"]]));
     assert.deepEqual(gate(collect(run), "integrate"), ["integrate-own#1: major, open — it holds the push"]);
+    assert.equal(build(collect(run)).findings[0].evidence, "logs/integrate-checks.log.lines:3");
   });
 
   test("a red check Integrate can still fix is no finding", () => {
@@ -509,23 +527,53 @@ describe("integrate and finish", () => {
     );
   });
 
-  test("the merge's critic runs again after a fix: only its last report holds the push", () => {
+  test("the merge's critic runs again after a fix: a finding is fixed only once an integrate fix ran, and only the last report speaks", () => {
     common();
     green("p1-verdict");
     transcript("ic1", { agent: "fsloop-critic", description: "critic craft verdict", final: critic("craft verdict", ["craft-1 [craft] major high local app/a.tsx:1 — ux 2 — /impeccable layout"]) });
     save(run, "integrate", "ic1");
     put(join(run, "findings", "integrate.md"), table(["finding", "decision", "ref", "repeat", "why"], [["integrate-critic-craft-verdict#craft-1", "fix", "—", "—", "ux 2, the merge clipped the header"]]));
     assert.deepEqual(gate(collect(run), "integrate"), ["integrate-critic-craft-verdict#craft-1: major, queued — settle it before the push"]);
+    // A second critic with no fix between them proves nothing: the finding still waits for its fix.
     transcript("ic2", { agent: "fsloop-critic", description: "critic craft verdict", final: critic("craft verdict", []) });
     save(run, "integrate", "ic2");
+    assert.deepEqual(gate(collect(run), "integrate"), ["integrate-critic-craft-verdict#craft-1: major, queued — settle it before the push"]);
+    transcript("if1", { agent: "fsloop-implement", description: "integrate fix", final: "RESULT: done" });
+    save(run, "integrate", "if1");
+    assert.deepEqual(gate(collect(run), "integrate"), ["integrate-critic-craft-verdict#craft-1: major, fixed — settle it before the push"]);
+    transcript("ic3", { agent: "fsloop-critic", description: "critic craft verdict", final: critic("craft verdict", []) });
+    save(run, "integrate", "ic3");
     const r = collect(run);
     assert.deepEqual(gate(r, "integrate"), []);
-    assert.equal(build(r).findings[0].status, "closed");
+    const f = build(r).findings[0];
+    assert.deepEqual([f.status, f.closedBy, f.checkedBy], ["fixed", "integrate-recheck", "integrate-critic-craft-verdict-3"]);
+  });
+
+  test("a merge finding the re-run critic raises again is repeated: the push waits on the repeat", () => {
+    common();
+    green("p1-verdict");
+    transcript("rc1", { agent: "fsloop-critic", description: "critic craft verdict", final: critic("craft verdict", ["craft-1 [craft] major high local app/a.tsx:1 — ux 2 — clip"]) });
+    save(run, "integrate", "rc1");
+    transcript("rf1", { agent: "fsloop-implement", description: "integrate fix", final: "RESULT: done" });
+    save(run, "integrate", "rf1");
+    transcript("rc2", { agent: "fsloop-critic", description: "critic craft verdict", final: critic("craft verdict", ["craft-4 [craft] major high local app/a.tsx:1 — ux 2 — still clipped"]) });
+    save(run, "integrate", "rc2");
+    put(
+      join(run, "findings", "integrate.md"),
+      table(["finding", "decision", "ref", "repeat", "why"], [
+        ["integrate-critic-craft-verdict#craft-1", "fix", "—", "—", "ux 2"],
+        ["integrate-critic-craft-verdict-2#craft-4", "open", "—", "integrate-critic-craft-verdict#craft-1", "ux 2, the second critic's major is open"],
+      ]),
+    );
+    const r = collect(run);
+    assert.deepEqual(gate(r, "integrate"), ["integrate-critic-craft-verdict-2#craft-4: major, open — it holds the push"]);
+    const first = build(r).findings[0];
+    assert.deepEqual([first.status, first.effectiveStatus, first.repeatedBy], ["repeated", "open", "integrate-critic-craft-verdict-2#craft-4"]);
   });
 
   test("the run's own finding needs a severity and counts toward the pass rule", () => {
     common({ N: 2 });
-    put(join(run, "findings", "p1-assess.md"), table(["finding", "decision", "ref", "repeat", "severity", "why"], [["p1-assess-own#1", "fix", "p2", "—", "major", "suite: lib/a.test.ts red"], ["p1-assess-own#2", "candidate", "—", "—", "—", "e2e slow"]]));
+    put(join(run, "findings", "p1-assess.md"), table(["finding", "decision", "ref", "repeat", "severity", "evidence", "why"], [["p1-assess-own#1", "fix", "p2", "—", "major", "logs/p1-assess-suite.log.lines:2", "suite: lib/a.test.ts red"], ["p1-assess-own#2", "candidate", "—", "—", "—", "logs/p1-e2e.log.lines:4", "e2e slow"]]));
     put(join(run, "passes.md"), table(["pass", "critical+major", "outcome", "why"], [["p1", "1", "next", "the suite is red"]]));
     green("p1-fix");
     assert.deepEqual(gate(collect(run), "p1-assess"), ["findings/p1-assess.md p1-assess-own#2: the run's own finding needs a severity column — critical, major or minor"]);
@@ -659,5 +707,261 @@ describe("cli", () => {
     const r = spawnSync(process.execPath, [SCRIPT, "gate", run, "review"], { encoding: "utf8" });
     assert.equal(r.status, 1);
     assert.match(r.stdout, /unknown stage "review"/);
+  });
+
+  test("build writes run.json and summary.json whole, unindented, stamped with the shape's version and fsl.mjs's hash", () => {
+    common();
+    green("p1-map");
+    const r = spawnSync(process.execPath, [SCRIPT, "build", run], { encoding: "utf8" });
+    assert.equal(r.status, 0);
+    const text = readFileSync(join(run, "run.json"), "utf8");
+    assert.ok(!text.includes("\n "), "no indentation");
+    const json = JSON.parse(text);
+    assert.equal(json.version, 2);
+    assert.match(json.generator.fsl, /^[0-9a-f]{12}$/);
+    const summary = JSON.parse(readFileSync(join(run, "summary.json"), "utf8"));
+    assert.deepEqual([summary.id, summary.now.stage, summary.counts.findings.total], ["ab12cd34", "p1-spike", 0]);
+  });
+});
+
+describe("run.json for a UI", () => {
+  const decide = (stage, rows, header = ["finding", "decision", "ref", "repeat", "why"]) => put(join(run, "findings", `${stage}.md`), table(header, rows));
+  const journal = (rows) => put(join(run, "journal.md"), table(["#", "stage", "question", "decision", "why", "refs"], rows));
+  const commonWith = (...lines) =>
+    put(join(run, "common.md"), ["Run: ab12cd34", "Mode: worktree", "N: —", "K: 3", "Start: /repo", "Worktree: /fsl/ab12cd34", ...lines, "", "## Goal", "Show cabinet balances."].join("\n"));
+
+  test("every FINDINGS line is kept: a repeated id by position, a bent line loose, prose held until the journal names it", () => {
+    common();
+    transcript("k1", {
+      agent: "fsloop-critic",
+      description: "critic code",
+      final: critic("code", ["code-1 [spec] major high local a.ts:1 — c — x", "code-1 [spec] minor low local b.ts:2 — c — y", "**code-2** [spec] major high local c.ts:3 — c — z", "code-3 [spec] major high local d.ts:4 - c - w", "No findings of note beyond these."]),
+    });
+    save(run, "p1-review", "k1");
+    green("p1-units");
+    const ids = ["p1-review-critic-code#code-1", "p1-review-critic-code#code-1~2", "p1-review-critic-code#code-2", "p1-review-critic-code#code-3"];
+    let json = build(collect(run));
+    assert.deepEqual(json.findings.map((f) => [f.id, f.parsed, f.severity]), [[ids[0], "strict", "major"], [ids[1], "strict", "minor"], [ids[2], "loose", "major"], [ids[3], "loose", "major"]]);
+    assert.deepEqual([json.findings[0].raw, json.findings[3].rule, json.findings[3].raw], [undefined, "c", "code-3 [spec] major high local d.ts:4 - c - w"]);
+    assert.deepEqual(json.launches[0].unparsed, [{ id: "p1-review-critic-code#line-11", section: "FINDINGS", line: 11, text: "No findings of note beyond these." }]);
+    assert.equal(json.launches[0].block.FINDINGS, undefined, "finding lines live in findings[], not twice");
+    decide("p1-review", ids.map((id) => [id, "candidate", "—", "—", "minor"]));
+    assert.deepEqual(gate(collect(run), "p1-review"), ['p1-review-critic-code#line-11: "No findings of note beyond these." under FINDINGS is no finding line — a journal row refs it with what it is, or relaunch']);
+    journal([["1", "p1-review", "line 11 of critic code", "prose, no finding", "it names no rule", "p1-review-critic-code#line-11"]]);
+    assert.deepEqual(gate(collect(run), "p1-review"), []);
+    json = build(collect(run));
+    assert.deepEqual(json.journal[0].refs, [{ id: "p1-review-critic-code#line-11", kind: "line" }]);
+  });
+
+  test("a re-decided finding keeps each of its rows in decisions.jsonl; run.json shows the earlier ones as its history", () => {
+    common();
+    transcript("h1", { agent: "fsloop-critic", description: "critic code", final: critic("code", ["code-1 [spec] major high local a.ts:1 — c — x"]) });
+    save(run, "p1-review", "h1");
+    const id = "p1-review-critic-code#code-1";
+    decide("p1-review", [[id, "fix", "—", "—", "major"]]);
+    writeRunJson(run, { at: "t1" });
+    writeRunJson(run, { at: "t1b" });
+    decide("p1-review", [[id, "fix", "f1", "—", "major"]]);
+    writeRunJson(run, { at: "t2" });
+    decide("p1-review", [[id, "candidate", "—", "—", "the fix needs a file outside the manifest"]]);
+    const json = writeRunJson(run, { at: "t3" });
+    assert.deepEqual([json.findings[0].decision, json.findings[0].decidedAt], ["candidate", "t3"]);
+    assert.deepEqual(json.findings[0].history, [
+      { decision: "fix", why: "major", at: "t1" },
+      { decision: "fix", ref: "f1", why: "major", at: "t2" },
+    ]);
+    const log = readFileSync(join(run, "decisions.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    assert.deepEqual(log.map((e) => [e.finding, e.stage, e.from, e.to, e.ref, e.at]), [[id, "p1-review", null, "fix", null, "t1"], [id, "p1-review", "fix", "fix", "f1", "t2"], [id, "p1-review", "fix", "candidate", null, "t3"]]);
+  });
+
+  test("a drop or decline rests on j<n>, a finding or law:<file> <rule>; build follows the ref", () => {
+    common();
+    transcript("g1", { agent: "fsloop-critic", description: "critic code", final: critic("code", ["code-1 [spec] major high local a.ts:1 — c — x", "code-2 [spec] minor low local b.ts:1 — c — y", "code-3 [spec] minor low local c.ts:1 — c — z"]) });
+    save(run, "p1-review", "g1");
+    green("p1-units");
+    const [a, b, c] = ["code-1", "code-2", "code-3"].map((l) => `p1-review-critic-code#${l}`);
+    decide("p1-review", [[a, "dropped", "j9", "—", "settled"], [b, "declined", "the user said so", "—", "user"], [c, "dropped", "law:ui.md Precedence", "—", "the design law voids it"]]);
+    assert.deepEqual(gate(collect(run), "p1-review"), [
+      `findings/p1-review.md ${a}: ref j9 — journal.md has no row # 9`,
+      `findings/p1-review.md ${b}: ref "the user said so" is not j<n>, another finding's id or law:<file> <rule>`,
+    ]);
+    journal([["1", "p1-review", "keep the old loader?", "yes", "the user asked", a]]);
+    decide("p1-review", [[a, "dropped", "j1", "—", "settled"], [b, "declined", a, "—", "contradicts it"], [c, "dropped", "law:ui.md Precedence", "—", "the design law voids it"]]);
+    const r = collect(run);
+    assert.deepEqual(gate(r, "p1-review"), []);
+    const f = Object.fromEntries(build(r).findings.map((x) => [x.local, x]));
+    assert.deepEqual([f["code-1"].refKind, f["code-1"].refJournal, f["code-1"].journal], ["journal", { n: "1", question: "keep the old loader?", decision: "yes", why: "the user asked" }, ["1"]]);
+    assert.deepEqual([f["code-2"].refKind, f["code-3"].refKind], ["finding", "law"]);
+  });
+
+  test("a journal # cited twice is ambiguous", () => {
+    common();
+    green("p1-map");
+    journal([["1", "p1-map", "a", "b", "c", "—"], ["1", "p1-map", "d", "e", "f", "—"]]);
+    assert.ok(gate(collect(run), "p1-spike").includes("journal.md: # 1 on 2 rows — j1 must name one"));
+  });
+
+  test("units and findings carry the commits git holds now, found by trailer; units.md's sha is the fallback", () => {
+    common();
+    put(join(run, "units.md"), table(["unit", "pass", "state", "tree", "title"], [["u1", "1", "committed 1111111", "—", "page"]]));
+    put(join(run, "units", "u1", "brief.md"), brief({ closes: "p1-map-craft-cabinets#craft-1" }));
+    const record = (sha, subject, trailers) => `${sha}\x1f2026-10-18T10:00:00+00:00\x1f${subject}\x1f${subject}\n\n${trailers.join("\n")}\n\0`;
+    const calls = [];
+    const fake = (start, args) => {
+      calls.push(args);
+      if (args[0] === "rev-parse") return "x\n";
+      return [
+        record("2222222aaaa", "feat: page", ["Fsloop-Run: ab12cd34", "Fsloop-Step: u1 1/1", "Fsloop-Closes: p1-map-craft-cabinets#craft-1"]),
+        record("3333333bbbb", "merge origin/main", ["Fsloop-Run: ab12cd34", "Fsloop-Step: merge"]),
+        record("4444444cccc", "another run", ["Fsloop-Run: ab12cd345", "Fsloop-Step: u1 1/1"]),
+      ].join("\n");
+    };
+    const json = build(collect(run, { git: fake }));
+    assert.deepEqual(calls.at(-1).slice(0, 2), ["log", "fsl/ab12cd34"]);
+    assert.deepEqual(json.commits.map((c) => [c.sha, c.step, c.unit, c.closes]), [["2222222aaaa", "u1 1/1", "u1", ["p1-map-craft-cabinets#craft-1"]], ["3333333bbbb", "merge", null, []]]);
+    assert.deepEqual([json.units[0].sha, json.units[0].recordedSha, json.units[0].commits], ["2222222aaaa", "1111111", ["2222222aaaa"]]);
+    const offline = build(collect(run, { git: () => null }));
+    assert.deepEqual([offline.commits, offline.units[0].sha], [null, "1111111"]);
+  });
+
+  test("a launch keeps its whole block; verdicts are exported matched or not; a JUDGED finding is named; OPEN lines are findings", () => {
+    common();
+    transcript("o1", {
+      agent: "fsloop-implement",
+      description: "u1 implement",
+      final: "RESULT: partial\nCHANGED: a.ts\nNOTES:\n- to judge: kept the loader — one caller\nOPEN:\n- the live criterion needs a session .spike/ lacks\nVERIFY: type-check pass; lint pass; tests pass",
+    });
+    save(run, "p1-units", "o1");
+    transcript("o2", {
+      agent: "fsloop-critic",
+      description: "critic code",
+      final: critic("code", ["code-1 [spec] major high local a.ts:1 — c — x"]).replace("CANDIDATES:\n- —", "CANDIDATES:\n- extract the loader").replace("VERDICT:\n- —", "VERDICT:\n- code-9 resolved — a.ts:2\nJUDGED:\n- p1-units-u1-implement#judge-1 one caller is not a pattern — finding code-1"),
+    });
+    save(run, "p1-review", "o2");
+    let json = build(collect(run));
+    const [impl, crit] = json.launches;
+    assert.deepEqual([impl.unit, impl.block.RESULT.value, impl.block.OPEN, crit.block.CANDIDATES.items], ["u1", "partial", undefined, ["extract the loader"]]);
+    assert.deepEqual(json.findings.find((f) => f.local === "open-1").raw, "the live criterion needs a session .spike/ lacks");
+    assert.deepEqual(json.verdicts.map((v) => [v.id, v.matched]), [["code-9", null]]);
+    assert.deepEqual([json.judges[0].answer.result, json.judges[0].answer.finding], ["finding", "p1-review-critic-code#code-1"]);
+    put(join(run, "units.md"), table(["unit", "pass", "state", "tree", "title"], [["u1", "1", "blocked: no session", "—", "page"]]));
+    put(join(run, "units", "u1", "brief.md"), brief());
+    green("p1-decompose");
+    assert.deepEqual(gate(collect(run), "p1-units"), ["p1-units-u1-implement#open-1: no row in findings/p1-units.md"]);
+    decide("p1-units", [["p1-units-u1-implement#open-1", "open", "—", "—", "major", "needs what .spike/ lacks"]], ["finding", "decision", "ref", "repeat", "severity", "why"]);
+    assert.deepEqual(gate(collect(run), "p1-units"), []);
+    json = build(collect(run));
+    assert.deepEqual(json.units[0].launches, ["p1-units-u1-implement"]);
+    assert.deepEqual([json.findings.find((f) => f.local === "open-1").severity, json.findings.find((f) => f.local === "open-1").status], ["major", "open"]);
+  });
+
+  test("the user's verdicts in human.jsonl join their finding, launch or journal row", () => {
+    common();
+    transcript("u1", { agent: "fsloop-critic", description: "critic code", final: critic("code", ["code-1 [spec] major high local a.ts:1 — c — x"]) });
+    save(run, "p1-review", "u1");
+    journal([["1", "p1-review", "q", "d", "w", "—"]]);
+    put(
+      join(run, "human.jsonl"),
+      [
+        { finding: "p1-review-critic-code#code-1", verdict: "false-positive", note: "a.ts:1 is generated", at: "t1" },
+        { launch: "p1-review-critic-code", verdict: "agree", at: "t2" },
+        { journal: "j1", verdict: "disagree", note: "should have asked", at: "t3" },
+        { finding: "p1-review-critic-code#code-1", verdict: "maybe", at: "t4" },
+      ].map((l) => JSON.stringify(l)).join("\n") + "\n",
+    );
+    const json = build(collect(run));
+    assert.deepEqual(json.findings[0].human, [{ verdict: "false-positive", note: "a.ts:1 is generated", at: "t1" }]);
+    assert.deepEqual(json.launches[0].human, [{ verdict: "agree", note: null, at: "t2" }]);
+    assert.deepEqual(json.journal[0].human, [{ verdict: "disagree", note: "should have asked", at: "t3" }]);
+  });
+
+  test("the orchestrator's session shows where the run is: its launches in flight, its spend, and its sub-agents' spend under their launch", () => {
+    commonWith("Started: 2026-10-18T09:59:00.000Z", "Session: session-0", "Session: session-1");
+    const prompt = "Repo: /x\nCommon: /repo/.claude/fsloop/runs/ab12cd34/common.md";
+    transcript("done", { agent: "fsloop-critic", description: "craft cabinets", final: "LENS: craft assess", prompt });
+    // critique A, and the sub-agent it started: both the craft launch's spend.
+    const dir = join(projects, "C--repo", "session-1", "subagents");
+    const usage = (id, n) => JSON.stringify({ type: "assistant", timestamp: "2026-10-18T10:00:30.000Z", message: { id, model: "m", content: [{ type: "text", text: "ok" }], usage: { input_tokens: n, output_tokens: n, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } });
+    put(join(dir, "agent-kid.jsonl"), usage("k1", 7) + "\n");
+    put(join(dir, "agent-kid.meta.json"), JSON.stringify({ agentType: "general-purpose", description: "critique A", parentAgentId: "done", spawnDepth: 2 }));
+    put(join(dir, "agent-grandkid.jsonl"), usage("k2", 3) + "\n");
+    put(join(dir, "agent-grandkid.meta.json"), JSON.stringify({ agentType: "general-purpose", description: "probe", parentAgentId: "kid", spawnDepth: 3 }));
+    save(run, "p1-map", "done");
+    transcript("live", { agent: "Explore", description: "map", final: "| area |", prompt });
+    transcript("elsewhere", { agent: "Explore", description: "map", final: "| area |", prompt: "Repo: /x\nCommon: /repo/.claude/fsloop/runs/99999999/common.md" });
+    put(join(projects, "C--repo", "session-1.jsonl"), [usage("o1", 100), usage("o1", 120), usage("o2", 5)].join("\n") + "\n");
+    const json = build(collect(run));
+    assert.deepEqual(json.launches[0].spend.children, { launches: 2, input: 10, output: 10, cacheWrite: 0, cacheRead: 0 });
+    assert.deepEqual(json.running.map((l) => [l.agentId, l.description, l.startedAt]), [["live", "map", "2026-10-18T10:00:00.000Z"]]);
+    assert.deepEqual(json.orchestrator.spend, { input: 125, output: 125, cacheWrite: 0, cacheRead: 0 });
+    assert.deepEqual(json.orchestrator.sessions.map((s) => [s.id, s.transcriptGone]), [["session-0", true], ["session-1", false]]);
+    assert.deepEqual([json.sessions, json.startedAt], [["session-0", "session-1"], "2026-10-18T09:59:00.000Z"]);
+    assert.deepEqual(json.now, { stage: "p1-map", since: "2026-10-18T09:59:00.000Z", waitingOn: { running: 1, units: [], lastRedGate: null } });
+    assert.deepEqual(json.surfaces, {});
+  });
+
+  test("a launch whose transcript is gone keeps its report; a launches.md an older fsl.mjs began keeps its columns", () => {
+    common();
+    put(join(run, "launches.md"), table(["launch", "stage", "agent", "description", "model", "seconds", "input", "output", "cache write", "cache read", "transcript", "report"], [["p1-map-map", "p1-map", "Explore", "map", "m", "3", "1", "1", "0", "0", "/gone/agent-old.jsonl", "reports/p1-map-map.md"]]));
+    put(join(run, "reports", "p1-map-map.md"), "RESULT: done\n");
+    transcript("n1", { agent: "fsloop-critic", description: "craft cabinets", final: "LENS: craft assess" });
+    save(run, "p1-map", "n1");
+    const json = build(collect(run));
+    assert.deepEqual(json.launches.map((l) => [l.id, l.agentId, l.transcriptGone, l.spend.children]), [["p1-map-map", "old", true, null], ["p1-map-craft-cabinets", "n1", false, null]]);
+    assert.equal(json.launches[0].block.RESULT.value, "done");
+    assert.equal(json.launches[1].report, "reports/p1-map-craft-cabinets.md");
+  });
+
+  test("stages keep the run's order and every attempt, whatever order they were gated in", () => {
+    common();
+    green("p1-map", "p1-spike", "p1-decompose");
+    put(join(run, "gates.jsonl"), readOr(join(run, "gates.jsonl")) + JSON.stringify({ stage: "p1-map", green: false, at: "t4", problems: ["x"] }) + "\n");
+    green("p1-map");
+    const stages = build(collect(run)).stages;
+    assert.deepEqual(stages.map((s) => [s.stage, s.attempts.length, s.green]), [["p1-map", 3, true], ["p1-spike", 1, true], ["p1-decompose", 1, true]]);
+    assert.deepEqual(stages[0].attempts.map((a) => a.green), [true, false, true]);
+  });
+
+  test("the outcome says pushed, held and the deploy's verdict, prod-check's VERDICT read with or without its colon", () => {
+    assert.deepEqual(parseDeploy("VERDICT degraded — worker restarts\nSHA abc1234 DEPLOYED 10:02\n| # | check |\nANOMALIES\n- cron x missing\n"), { verdict: "degraded", line: "worker restarts", sha: "abc1234", deployedAt: "10:02", anomalies: ["cron x missing"] });
+    common();
+    green("p1-verdict", "integrate");
+    put(join(run, "logs", "push.log.lines"), "1 push — exit 0 — main -> main\n");
+    transcript("pc", { agent: "prod-check", description: "prod check", final: "VERDICT: failed — the web service is down\nSHA: abc1234 · DEPLOYED: 10:02\nANOMALIES: none" });
+    save(run, "finish", "pc");
+    green("finish");
+    const { outcome } = build(collect(run));
+    assert.deepEqual(outcome, { pushed: true, pushLine: "1 push — exit 0 — main -> main", held: [], deploy: { verdict: "failed", line: "the web service is down", sha: "abc1234", deployedAt: "10:02", anomalies: [], launch: "finish-prod-check" }, goalMet: false });
+  });
+
+  test("evidence: each unit's and each log's COMMANDS lines, every frame, the review critic's scores by surface", () => {
+    common();
+    put(join(run, "units.md"), table(["unit", "pass", "state", "tree", "title"], [["u1", "1", "verify", "—", "page"]]));
+    put(join(run, "units", "u1", "verify.log.lines"), "1 type-check — exit 0 — Found 0 errors\n2 unit tests — exit 1 — 1 fail\n");
+    put(join(run, "logs", "integrate-checks.log.lines"), "1 build — exit 0 — built\n");
+    for (const f of ["p1-baseline-cabinets.png", "p1-final-cabinets.png", "init-public.png"]) put(join(run, "shots", f), "png");
+    transcript("cr", { agent: "fsloop-critic", description: "critic craft", final: "LENS: craft\nAUDIT:\n- Cabinets (`app/cabinets/`) audit 17/20 Good · critique 30/40\n- Billing page audit 12/20 Fair · critique 20/40\nFINDINGS (ranked):\n- —" });
+    save(run, "p1-review", "cr");
+    const json = build(collect(run));
+    assert.deepEqual(json.units[0].checks, [{ file: "verify.log.lines", n: 1, label: "type-check", exit: 0, line: "Found 0 errors" }, { file: "verify.log.lines", n: 2, label: "unit tests", exit: 1, line: "1 fail" }]);
+    assert.deepEqual(json.logs, [{ file: "logs/integrate-checks.log.lines", n: 1, label: "build", exit: 0, line: "built" }]);
+    assert.deepEqual(json.shots.map((s) => [s.moment, s.pass, s.surface]), [["init", null, "public"], ["baseline", 1, "cabinets"], ["final", 1, "cabinets"]]);
+    assert.deepEqual(Object.keys(json.surfaces), ["cabinets", "billing-page"]);
+    assert.deepEqual(json.surfaces.cabinets.map((s) => [s.stage, s.audit, s.critique]), [["p1-review", 17, 30]]);
+  });
+
+  test("a legacy folder is listed by its report alone; a lane's mirror says it is one", () => {
+    const legacy = join(root, ".claude", "fsloop", "0ld0ld00");
+    put(join(legacy, "report.md"), "# old\n");
+    const r = spawnSync(process.execPath, [SCRIPT, "build", legacy], { encoding: "utf8" });
+    assert.equal(r.status, 0);
+    const json = JSON.parse(readFileSync(join(legacy, "run.json"), "utf8"));
+    assert.deepEqual([json.legacy, json.id, json.report], [true, "0ld0ld00", "report.md"]);
+    assert.ok(existsSync(join(legacy, "summary.json")));
+    const home = join(root, "repo", ".claude", "fsloop", "runs", "ab12cd34");
+    put(join(home, "common.md"), ["Run: ab12cd34", "Mode: worktree", `Start: ${join(root, "repo")}`].join("\n"));
+    assert.equal(build(collect(home)).mirror, false);
+    put(join(run, "common.md"), ["Run: ab12cd34", "Mode: worktree", `Start: ${join(root, "repo")}`].join("\n"));
+    assert.equal(build(collect(run)).mirror, true);
   });
 });
