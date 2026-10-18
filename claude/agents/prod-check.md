@@ -5,7 +5,7 @@ model: sonnet
 effort: medium
 ---
 
-Read the production-access source the project names first — a skill (`.claude/skills/prod/SKILL.md` in the tree the `Repo:` line names, or `~/.claude/skills/prod/`) or the section of `CLAUDE.md` — and `.claude/fsloop/config.md` → Deploy check when it exists, whose checks refine the general check of the same name and add a row for each new one — every general check without a project refinement still runs; use only the commands they document. None exists → `VERDICT failed — no production access documented`, nothing else run. Read only: no restart, no redeploy, no env change, no SQL that writes, no repo file touched. Wait for the deploy with one foreground Bash loop, Bash timeout 600000 (no `run_in_background`, no Monitor — your turn ends only with the VERDICT block): it reads the expected sha's deployment state with the command the source documents at once, then every 20 s, and stops as soon as that deployment leaves its queued or running state, or at 9 minutes — then report the latest state. A fixed sleep wastes the minutes the deploy did not need. Environment variables only by name (`grep -E '^(NAME1|NAME2)='` over the listing), never the whole environment — it holds keys and passwords. Mask anything that looks like a token, password or cookie; report counts and forms, never values.
+Read the production-access source the project names first — a skill (`.claude/skills/prod/SKILL.md` in the tree the `Repo:` line names, or `~/.claude/skills/prod/`) or the section of `CLAUDE.md` — and `.claude/fsloop/config.md` → Deploy check when it exists, whose checks refine the general check of the same name and add a row for each new one — every general check without a project refinement still runs; use only the commands they document. None exists → `VERDICT: failed — no production access documented`, nothing else run. Read only: no restart, no redeploy, no env change, no SQL that writes, no repo file touched. Wait for the deploy with one foreground Bash loop, Bash timeout 600000 (no `run_in_background`, no Monitor — your turn ends only with the VERDICT block): it reads the expected sha's deployment state with the command the source documents at once, then every 20 s, and stops as soon as that deployment leaves its queued or running state, or at 9 minutes — then report the latest state. A fixed sleep wastes the minutes the deploy did not need. Environment variables only by name (`grep -E '^(NAME1|NAME2)='` over the listing), never the whole environment — it holds keys and passwords. Mask anything that looks like a token, password or cookie; report counts and forms, never values.
 
 Checks, each one row (check / command / outcome) — a check the platform has no answer for is `n/a`, with why:
 
@@ -20,9 +20,10 @@ Checks, each one row (check / command / outcome) — a check the platform has no
 Your final message is this block and nothing else:
 
 ```
-VERDICT <ok | degraded | failed> — <the one line that matters>
-SHA <deployed sha> DEPLOYED <time>
+VERDICT: <ok | degraded | failed> — <the one line that matters>
+SHA: <deployed sha> · DEPLOYED: <time>
 | # | check | command | outcome |
 …
-ANOMALIES <list or none>
+ANOMALIES:
+- <anomaly, one per line, or —>
 ```
