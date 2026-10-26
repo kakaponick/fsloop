@@ -23,6 +23,7 @@ frame options:
                          | {"hover": sel} | {"wait": sel} | {"goto": url}] — a text "$ENV:NAME" reads the process environment
                          (load env files with: node --env-file=<file> shot.mjs …)
 shoot prints one JSON line: ok, finalUrl, status, overlay, consoleErrors, ms.
+serve prints one JSON line: ok, pid, url, status, ms (until the url first answered), log.
 exit: 0 frame taken · 1 frame taken but suspect (another path, HTTP ≥ 400, an error overlay) · 2 failed · 3 no puppeteer-core or Chrome · 4 usage`;
 
 const OVERLAYS = ["nextjs-portal", "vite-error-overlay", "#webpack-dev-server-client-overlay", "[data-nextjs-dialog]"];
@@ -226,7 +227,8 @@ async function serve(opts) {
   let exited = null;
   child.on("exit", (code) => (exited = code));
   child.unref();
-  const deadline = Date.now() + Number(opts.timeout ?? 180) * 1000;
+  const started = Date.now();
+  const deadline = started + Number(opts.timeout ?? 180) * 1000;
   while (Date.now() < deadline) {
     if (exited !== null) {
       console.error(`serve: the server exited ${exited} before answering — ${log}`);
@@ -235,7 +237,7 @@ async function serve(opts) {
     try {
       const r = await fetch(opts.url, { redirect: "manual" });
       if (r.status < 500) {
-        console.log(JSON.stringify({ ok: true, pid: child.pid, url: opts.url, status: r.status, log }));
+        console.log(JSON.stringify({ ok: true, pid: child.pid, url: opts.url, status: r.status, ms: Date.now() - started, log }));
         return 0;
       }
     } catch {}

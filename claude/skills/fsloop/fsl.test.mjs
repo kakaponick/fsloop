@@ -423,7 +423,7 @@ describe("a whole run", () => {
     pass("integrate");
     put(join(run, "report.md"), "# ab12cd34\n\n## Spikes\n\n—\n");
     assert.deepEqual(gate(collect(run), "finish"), [
-      "integrate is green but logs/push.log.lines shows no push that exited 0 — push first",
+      "integrate is green but logs/push.log.lines has no `push` line that exited 0 or `skipped — by instruction j<n>` — push first",
       "report.md has no tables of fsl.mjs report — run it",
     ]);
     put(join(run, "logs", "push.log.lines"), "1 push — exit 0 — main -> main\n");
@@ -467,7 +467,22 @@ describe("integrate and finish", () => {
     assert.deepEqual(gate(collect(run), "finish"), ["integrate is red for more than held findings — settle the rest, gate it again"]);
     integrateGate(["p1-review-critic-code#code-1: major, blocked — it holds the push"]);
     assert.deepEqual(gate(collect(run), "finish"), []);
-    assert.deepEqual(build(collect(run)).outcome, { pushed: false, pushLine: null, held: ["p1-review-critic-code#code-1"], deploy: null, goalMet: null });
+    assert.deepEqual(build(collect(run)).outcome, { pushed: false, pushLine: null, skippedBy: null, held: ["p1-review-critic-code#code-1"], deploy: null, goalMet: null });
+  });
+
+  test("a push the goal's words forbid closes the run on a skipped line, only with the journal row it names; a relabelled line pushes nothing", () => {
+    common();
+    green("p1-verdict", "integrate");
+    put(join(run, "report.md"), "# ab12cd34\n");
+    writeReport(run);
+    put(join(run, "logs", "push.log.lines"), "1 ff-local-master-no-push — exit 0 — master\n");
+    assert.deepEqual(gate(collect(run), "finish"), ["integrate is green but logs/push.log.lines has no `push` line that exited 0 or `skipped — by instruction j<n>` — push first"]);
+    put(join(run, "logs", "push.log.lines"), "1 push — skipped — by instruction j2\n");
+    assert.deepEqual(gate(collect(run), "finish"), ["logs/push.log.lines: push skipped by instruction j2 — journal.md has no row # 2"]);
+    put(join(run, "journal.md"), table(["#", "stage", "question", "decision", "why", "refs"], [["2", "integrate", "push?", "skipped by instruction", "«оставить свои коммиты локально»", "—"]]));
+    assert.deepEqual(gate(collect(run), "finish"), []);
+    green("finish");
+    assert.deepEqual(build(collect(run)).outcome, { pushed: false, pushLine: "1 push — skipped — by instruction j2", skippedBy: "j2", held: [], deploy: null, goalMet: true });
   });
 
   test("a red check the run could not fix is its own finding, with its evidence, and it holds the push", () => {
@@ -721,7 +736,7 @@ describe("cli", () => {
     const text = readFileSync(join(run, "run.json"), "utf8");
     assert.ok(!text.includes("\n "), "no indentation");
     const json = JSON.parse(text);
-    assert.equal(json.version, 2);
+    assert.equal(json.version, 3);
     assert.match(json.generator.fsl, /^[0-9a-f]{12}$/);
     const summary = JSON.parse(readFileSync(join(run, "summary.json"), "utf8"));
     assert.deepEqual([summary.id, summary.now.stage, summary.counts.findings.total], ["ab12cd34", "p1-spike", 0]);
@@ -900,7 +915,7 @@ describe("run.json for a UI", () => {
     assert.deepEqual(json.orchestrator.spend, { input: 125, output: 125, cacheWrite: 0, cacheRead: 0 });
     assert.deepEqual(json.orchestrator.sessions.map((s) => [s.id, s.transcriptGone]), [["session-0", true], ["session-1", false]]);
     assert.deepEqual([json.sessions, json.startedAt], [["session-0", "session-1"], "2026-10-18T09:59:00.000Z"]);
-    assert.deepEqual(json.now, { stage: "p1-map", since: "2026-10-18T09:59:00.000Z", waitingOn: { running: 1, units: [], lastRedGate: null } });
+    assert.deepEqual(json.now, { stage: "p1-map", step: null, since: "2026-10-18T09:59:00.000Z", waitingOn: { running: 1, units: [], lastRedGate: null } });
     assert.deepEqual(json.surfaces, {});
   });
 
@@ -935,7 +950,7 @@ describe("run.json for a UI", () => {
     save(run, "finish", "pc");
     green("finish");
     const { outcome } = build(collect(run));
-    assert.deepEqual(outcome, { pushed: true, pushLine: "1 push — exit 0 — main -> main", held: [], deploy: { verdict: "failed", line: "the web service is down", sha: "abc1234", deployedAt: "10:02", anomalies: [], launch: "finish-prod-check" }, goalMet: false });
+    assert.deepEqual(outcome, { pushed: true, pushLine: "1 push — exit 0 — main -> main", skippedBy: null, held: [], deploy: { verdict: "failed", line: "the web service is down", sha: "abc1234", deployedAt: "10:02", anomalies: [], launch: "finish-prod-check" }, goalMet: false });
   });
 
   test("evidence: each unit's and each log's COMMANDS lines, every frame, the review critic's scores by surface", () => {
@@ -947,8 +962,9 @@ describe("run.json for a UI", () => {
     transcript("cr", { agent: "fsloop-critic", description: "critic craft", final: "LENS: craft\nAUDIT:\n- Cabinets (`app/cabinets/`) audit 17/20 Good · critique 30/40\n- Billing page audit 12/20 Fair · critique 20/40\nFINDINGS (ranked):\n- —" });
     save(run, "p1-review", "cr");
     const json = build(collect(run));
-    assert.deepEqual(json.units[0].checks, [{ file: "verify.log.lines", n: 1, label: "type-check", exit: 0, line: "Found 0 errors" }, { file: "verify.log.lines", n: 2, label: "unit tests", exit: 1, line: "1 fail" }]);
-    assert.deepEqual(json.logs, [{ file: "logs/integrate-checks.log.lines", n: 1, label: "build", exit: 0, line: "built" }]);
+    const untimed = { seconds: null, startedAt: null, endedAt: null };
+    assert.deepEqual(json.units[0].checks, [{ file: "verify.log.lines", n: 1, label: "type-check", exit: 0, line: "Found 0 errors", ...untimed }, { file: "verify.log.lines", n: 2, label: "unit tests", exit: 1, line: "1 fail", ...untimed }]);
+    assert.deepEqual(json.logs, [{ file: "logs/integrate-checks.log.lines", n: 1, label: "build", exit: 0, line: "built", ...untimed }]);
     assert.deepEqual(json.shots.map((s) => [s.moment, s.pass, s.surface]), [["init", null, "public"], ["baseline", 1, "cabinets"], ["final", 1, "cabinets"]]);
     assert.deepEqual(Object.keys(json.surfaces), ["cabinets", "billing-page"]);
     assert.deepEqual(json.surfaces.cabinets.map((s) => [s.stage, s.audit, s.critique]), [["p1-review", 17, 30]]);

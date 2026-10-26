@@ -11,7 +11,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** run.json's shape; bumped on every change to it. */
-export const VERSION = 2;
+export const VERSION = 3;
 export const STEPS = ["map", "spike", "decompose", "units", "review", "fix", "verdict", "assess"];
 export const DECISIONS = ["fix", "candidate", "dropped", "declined", "duplicate", "open"];
 export const OUTCOMES = ["converged", "stalled", "next", "cap"];
@@ -483,6 +483,15 @@ function readJsonl(path) {
 }
 
 const CHECK_LINE = /^(\d+)\s+(.+?)\s+—\s+exit\s+(-?\d+)\b\s*(?:—\s*)?(.*)$/;
+const SECONDS_TAIL = /^(\d+(?:\.\d+)?)\s*s\b\s*(?:—\s*)?(.*)$/;
+
+const mtimeOf = (path) => {
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return null;
+  }
+};
 
 /** The `COMMANDS` lines a command list leaves in its `<log>.lines` files. */
 function checkLines(dir, prefix) {
@@ -492,7 +501,23 @@ function checkLines(dir, prefix) {
     for (const line of read(join(dir, file)).split(/\r?\n/)) {
       if (!line.trim()) continue;
       const m = CHECK_LINE.exec(line.trim());
-      out.push(m ? { file: `${prefix}${file}`, n: Number(m[1]), label: m[2], exit: Number(m[3]), line: m[4] || null } : { file: `${prefix}${file}`, n: null, label: null, exit: null, line: line.trim() });
+      if (!m) {
+        out.push({ file: `${prefix}${file}`, n: null, label: null, exit: null, line: line.trim() });
+        continue;
+      }
+      const s = SECONDS_TAIL.exec(m[4] ?? "");
+      const seconds = s ? Number(s[1]) : null;
+      const ended = mtimeOf(join(dir, `${file.replace(/\.lines$/, "")}.${m[1]}`));
+      out.push({
+        file: `${prefix}${file}`,
+        n: Number(m[1]),
+        label: m[2],
+        exit: Number(m[3]),
+        line: m[4] || null,
+        seconds,
+        startedAt: ended !== null && seconds !== null ? isoOf(ended - seconds * 1000) : null,
+        endedAt: isoOf(ended),
+      });
     }
   return out;
 }
@@ -736,7 +761,7 @@ export function collect(runDir, { git: runGit = git } = {}) {
       updated = Math.max(updated, statSync(path).mtimeMs);
     } catch {}
   };
-  for (const f of ["common.md", "journal.md", "units.md", "launches.md", "passes.md", "gates.jsonl", "decisions.jsonl", "human.jsonl", "report.md"]) touch(join(runDir, f));
+  for (const f of ["common.md", "journal.md", "units.md", "launches.md", "passes.md", "gates.jsonl", "marks.jsonl", "decisions.jsonl", "human.jsonl", "report.md"]) touch(join(runDir, f));
   for (const d of ["findings", "logs", "reports"]) if (existsSync(join(runDir, d))) for (const f of readdirSync(join(runDir, d))) touch(join(runDir, d, f));
 
   return {
@@ -760,6 +785,7 @@ export function collect(runDir, { git: runGit = git } = {}) {
     journal,
     passes,
     gates,
+    marks: readJsonl(join(runDir, "marks.jsonl")).filter((m) => m.step && m.at),
     decisionLog,
     human,
     shots: shotsOf(runDir),
@@ -847,9 +873,11 @@ function prerequisites(run, stage) {
   if (step === "finish") {
     if (heldPush(lastGate(run, "integrate"))) return [];
     if (isGreen(run, "integrate")) {
-      // A green gate comes before the push; Integrate is done when the push list ran to exit 0.
-      const last = read(join(run.runDir, "logs", "push.log.lines")).trim().split(/\r?\n/).at(-1) ?? "";
-      return /exit 0\b/.test(last) ? [] : ["integrate is green but logs/push.log.lines shows no push that exited 0 — push first"];
+      const line = runPushLine(run) ?? "";
+      if (/exit 0\b/.test(line)) return [];
+      const skip = skippedPushRef(line);
+      if (skip) return journalRow(run, skip) ? [] : [`logs/push.log.lines: push skipped by instruction ${skip} — journal.md has no row # ${skip.slice(1)}`];
+      return ["integrate is green but logs/push.log.lines has no `push` line that exited 0 or `skipped — by instruction j<n>` — push first"];
     }
     return [lastGate(run, "integrate") ? "integrate is red for more than held findings — settle the rest, gate it again" : "integrate has no gate yet"];
   }
@@ -1080,7 +1108,7 @@ export function gate(run, stage, { commitMessage = defaultCommitMessage } = {}) 
     for (const f of run.findings.values()) {
       if (!holdsPushScope(f)) continue;
       let s = statusOf(run, f);
-      if (s.status === "repeated") {
+      if (s.status === "repeated" || (s.status === "unresolved" && run.repeaters.has(f.id))) {
         const e = effectiveOf(run, f.id, (id) => statusOf(run, run.findings.get(id)));
         if (holdsPushScope(run.findings.get(e.id))) continue;
         s = e;
@@ -1104,7 +1132,27 @@ export function gate(run, stage, { commitMessage = defaultCommitMessage } = {}) 
     const report = read(join(run.runDir, "report.md"));
     if (!report) problems.push("no report.md");
     else if (!report.includes(TABLES_START)) problems.push("report.md has no tables of fsl.mjs report — run it");
+    problems.push(...checkTrees(run));
   }
+  return problems;
+}
+
+export function checkTrees(run, runGit = git) {
+  const { mode, worktree: wt, start } = run.common;
+  if (mode !== "worktree" || !wt || !start) return [];
+  const same = (p) => resolve(p).toLowerCase() === resolve(wt).toLowerCase();
+  const ofRun = (p) => same(p) || resolve(p).toLowerCase().startsWith(`${resolve(wt).toLowerCase()}-`);
+  const branch = `fsl/${run.id}`;
+  const branches = (runGit(start, ["branch", "--list", "--format=%(refname:short)", branch, `${branch}-*`]) ?? "").split(/\r?\n/).filter(Boolean);
+  const head = runGit(start, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])?.trim();
+  const kept = branches.includes(branch) && !(head && runGit(start, ["merge-base", "--is-ancestor", branch, head]) !== null);
+  const parent = dirname(wt);
+  const folders = existsSync(parent) ? readdirSync(parent).map((f) => join(parent, f)).filter((p) => ofRun(p) && statSync(p).isDirectory()) : [];
+  const listed = (runGit(start, ["worktree", "list", "--porcelain"]) ?? "").split(/\r?\n/).filter((l) => l.startsWith("worktree ")).map((l) => nativePath(l.slice(9))).filter(ofRun);
+  const problems = [];
+  for (const p of new Set([...folders, ...listed].map((p) => resolve(p))))
+    if (!(kept && same(p))) problems.push(`${p} is still ${listed.some((l) => resolve(l) === p) ? "a worktree" : "a folder on disk"} — remove it (SKILL.md → Removal)`);
+  for (const b of branches) if (!(kept && b === branch)) problems.push(`branch ${b} still exists — git branch -D it (SKILL.md → Removal)`);
   return problems;
 }
 
@@ -1211,6 +1259,8 @@ function statusOf(run, f) {
   if (d.decision !== "fix") return { status: d.decision };
   const repeated = run.repeaters.has(f.id);
   if (f.stage === "integrate") {
+    const verdict = verdictOf(run, f.id);
+    if (verdict) return { status: verdict.result === "resolved" ? "closed" : "unresolved", closedBy: verdict.result === "resolved" ? "verdict" : null, checkedBy: verdict.launch, verdict };
     const at = run.launches.findIndex((l) => l.id === f.launch);
     const fix = run.launches.findIndex((l, i) => i > at && isFixLaunch(l));
     if (fix < 0) return { status: "queued" };
@@ -1294,9 +1344,11 @@ function nowOf(run, stages, closed) {
   const ahead = stages.filter((s) => !done(s) && (!lastDone || compareStages(s.stage, lastDone.stage) > 0)).at(-1);
   const stage = ahead?.stage ?? nextStage(run, lastDone?.stage ?? null);
   const entry = stages.find((s) => s.stage === stage);
+  const mark = stage === "init" ? (run.marks.filter((m) => !m.end).at(-1) ?? null) : null;
   return {
     stage,
-    since: entry?.startedAt ?? lastDone?.at ?? run.common.started ?? null,
+    step: mark?.step ?? null,
+    since: mark?.at ?? entry?.startedAt ?? lastDone?.at ?? run.common.started ?? null,
     waitingOn: {
       running: run.running.length,
       units: run.units.filter((u) => !["committed", "blocked"].includes(u.state)).map((u) => ({ id: u.id, state: u.state })),
@@ -1305,24 +1357,160 @@ function nowOf(run, stages, closed) {
   };
 }
 
+export const INIT_STEPS = ["bootstrap", "survey", "commands", "design", "shots", "config", "land"];
+const TIMES_LINE = /^(.+?)\s+(\d+(?:\.\d+)?)\s*s\b/;
+const ms = (iso) => (iso ? Date.parse(iso) : NaN);
+
+export const formatSeconds = (s) => {
+  if (s === null || s === undefined || Number.isNaN(s)) return "—";
+  const n = Math.round(s);
+  if (n < 60) return `${n} s`;
+  const h = Math.floor(n / 3600);
+  const m = Math.floor((n % 3600) / 60);
+  const r = n % 60;
+  return [h ? `${h} h` : "", m ? `${m} min` : "", r && !h ? `${r} s` : ""].filter(Boolean).join(" ");
+};
+
+const clock = (iso) => (iso ? iso.replace(/^.*T/, "").replace(/\.\d+Z$|Z$/, "") : "—");
+
+function shotsTimes(run) {
+  const l = run.launches.filter((x) => x.stage === "init" && x.description === "shots").at(-1);
+  if (!l) return [];
+  const block = blockSections(read(join(run.runDir, l.report)));
+  return [block.TIMES?.value, ...(block.TIMES?.items ?? [])]
+    .filter(Boolean)
+    .map((line) => {
+      const m = TIMES_LINE.exec(line);
+      return m ? { label: m[1].trim(), seconds: Number(m[2]) } : null;
+    })
+    .filter(Boolean);
+}
+
+function perLog(lines) {
+  const byFile = new Map();
+  for (const l of lines) {
+    const e = byFile.get(l.file) ?? byFile.set(l.file, { label: /^logs\/(?:init-)?(.+)\.log\.lines$/.exec(l.file)?.[1] ?? l.file, seconds: null, exit: 0, startedAt: null, endedAt: null }).get(l.file);
+    if (l.seconds !== null) e.seconds = (e.seconds ?? 0) + l.seconds;
+    if (l.exit) e.exit = l.exit;
+    if (l.startedAt && (!e.startedAt || l.startedAt < e.startedAt)) e.startedAt = l.startedAt;
+    if (l.endedAt && (!e.endedAt || l.endedAt > e.endedAt)) e.endedAt = l.endedAt;
+  }
+  return [...byFile.values()].sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""));
+}
+
+const detailOf = (xs) => xs.map((x) => `${x.label} ${formatSeconds(x.seconds)}${x.exit ? ` exit ${x.exit}` : ""}`).join(" · ") || "—";
+const earliest = (isos) => isos.filter(Boolean).sort()[0] ?? null;
+const latest = (isos) => isos.filter(Boolean).sort().at(-1) ?? null;
+const sumSeconds = (xs) => (xs.some((x) => x.seconds !== null) ? xs.reduce((a, x) => a + (x.seconds ?? 0), 0) : null);
+
+export function timelineOf(run, now = new Date().toISOString()) {
+  const closed = isGreen(run, "finish") || (isGreen(run, "init") && /exit 0\b/.test(runPushLine(run) ?? ""));
+  if (run.common.mode !== "init" && !run.marks.length) {
+    const rows = stagesOf(run).map((s) => ({ step: s.stage, startedAt: s.startedAt, endedAt: s.green ? s.at : null, derived: false, detail: s.green === null ? "—" : s.green ? "green" : `red — ${s.problems.length}` }));
+    return finishRows(rows, closed, now, run.common.started, []);
+  }
+  const logs = run.logs.filter((l) => l.n !== null);
+  const launch = (d) => run.launches.filter((l) => l.stage === "init" && l.description === d);
+  const bootstrap = [
+    ...logs.filter((l) => l.file === "logs/init-bootstrap.log.lines").map((l) => ({ label: l.label, seconds: l.seconds, exit: l.exit, startedAt: l.startedAt, endedAt: l.endedAt })),
+    ...perLog(logs.filter((l) => l.file === "logs/init-install.log.lines")),
+  ];
+  const roles = perLog(logs.filter((l) => /^logs\/init-(?!bootstrap|install)[\w-]+\.log\.lines$/.test(l.file)));
+  const land = perLog(logs.filter((l) => /^logs\/land\.log\.lines$/.test(l.file)));
+  const gates = run.gates.filter((g) => g.stage === "init");
+  const times = shotsTimes(run);
+  const launchDetail = (ls) => ls.map((l) => ({ label: `${l.description} (${(l.model ?? "").replace(/^claude-|-\d.*$/g, "")})`, seconds: l.seconds, exit: 0 }));
+  const shotsLaunches = [...launch("shots"), ...launch("shots proof")];
+  const sources = {
+    bootstrap: { startedAt: earliest([...bootstrap.map((b) => b.startedAt), run.common.started]), endedAt: latest(bootstrap.map((b) => b.endedAt)), detail: detailOf(bootstrap) },
+    survey: { startedAt: earliest(launch("map").map((l) => l.startedAt)), endedAt: latest(launch("map").map((l) => l.endedAt)), detail: detailOf(launchDetail(launch("map"))) },
+    commands: { startedAt: earliest(roles.map((r) => r.startedAt)), endedAt: latest(roles.map((r) => r.endedAt)), detail: detailOf(roles) },
+    design: { startedAt: null, endedAt: null, detail: "the user's interview" },
+    shots: {
+      startedAt: earliest(shotsLaunches.map((l) => l.startedAt)),
+      endedAt: latest(shotsLaunches.map((l) => l.endedAt)),
+      detail: [detailOf(times.map((t) => ({ ...t, exit: 0 }))), detailOf(launchDetail(shotsLaunches))].filter((d) => d !== "—").join(" · ") || "—",
+    },
+    config: { startedAt: null, endedAt: null, detail: "—" },
+    land: {
+      startedAt: earliest([...gates.map((g) => g.at), ...land.map((l) => l.startedAt)]),
+      endedAt: latest([...gates.map((g) => g.at), ...land.map((l) => l.endedAt)]),
+      detail: [gates.length ? `gate ${gates.map((g) => (g.green ? "green" : "red")).join(", ")}` : "", detailOf(land)].filter((d) => d && d !== "—").join(" · ") || "—",
+    },
+  };
+  const rows = INIT_STEPS.map((step) => {
+    const mark = run.marks.find((m) => m.step === step && !m.end) ?? null;
+    const endMark = run.marks.find((m) => m.step === step && m.end) ?? null;
+    const startedAt = mark?.at ?? sources[step].startedAt;
+    return startedAt ? { step, startedAt, endedAt: endMark?.at ?? sources[step].endedAt, marked: Boolean(endMark), derived: !mark, detail: sources[step].detail } : null;
+  }).filter(Boolean);
+  const pick = (re) => times.find((t) => re.test(t.label))?.seconds ?? null;
+  const installed = sumSeconds(bootstrap);
+  const serve = pick(/^serve\b/);
+  const raise = pick(/^raise\b/);
+  const login = pick(/^login\b/);
+  const shoot = pick(/^shoot\b/);
+  const slowest = roles.filter((r) => r.seconds !== null).sort((a, b) => b.seconds - a.seconds)[0] ?? null;
+  const spans = [
+    { span: "worktree → installed", seconds: installed, from: bootstrap.map((b) => b.label).join(" + ") || null },
+    installed !== null && serve !== null ? { span: "worktree → dev server ready", seconds: installed + (raise ?? 0) + serve, from: "installed + raise + serve" } : null,
+    installed !== null && serve !== null && shoot !== null ? { span: "worktree → first frame", seconds: installed + (raise ?? 0) + serve + (login ?? 0) + shoot, from: "dev server ready + login + shoot" } : null,
+    slowest ? { span: "slowest command", seconds: slowest.seconds, from: slowest.label } : null,
+  ].filter(Boolean);
+  const out = finishRows(rows, closed, now, run.common.started, spans);
+  const design = out.rows.find((r) => r.step === "design");
+  if (design && design.took !== null) out.spans.push({ span: "the user's time", seconds: design.took, from: "design" });
+  return out;
+}
+
+function finishRows(rows, closed, now, started, spans) {
+  rows.sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""));
+  rows.forEach((r, i) => {
+    const next = rows[i + 1]?.startedAt ?? null;
+    r.endedAt = r.marked ? r.endedAt : latest([r.endedAt, next]);
+    r.running = !closed && !r.endedAt;
+    const end = r.endedAt ?? (r.running ? now : null);
+    r.took = end ? Math.max(0, (ms(end) - ms(r.startedAt)) / 1000) : null;
+  });
+  const first = earliest([started, ...rows.map((r) => r.startedAt)]);
+  const end = rows.length ? latest(rows.map((r) => r.endedAt ?? (r.running ? now : null))) : null;
+  const total = first && end ? Math.max(0, (ms(end) - ms(first)) / 1000) : null;
+  return { startedAt: first, endedAt: closed ? end : null, total, rows, spans };
+}
+
+export function renderTimeline(t) {
+  const lines = ["| step | started (UTC) | took | detail |", "|---|---|---|---|"];
+  for (const r of t.rows) lines.push(`| ${r.step}${r.derived ? " ~" : ""} | ${clock(r.startedAt)} | ${formatSeconds(r.took)}${r.running ? " …" : ""} | ${escapeCell(r.detail)} |`);
+  lines.push(`| total | ${clock(t.startedAt)} | ${formatSeconds(t.total)}${t.endedAt ? "" : " …"} | ${t.rows.length} steps |`);
+  if (t.spans.length) {
+    lines.push("", "| span | took | from |", "|---|---|---|");
+    for (const s of t.spans) lines.push(`| ${s.span} | ${formatSeconds(s.seconds)} | ${escapeCell(s.from ?? "—")} |`);
+  }
+  if (t.rows.some((r) => r.derived)) lines.push("", "~ a step with no mark: its start is read off its logs and launches");
+  return lines.join("\n");
+}
+
 /** Init lands by its own list (init.md → Gate, land): its `push` line, else null. */
-const initPushLine = (run) =>
-  read(join(run.runDir, "logs", "land.log.lines"))
+function runPushLine(run) {
+  return read(join(run.runDir, "logs", run.common.mode === "init" ? "land.log.lines" : "push.log.lines"))
     .split(/\r?\n/)
     .filter((l) => /^\d+ push\b/.test(l))
     .at(-1) ?? null;
+}
+
+const skippedPushRef = (line) => /^\d+ push — skipped — by instruction (j\d+)\b/.exec(line ?? "")?.[1] ?? null;
 
 function outcomeOf(run, findings, closed) {
-  const pushLine =
-    run.common.mode === "init" ? initPushLine(run) : (read(join(run.runDir, "logs", "push.log.lines")).trim().split(/\r?\n/).filter(Boolean).at(-1) ?? null);
+  const pushLine = runPushLine(run);
   const pushed = Boolean(pushLine && /exit 0\b/.test(pushLine));
+  const skippedBy = run.common.mode === "init" ? null : skippedPushRef(pushLine);
   const g = lastGate(run, "integrate");
   const held = heldPush(g) ? g.problems.map((p) => /^(\S+?):/.exec(p)?.[1]).filter(Boolean) : [];
   const deploy = run.deploys.at(-1) ?? null;
   const left = findings.some((f) => ["critical", "major"].includes(f.severity) && [...GAVE_UP, "repeated"].includes(f.effectiveStatus));
   // Met in full: pushed, nothing held, the deploy ok when checked, no critical or major finding left standing.
-  const goalMet = !closed ? null : run.common.mode === "init" ? pushed : pushed && !held.length && (!deploy || deploy.verdict === "ok") && !left;
-  return { pushed, pushLine, held, deploy, goalMet };
+  const goalMet = !closed ? null : run.common.mode === "init" ? pushed : (pushed || Boolean(skippedBy)) && !held.length && (!deploy || deploy.verdict === "ok") && !left;
+  return { pushed, pushLine, skippedBy, held, deploy, goalMet };
 }
 
 export function build(run) {
@@ -1398,7 +1586,7 @@ export function build(run) {
 
   const stages = stagesOf(run);
   // A run is closed by its last stage: finish; /fsloop init by its gate and then its land list's push at exit 0.
-  const closed = isGreen(run, "finish") || (isGreen(run, "init") && /exit 0\b/.test(initPushLine(run) ?? ""));
+  const closed = isGreen(run, "finish") || (isGreen(run, "init") && /exit 0\b/.test(runPushLine(run) ?? ""));
   const startedAt = run.common.started ?? run.launches.map((l) => l.startedAt).filter(Boolean).sort()[0] ?? null;
   return {
     version: VERSION,
@@ -1436,6 +1624,8 @@ export function build(run) {
     audits: run.audits,
     shots: run.shots,
     logs: run.logs,
+    marks: run.marks,
+    timeline: timelineOf(run),
     journal: run.journal.map((r) => ({ ...r, refs: refsOf(r).map((id) => ({ id, kind: refKind(run, id) })), human: humanFor("journal", r.n) })),
   };
 }
@@ -1652,6 +1842,8 @@ const USAGE = `usage:
   node fsl.mjs gate   <run folder> <stage>   is the stage done? exit 1 when not
   node fsl.mjs report <run folder>           write the run folder's tables into report.md
   node fsl.mjs build  <run folder>           write run.json and summary.json
+  node fsl.mjs mark   <run folder> <step> [end]   stamp the start of an init step — ${INIT_STEPS.join(" | ")} — or, with end, its end (design: the interview has no artifact)
+  node fsl.mjs timeline <run folder>         the run by step — started, took, what each command and launch took
 stage: p<n>-{${STEPS.join("|")}} | integrate | finish | init`;
 
 function main(argv) {
@@ -1700,6 +1892,20 @@ function main(argv) {
   if (command === "build") {
     writeRunJson(runDir);
     console.log(`run.json, summary.json → ${runDir}`);
+    return 0;
+  }
+  if (command === "mark") {
+    const [step, end] = rest;
+    if (!step || (end && end !== "end")) return (console.error(USAGE), 4);
+    mkdirSync(runDir, { recursive: true });
+    const at = new Date().toISOString();
+    appendFileSync(join(runDir, "marks.jsonl"), JSON.stringify(end ? { step, at, end: true } : { step, at }) + "\n");
+    if (existsSync(join(runDir, "common.md"))) writeRunJson(runDir);
+    console.log(`mark ${step}${end ? " end" : ""} ${at}`);
+    return 0;
+  }
+  if (command === "timeline") {
+    console.log(renderTimeline(timelineOf(collect(runDir))));
     return 0;
   }
   console.error(USAGE);
