@@ -14,7 +14,7 @@
 | `skills/fsloop/spike.md` | `/fsloop spike <question>` — исследование неизвестного |
 | `skills/fsloop/assess.md` | оценка и повторные проходы при `N` |
 | `skills/fsloop/json-merge.mjs`, `merge.attributes` | merge-драйвер i18n-каталогов по ключам: юниты, дописывающие ключи в один JSON, не конфликтуют |
-| `skills/fsloop/spike-lease.mjs` | аренда аккаунтов из `.spike/sessions/` и зеркало `.spike/` в worktree — [опционально](#spike-lease-опционально) |
+| `skills/fsloop/spike-lease.mjs` | аренда аккаунтов из `.claude/fsloop/spike/sessions/` и зеркало `.claude/fsloop/spike/` в worktree — [опционально](#spike-lease-опционально) |
 | `skills/fsloop/fsl.mjs` | хранитель папки прогона: `save` сохраняет отчёт каждого запуска агента, `gate` проверяет, что шаг завершён, `report` пишет таблицы отчёта, `build` собирает `run.json` — [подробнее](#папка-прогона) |
 | `skills/fsloop/init.md` | `/fsloop init`: агент сам заполняет и проверяет `.claude/fsloop/config.md` — [подробнее](#init) |
 | `skills/fsloop/shot.mjs` | движок съёмки для проектов без своего инструмента: поднять dev-сервер, войти, снять кадр (страница, диалог по шагам, регион), остановить по pid |
@@ -53,7 +53,9 @@ node fsloop/install.mjs <путь к репо>    # машина и проект
 - ставит три ссылки — `~/.claude/skills/fsloop` → `skills/fsloop`, `~/.claude/agents/fsloop` → `agents`, `~/.claude/hooks/fsloop` → `hooks`. Это junction: файловый симлинк Windows делает только в режиме разработчика, junction — всегда; агентов из папки внутри `agents/` Claude Code читает так же, как лежащих в ней;
 - добавляет хук `spike-guard` в `~/.claude/settings.json`;
 - ссылку, которая ведёт в другое место, переставляет на этот клон; настоящую папку или файл на месте ссылки не трогает и останавливается;
-- с путём к репо — добавляет `.spike/` в `.gitignore`, а в `.git/info/exclude` — `.claude/fsloop/*` и `!.claude/fsloop/config.md` (папки прогонов не попадают в git, `config.md` попадает), создаёт `.spike/{data,sessions,toolkits}` и шаблон `README.md`, и называет копию fsloop, которая осталась в проекте (`.claude/skills/fsloop`, агенты, хук в `.claude/settings.json`), — её надо удалить, чтобы работала только глобальная.
+- с путём к репо — переносит старый `.spike/` в `.claude/fsloop/spike/` целиком (не трогает его, пока у сессии есть аренда или worktree держит его зеркало), добавляет `.claude/fsloop/spike/` в `.gitignore`, а в `.git/info/exclude` — `.claude/fsloop/*` и `!.claude/fsloop/config.md` (папки прогонов не попадают в git, `config.md` попадает), создаёт `.claude/fsloop/spike/{data,sessions,toolkits}` и шаблон `README.md`, и называет копию fsloop, которая осталась в проекте (`.claude/skills/fsloop`, агенты, хук в `.claude/settings.json`), — её надо удалить, чтобы работала только глобальная, — и `CLAUDE.md` или файл `.claude/rules/`, где ещё написано `.spike/`.
+
+`.claude/fsloop/spike/` попадает в `.gitignore`, хотя `.git/info/exclude` и так прячет всё под `.claude/fsloop/`, кроме `config.md`: exclude живёт только в этом клоне, а сессии и токены не должны попасть в коммит и из свежего клона.
 
 `--claude-dir <папка>` ставит ссылки и хук в другую папку вместо `~/.claude`. Повторный запуск ничего не дублирует.
 
@@ -73,14 +75,14 @@ i18n-каталоги, которые сливаются по ключам, пе
 
 ## Spike lease (опционально)
 
-Нужен, только когда агенты работают с живыми аккаунтами — сессиями, которые нельзя поднимать из двух процессов сразу (мессенджеры, кабинеты с привязкой к IP). Если аккаунтов нет, `.spike/sessions/` пуст, `link` даёт пустое зеркало, `acquire` не вызывается — настраивать ничего не нужно.
+Нужен, только когда агенты работают с живыми аккаунтами — сессиями, которые нельзя поднимать из двух процессов сразу (мессенджеры, кабинеты с привязкой к IP). Если аккаунтов нет, `.claude/fsloop/spike/sessions/` пуст, `link` даёт пустое зеркало, `acquire` не вызывается — настраивать ничего не нужно.
 
 Как работает:
 
-- Аккаунт — папка `.spike/sessions/<name>/` в основной рабочей копии.
-- Каждый worktree прогона получает зеркало `.spike/` ссылками — всё, кроме `sessions/`.
+- Аккаунт — папка `.claude/fsloop/spike/sessions/<name>/` в основной рабочей копии.
+- Каждый worktree прогона получает зеркало `.claude/fsloop/spike/` ссылками — всё, кроме `sessions/`.
 - `acquire` берёт атомарную аренду (`.lease` в папке сессии) и только тогда ссылает папку в worktree. Без аренды папки в worktree нет: скрипт или тест падает на отсутствующем пути, а не делит сессию с другим процессом.
-- `spike-guard` блокирует обход: ручные ссылки в `.spike`, копирование из `sessions/`, удаление `.lease`.
+- `spike-guard` блокирует обход: ручные ссылки в `.claude/fsloop/spike`, копирование из `sessions/`, удаление `.lease`. Старый `.spike/` он охраняет так же, пока проект не перенесён.
 
 ```
 node .claude/skills/fsloop/spike-lease.mjs link <checkout>
@@ -90,7 +92,7 @@ node .claude/skills/fsloop/spike-lease.mjs unlink <checkout>
 node .claude/skills/fsloop/spike-lease.mjs status
 ```
 
-Пробы в worktree не кладите под `.spike/`: это ссылка в основную копию, файл окажется там, а импорты разрешатся от её конфигурации, а не от worktree.
+Пробы в worktree не кладите под `.claude/fsloop/spike/`: это ссылка в основную копию, файл окажется там, а импорты разрешатся от её конфигурации, а не от worktree.
 
 ## Запуск
 
@@ -190,12 +192,12 @@ Id находки — `<запуск>#<id>` (`p1-review-critic-code#code-3`). П
 
 Чего в проекте нет (сида, тестового пользователя, сухого режима воркера), init не пишет сам — он называет это в итоге, вместе с тем, куда попал конфиг: в основную ветку, в ветку для слияния или никуда (worktree остаётся). Гейт `fsl.mjs gate <папка> init` не пропустит конфиг, если: у роли нет строки; у запускаемой роли нет лога запуска; нет раздела про каталоги, роли или дизайн (или `- none — <почему>`); кадры не подтверждены как «ok» — три, или два, когда в рецепте `login: —`.
 
-`shot.mjs` работает через `puppeteer-core` и установленный Chrome. Если `puppeteer-core` нет в проекте, он ставится один раз вне репо: `npm i --prefix ~/.fsloop puppeteer-core`; Chrome ищется в системе или по `CHROME_PATH`. Сессия входа хранится в `.claude/fsloop/auth.json` (не в git), пароли — только в переменных окружения или `.spike/`. Сервер для съёмки работает на своей одноразовой базе `<base>_shots_<run id>`, а все переменные внешних сервисов (ключи, токены, адреса очередей, кешей, почты, хранилищ) пустые; файлы env никто не читает целиком, только имена переменных. `shot.mjs stop` останавливает только процесс, который запустил `serve`: рядом с pid записано время его старта, и чужой процесс с тем же pid не трогается.
+`shot.mjs` работает через `puppeteer-core` и установленный Chrome. Если `puppeteer-core` нет в проекте, он ставится один раз вне репо: `npm i --prefix ~/.fsloop puppeteer-core`; Chrome ищется в системе или по `CHROME_PATH`. Сессия входа хранится в `.claude/fsloop/auth.json` (не в git), пароли — только в переменных окружения или `.claude/fsloop/spike/`. Сервер для съёмки работает на своей одноразовой базе `<base>_shots_<run id>`, а все переменные внешних сервисов (ключи, токены, адреса очередей, кешей, почты, хранилищ) пустые; файлы env никто не читает целиком, только имена переменных. `shot.mjs stop` останавливает только процесс, который запустил `serve`: рядом с pid записано время его старта, и чужой процесс с тем же pid не трогается.
 
 ## Проверка скриптов
 
 ```
-node --test install.test.mjs skills/fsloop/find-polluter.test.mjs skills/fsloop/fsl.test.mjs skills/fsloop/shot.test.mjs
+node --test install.test.mjs hooks/shell-text.test.mjs hooks/spike-guard.test.mjs skills/fsloop/find-polluter.test.mjs skills/fsloop/fsl.test.mjs skills/fsloop/shot.test.mjs
 ```
 
 Настоящая съёмка в `shot.test.mjs` идёт, только если найдены `puppeteer-core` (в проекте или в `FSLOOP_HOME`) и Chrome; иначе этот тест пропускается.

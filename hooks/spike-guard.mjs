@@ -4,9 +4,12 @@ import { spawnSync } from "node:child_process";
 
 import { commandSegments, verbOf } from "./shell-text.mjs";
 
-const SPIKE = /(^|[\\/])\.spike([\\/]|$)/i;
-const SESSIONS = /(^|[\\/])\.spike[\\/]sessions([\\/]|$)/i;
-const LEASE = /(^|[\\/])\.spike[\\/]sessions[\\/][^\\/]+[\\/]\.lease$/i;
+const ROOT = String.raw`(?:\.claude[\\/]fsloop[\\/]spike|\.spike)`;
+const SPIKE = new RegExp(String.raw`(^|[\\/])${ROOT}([\\/]|$)`, "i");
+const SESSIONS = new RegExp(String.raw`(^|[\\/])${ROOT}[\\/]sessions([\\/]|$)`, "i");
+const LEASE = new RegExp(String.raw`(^|[\\/])${ROOT}[\\/]sessions[\\/][^\\/]+[\\/]\.lease$`, "i");
+const SPIKE_HOMES = [join(".claude", "fsloop", "spike"), ".spike"];
+const atSpikeRoot = (p) => new RegExp(String.raw`(^|[\\/])${ROOT}$`, "i").test(p);
 const LINK_VERBS = /^(ln|mklink)$/i;
 const COPY_VERBS = /^(cp|copy|xcopy|robocopy|Copy-Item|rsync|mv|move|Move-Item)$/i;
 const DELETE_VERBS = /^(rm|del|Remove-Item|unlink)$/i;
@@ -26,17 +29,19 @@ function isReparse(p) {
 }
 
 function mirrorOnDisk(p) {
-  const spike = /(^|[\\/])\.spike$/i.test(p) ? p : join(p, ".spike");
-  if (!existsSync(spike)) return false;
-  try {
-    return readdirSync(spike).some((name) => isReparse(join(spike, name)));
-  } catch {
-    return false;
-  }
+  const homes = atSpikeRoot(p) ? [p] : SPIKE_HOMES.map((home) => join(p, home));
+  return homes.some((spike) => {
+    if (!existsSync(spike)) return false;
+    try {
+      return readdirSync(spike).some((name) => isReparse(join(spike, name)));
+    } catch {
+      return false;
+    }
+  });
 }
 
 function linksOnDisk(dir) {
-  if (/(^|[\\/])\.spike$/i.test(dir) || !existsSync(dir)) return [];
+  if (atSpikeRoot(dir) || !existsSync(dir)) return [];
   try {
     if (process.platform === "win32") {
       const r = spawnSync("cmd", ["/c", "dir", "/AL", "/B", dir], { encoding: "utf8" });
@@ -91,7 +96,7 @@ function winPath(p) {
 const RULES = [
   {
     hit: (call, mirrorAt) => removalTargets(call).some((p) => mirrorAt(p)),
-    why: "removing a checkout over a standing .spike mirror walks its junctions and empties the main .spike; run spike-lease.mjs unlink <checkout> first",
+    why: "removing a checkout over a standing .claude/fsloop/spike mirror walks its junctions and empties the main one; run spike-lease.mjs unlink <checkout> first",
   },
   {
     hit: (call, _mirrorAt, linksAt) => {
@@ -105,11 +110,11 @@ const RULES = [
     hit: ({ verb, args }) =>
       (LINK_VERBS.test(verb) && args.some((a) => SPIKE.test(a))) ||
       (/^New-Item$/i.test(verb) && args.some((a) => LINK_ITEM.test(a)) && args.some((a) => SPIKE.test(a))),
-    why: "a hand-made link into .spike bypasses the session lease; use .claude/skills/fsloop/spike-lease.mjs link / acquire",
+    why: "a hand-made link into .claude/fsloop/spike bypasses the session lease; use ~/.claude/skills/fsloop/spike-lease.mjs link / acquire",
   },
   {
     hit: (call) => COPY_VERBS.test(call.verb) && copySources(call).some((a) => SESSIONS.test(a)),
-    why: "copying or moving a session out of .spike/sessions makes a second usable copy; spike-lease.mjs acquire links it under a lease",
+    why: "copying or moving a session out of .claude/fsloop/spike/sessions makes a second usable copy; spike-lease.mjs acquire links it under a lease",
   },
   {
     hit: ({ verb, args }) => DELETE_VERBS.test(verb) && args.some((a) => LEASE.test(a)),

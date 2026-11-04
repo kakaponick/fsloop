@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -72,12 +72,40 @@ if (!pre.some((entry) => (entry.hooks ?? []).some((h) => forward(h.command ?? ""
 
 if (target) setUpRepo(target);
 
+function worktrees(repo) {
+  const r = spawnSync("git", ["-C", repo, "worktree", "list", "--porcelain"], { encoding: "utf8" });
+  if (r.status !== 0) return [];
+  const self = realpathSync.native(repo).toLowerCase();
+  return r.stdout
+    .split(/\r?\n/)
+    .filter((l) => l.startsWith("worktree "))
+    .map((l) => resolve(l.slice("worktree ".length)))
+    .filter((p) => !existsSync(p) || realpathSync.native(p).toLowerCase() !== self);
+}
+
+function moveLegacySpike(repo, spike) {
+  const legacy = join(repo, ".spike");
+  if (!existsSync(legacy) || lstatSync(legacy).isSymbolicLink()) return;
+  if (existsSync(spike)) return console.log(`warning: both ${legacy} and ${spike} exist — merge them by hand, fsloop reads only ${spike}`);
+  const sessions = join(legacy, "sessions");
+  const held = existsSync(sessions) ? readdirSync(sessions).filter((n) => existsSync(join(sessions, n, ".lease"))) : [];
+  if (held.length) fail(`${legacy} has leased sessions (${held.join(", ")}) — release them, then run again`);
+  const mirrored = worktrees(repo).filter((wt) => existsSync(join(wt, ".spike")));
+  if (mirrored.length) fail(`${mirrored.map((wt) => join(wt, ".spike")).join(", ")} mirror ${legacy} — take each down with the project's own spike-lease.mjs unlink <worktree>, then run again`);
+  mkdirSync(dirname(spike), { recursive: true });
+  renameSync(legacy, spike);
+  console.log(`moved ${legacy} → ${spike}`);
+}
+
 function setUpRepo(repo) {
+  const spike = join(repo, ".claude", "fsloop", "spike");
+  moveLegacySpike(repo, spike);
+
   const gitignore = join(repo, ".gitignore");
   const ignored = existsSync(gitignore) ? readFileSync(gitignore, "utf8") : "";
-  if (!/^\/?\.spike\/?$/m.test(ignored)) {
-    appendFileSync(gitignore, `${ignored && !ignored.endsWith("\n") ? "\n" : ""}.spike/\n`);
-    console.log("added .spike/ → .gitignore");
+  if (!/^\/?\.claude\/fsloop\/spike\/?$/m.test(ignored)) {
+    appendFileSync(gitignore, `${ignored && !ignored.endsWith("\n") ? "\n" : ""}.claude/fsloop/spike/\n`);
+    console.log("added .claude/fsloop/spike/ → .gitignore");
   }
 
   const gitPath = spawnSync("git", ["-C", repo, "rev-parse", "--git-path", "info/exclude"], { encoding: "utf8" });
@@ -109,13 +137,18 @@ function setUpRepo(repo) {
   if (existsSync(projectSettings) && readFileSync(projectSettings, "utf8").includes(".claude/hooks/spike-guard.mjs")) copies.push(`${projectSettings} → its spike-guard hook`);
   if (copies.length) console.log(`warning: the project keeps its own fsloop — remove it so the global one runs alone:\n${copies.map((p) => `  ${p}`).join("\n")}`);
 
-  const spike = join(repo, ".spike");
+  const rules = join(local, "rules");
+  const notes = [join(repo, "CLAUDE.md"), ...(existsSync(rules) ? readdirSync(rules).map((f) => join(rules, f)) : [])].filter(
+    (p) => existsSync(p) && lstatSync(p).isFile() && /(^|[^\w/])\.spike\b/.test(readFileSync(p, "utf8")),
+  );
+  if (notes.length) console.log(`warning: these still name .spike/ — point them at .claude/fsloop/spike/:\n${notes.map((p) => `  ${p}`).join("\n")}`);
+
   for (const d of ["data", "sessions", "toolkits"]) mkdirSync(join(spike, d), { recursive: true });
   const readme = join(spike, "README.md");
   if (!existsSync(readme)) {
     writeFileSync(
       readme,
-      `# .spike
+      `# .claude/fsloop/spike
 
 Research workspace for /fsloop and /fsloop spike. Never committed.
 

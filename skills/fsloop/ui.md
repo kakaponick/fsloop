@@ -23,7 +23,7 @@ The one source of these mechanics for every launch with a UI part — its agent 
 - **Sub-agents.** Your agent definition decides, over `SUBAGENT_AUTHORIZATION`: only the craft critic launches sub-agents — critique's Assessment A and B, read-only, each with an explicit `model` — and the implementer one, `cold-read` on its user-facing copy (`ux 1`); every other launch runs impeccable's isolated assessments (`layout`, `typeset`) in its own thread.
 - **Fix commands.** A Recommended Action reaches a fix unit only as one of `harden`, `clarify`, `layout`, `distill`, `quieter`, `typeset`, `onboard`, `optimize`, `adapt`, `polish`.
 - **Screen evidence.** The run's frames are the orchestrator's (Frames): a launch reads the frame its prompt names by path, with Read, and opens no browser, dev server, `live-server` or screenshot tool of its own (fsloop-shots at `/fsloop init` aside). Every render, screenshot or inspection round impeccable asks for — its SKILL.md's batched round and visual truth, a command's viewport, theme or overlay sweep, critique's browser evidence — is answered from that frame and the code, and reported as `skipped: fsloop frames`. No frame in the prompt → the code alone.
-- **Temp files.** A body file impeccable asks for (critique's snapshot body) goes under `.spike/tmp/` and is deleted after use.
+- **Temp files.** A body file impeccable asks for (critique's snapshot body) goes under `.claude/fsloop/spike/tmp/` and is deleted after use.
 
 ## Baseline
 

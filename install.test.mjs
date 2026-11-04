@@ -68,21 +68,66 @@ describe("install", () => {
     assert.equal(readFileSync(join(claude, "skills", "fsloop", "SKILL.md"), "utf8"), "mine");
   });
 
-  test("a repo gets its .spike workspace and git excludes, and is told of the fsloop it still keeps", () => {
-    const repo = join(tmp, "repo");
-    mkdirSync(join(repo, ".claude", "agents"), { recursive: true });
+  const repoAt = (name) => {
+    const repo = join(tmp, name);
+    mkdirSync(join(repo, ".claude"), { recursive: true });
     spawnSync("git", ["init", "-q", repo]);
+    return repo;
+  };
+
+  test("a repo gets its spike workspace and git excludes, and is told of the fsloop it still keeps", () => {
+    const repo = repoAt("repo");
+    mkdirSync(join(repo, ".claude", "agents"));
     writeFileSync(join(repo, ".claude", "agents", "fsloop-critic.md"), "old");
     writeFileSync(join(repo, ".claude", "settings.json"), JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/spike-guard.mjs"' }] }] } }));
+    writeFileSync(join(repo, "CLAUDE.md"), "- **`.spike/` — полный доступ.**\n");
     const r = install(repo);
     assert.equal(r.status, 0);
-    assert.match(readFileSync(join(repo, ".gitignore"), "utf8"), /^\.spike\/$/m);
+    assert.match(readFileSync(join(repo, ".gitignore"), "utf8"), /^\.claude\/fsloop\/spike\/$/m);
     const exclude = readFileSync(join(repo, ".git", "info", "exclude"), "utf8");
     assert.ok(exclude.includes(".claude/fsloop/*\n!.claude/fsloop/config.md\n"));
-    for (const d of ["data", "sessions", "toolkits"]) assert.ok(existsSync(join(repo, ".spike", d)));
+    for (const d of ["data", "sessions", "toolkits"]) assert.ok(existsSync(join(repo, ".claude", "fsloop", "spike", d)));
+    assert.ok(!existsSync(join(repo, ".spike")));
     assert.match(r.stdout, /the project keeps its own fsloop/);
     assert.match(r.stdout, /fsloop-critic\.md/);
     assert.match(r.stdout, /its spike-guard hook/);
+    assert.match(r.stdout, /still name \.spike\/[\s\S]*CLAUDE\.md/);
+  });
+
+  test("an old .spike moves to .claude/fsloop/spike whole", () => {
+    const repo = repoAt("old");
+    mkdirSync(join(repo, ".spike", "sessions", "acc1"), { recursive: true });
+    writeFileSync(join(repo, ".spike", "README.md"), "mine");
+    writeFileSync(join(repo, ".spike", "sessions", "acc1", "session.txt"), "secret");
+    assert.equal(install(repo).status, 0);
+    assert.ok(!existsSync(join(repo, ".spike")));
+    assert.equal(readFileSync(join(repo, ".claude", "fsloop", "spike", "README.md"), "utf8"), "mine");
+    assert.equal(readFileSync(join(repo, ".claude", "fsloop", "spike", "sessions", "acc1", "session.txt"), "utf8"), "secret");
+  });
+
+  test("an old .spike a worktree still mirrors stays where it is", () => {
+    const repo = repoAt("mirrored");
+    mkdirSync(join(repo, ".spike", "data"), { recursive: true });
+    const git = (...a) => spawnSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...a], { encoding: "utf8" });
+    git("commit", "-q", "--allow-empty", "-m", "init");
+    const wt = join(tmp, "lane");
+    assert.equal(git("worktree", "add", "-q", wt).status, 0);
+    mkdirSync(join(wt, ".spike"));
+    const r = install(repo);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /mirror .*spike-lease\.mjs unlink/);
+    assert.ok(existsSync(join(repo, ".spike", "data")));
+  });
+
+  test("an old .spike with a held lease stays where it is", () => {
+    const repo = repoAt("leased");
+    mkdirSync(join(repo, ".spike", "sessions", "acc1"), { recursive: true });
+    writeFileSync(join(repo, ".spike", "sessions", "acc1", ".lease"), "{}");
+    const r = install(repo);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /leased sessions \(acc1\)/);
+    assert.ok(existsSync(join(repo, ".spike", "sessions", "acc1", ".lease")));
+    assert.ok(!existsSync(join(repo, ".claude", "fsloop", "spike")));
   });
 
   test("a path that is not a repo root is refused before anything is linked", () => {

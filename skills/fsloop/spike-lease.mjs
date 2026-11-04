@@ -3,15 +3,17 @@ import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, rea
 import { basename, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
+const SPIKE = join(".claude", "fsloop", "spike");
+const LEGACY = ".spike";
 const SESSIONS = "sessions";
 const TMP = "tmp";
 const USAGE = `usage:
-  spike-lease link <checkout>                          mirror the main .spike into <checkout>/.spike — everything except sessions/
-  spike-lease acquire <checkout> <session> [--wait s]  take the session's lease, link .spike/sessions/<session> into <checkout>
+  spike-lease link <checkout>                          mirror the main .claude/fsloop/spike into <checkout>/.claude/fsloop/spike — everything except sessions/
+  spike-lease acquire <checkout> <session> [--wait s]  take the session's lease, link .claude/fsloop/spike/sessions/<session> into <checkout>
   spike-lease release <checkout> <session>             drop the link and the lease
-  spike-lease unlink <checkout>                        remove the whole mirror (releases its sessions first; a real tmp/ moves into the main .spike/tmp/)
+  spike-lease unlink <checkout>                        remove the whole mirror (releases its sessions first; a real tmp/ moves into the main .claude/fsloop/spike/tmp/)
   spike-lease status [<checkout>]                      every session and who holds it
-a session is a folder .spike/sessions/<name>/ in the main checkout; one holder at a time; a lane without the lease has no such folder.`;
+a session is a folder .claude/fsloop/spike/sessions/<name>/ in the main checkout; one holder at a time; a lane without the lease has no such folder.`;
 
 function die(msg, code = 64) {
   process.stderr.write(`spike-lease: ${msg}\n`);
@@ -70,15 +72,16 @@ function readLease(p) {
 function ctx(checkoutArg) {
   const checkout = resolve(checkoutArg ?? die(USAGE));
   const main = mainCheckout(existsSync(checkout) ? checkout : process.cwd());
-  const spike = join(main, ".spike");
+  const spike = join(main, SPIKE);
+  if (!existsSync(spike) && existsSync(join(main, LEGACY))) die(`${join(main, LEGACY)} predates ${spike} — move it with: node <fsloop>/install.mjs ${main}`, 65);
   mkdirSync(join(spike, SESSIONS), { recursive: true });
-  return { checkout, main, spike, isMain: resolve(checkout) === resolve(main), mirror: join(checkout, ".spike") };
+  return { checkout, main, spike, isMain: resolve(checkout) === resolve(main), mirror: join(checkout, SPIKE) };
 }
 
 function link(args) {
   const c = ctx(args[0]);
-  if (c.isMain) return process.stdout.write("main checkout holds the real .spike — nothing to link\n");
-  if (existsSync(c.mirror) && isReparse(c.mirror)) die(`${c.mirror} is a link to the whole .spike — remove it, sessions must not be shared that way`, 65);
+  if (c.isMain) return process.stdout.write(`main checkout holds the real ${SPIKE} — nothing to link\n`);
+  if (existsSync(c.mirror) && isReparse(c.mirror)) die(`${c.mirror} is a link to the whole ${SPIKE} — remove it, sessions must not be shared that way`, 65);
   mkdirSync(join(c.mirror, SESSIONS), { recursive: true });
   let n = 0;
   for (const name of readdirSync(c.spike)) {
