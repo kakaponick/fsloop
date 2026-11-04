@@ -403,6 +403,7 @@ export function readTranscript(path) {
   const finished = meta.finished === undefined ? Boolean(last && !last.toolUse && last.text.length) : meta.finished === true;
   return {
     finalText: finished && last?.text.length ? last.text.join("\n") : null,
+    lastCallsTool: Boolean(last?.toolUse),
     model,
     agent: meta.agentType ?? null,
     description: meta.description ?? null,
@@ -411,6 +412,7 @@ export function readTranscript(path) {
     endedAt: isoOf(lastAt),
     seconds: first !== null ? Math.round((lastAt - first) / 1000) : null,
     spend: sumSpend(messages),
+    boot: messages[0] ? messages[0].usage.input + messages[0].usage.cacheWrite + messages[0].usage.cacheRead : 0,
   };
 }
 
@@ -447,6 +449,8 @@ function git(start, args) {
 
 const defaultCommitMessage = (start, sha) => (start ? git(start, ["log", "-1", "--format=%B", sha]) : null);
 
+export const trailersVisible = (message, runId) => message.trim().split(/\n[ \t]*\n/).at(-1).includes(`Fsloop-Run: ${runId}`);
+
 /** The run's commits as git holds them now — a rebase or a pull rewrites the shas units.md recorded. Inline: the
  * start checkout's HEAD; worktree: the run branch, or every ref once it is gone. Null when git cannot answer. */
 function runCommits(common, id, runGit) {
@@ -463,7 +467,7 @@ function runCommits(common, id, runGit) {
     if (!trailer("Fsloop-Run").includes(id)) continue;
     const step = trailer("Fsloop-Step")[0] ?? null;
     const pass = /^(\d+)/.exec(trailer("Fsloop-Pass")[0] ?? "")?.[1];
-    commits.push({ sha, subject, at, step, unit: /^([uf]\d+)\b/.exec(step ?? "")?.[1] ?? null, pass: pass ? Number(pass) : null, closes: findingIds(trailer("Fsloop-Closes").join(" ")) });
+    commits.push({ sha, subject, at, step, unit: /^([uf]\d+)\b/.exec(step ?? "")?.[1] ?? null, pass: pass ? Number(pass) : null, closes: findingIds(trailer("Fsloop-Closes").join(" ")), trailersVisible: trailersVisible(body, id) });
   }
   return commits;
 }
@@ -571,6 +575,7 @@ export function collect(runDir, { git: runGit = git } = {}) {
         output: num("output"),
         cacheWrite: num("cache write"),
         cacheRead: num("cache read"),
+        boot: r.boot === undefined ? null : num("boot"),
         // A row saved before the column existed: unknown, not zero.
         children: r.children === undefined ? null : { launches: num("children"), input: num("children input"), output: num("children output"), cacheWrite: num("children cache write"), cacheRead: num("children cache read") },
       },
@@ -1010,6 +1015,32 @@ function checkBriefs(run, units) {
   return problems;
 }
 
+const globRe = (glob) =>
+  new RegExp(`^${glob.replace(/[.+?^$(){}|[\]\\]/g, "\\$&").split("**/").join("\0").replace(/\*/g, "[^/]*").split("\0").join("(?:.*/)?")}$`);
+let catalogs;
+const isCatalog = (path) =>
+  (catalogs ??= read(join(dirname(fileURLToPath(import.meta.url)), "merge.attributes"))
+    .split(/\r?\n/)
+    .map((l) => l.trim().split(/\s+/)[0])
+    .filter(Boolean)
+    .map(globRe)).some((re) => re.test(path));
+const repoPath = (p) => (p.startsWith("./") ? p.slice(2) : p);
+const manifestOf = (u) => [...(u.sections.files ?? "").matchAll(/^\s*- `([^`]+)`/gm)].map((m) => repoPath(m[1].replaceAll("\\", "/")));
+
+function checkOverlap(run, units) {
+  const problems = [];
+  const briefed = units.filter((u) => u.brief && u.sections.files !== undefined && !NONE.test(u.sections.files));
+  for (const u of briefed) if (!manifestOf(u).length) problems.push(`${u.id}: brief's "## Files" has no "- \`<path>\`" line — one path per line from the repo root`);
+  for (const [i, a] of briefed.entries())
+    for (const b of briefed.slice(i + 1)) {
+      const other = new Set(manifestOf(b));
+      const shared = manifestOf(a).filter((p) => other.has(p) && !isCatalog(p));
+      if (shared.length && !run.journal.some((r) => refsOf(r).includes(a.id) && refsOf(r).includes(b.id)))
+        problems.push(`${a.id}, ${b.id}: both write ${shared.join(", ")} — one unit, or one Blocked by the other with a journal row that refs both and says why one launch cannot carry them`);
+    }
+  return problems;
+}
+
 /** Every fix decision of `stages` is closed by a unit of `pass` whose id starts with `prefix`. */
 function checkTaken(run, stages, pass, prefix) {
   const problems = [];
@@ -1022,6 +1053,10 @@ function checkTaken(run, stages, pass, prefix) {
       problems.push(`${row.finding}: ref ${row.ref}, but it is closed by ${by.map((u) => u.id).join(", ")}`);
   }
   return problems;
+}
+
+function checkTrailers(run) {
+  return (run.commits ?? []).filter((c) => !c.trailersVisible).map((c) => `commit ${c.sha.slice(0, 7)}: a blank line inside its trailers hides Fsloop-Run from %(trailers) — reword it`);
 }
 
 function checkLanded(run, units, stage, commitMessage) {
@@ -1066,11 +1101,12 @@ export function gate(run, stage, { commitMessage = defaultCommitMessage } = {}) 
   const problems = [...prerequisites(run, stage), ...checkLaunches(run, stage), ...checkUnparsed(run, stage), ...checkDecisions(run, stage), ...checkJournal(run)];
   const ofPass = (prefix) => run.units.filter((u) => u.pass === pass && u.id.startsWith(prefix));
 
+  if (["units", "fix", "integrate"].includes(step)) problems.push(...checkTrailers(run));
   if (step === "map" && !run.launches.some((l) => l.stage === stage)) problems.push(`${stage}: no launch saved — Map's report goes through save`);
   if (step === "decompose") {
     const units = ofPass("u");
     if (!units.length) problems.push(`no u-unit of pass ${pass} in units.md`);
-    problems.push(...checkBriefs(run, units));
+    problems.push(...checkBriefs(run, units), ...checkOverlap(run, units));
     const sources = [`p${pass}-map`, `p${pass}-decompose`, ...(pass > 1 ? [`p${pass - 1}-assess`] : [])];
     problems.push(...checkTaken(run, sources, pass, "u"));
   }
@@ -1271,7 +1307,11 @@ function statusOf(run, f) {
   let by = closers(run, f.id);
   // An OPEN line taken by the unit that raised it names that unit as ref; no brief lists it.
   if (!by.length && /^[uf]\d+$/.test(d.ref)) by = run.units.filter((u) => u.id === d.ref);
-  if (!by.length) return { status: "queued" };
+  if (!by.length) {
+    const verdict = run.launches.some(isFixLaunch) ? verdictOf(run, f.id) : null;
+    if (!verdict) return { status: "queued" };
+    return { status: verdict.result === "resolved" ? "closed" : "unresolved", closedBy: verdict.result === "resolved" ? "verdict" : null, checkedBy: verdict.launch, verdict };
+  }
   const unit = by.at(-1);
   if (unit.state === "blocked") return { status: "blocked", unit: unit.id };
   if (unit.state !== "committed") return { status: "in-progress", unit: unit.id };
@@ -1635,6 +1675,8 @@ export function summarize(json) {
   const count = (xs, key) => xs.reduce((m, x) => ((m[x[key] ?? "none"] = (m[x[key] ?? "none"] ?? 0) + 1), m), {});
   const spend = emptySpend();
   for (const l of json.launches ?? []) for (const k of Object.keys(spend)) spend[k] += l.spend[k] + (l.spend.children?.[k] ?? 0);
+  spend.boot = (json.launches ?? []).reduce((sum, l) => sum + (l.spend.boot ?? 0), 0);
+  spend.continuations = (json.launches ?? []).filter((l) => /-c\d+$/.test(l.id)).length;
   if (json.legacy) return json;
   return {
     version: json.version,
@@ -1763,7 +1805,9 @@ export function writeReport(runDir) {
 
 const escapeCell = (s) => String(s ?? "—").replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
 
-export const LAUNCH_COLUMNS = ["launch", "stage", "agent", "description", "model", "started", "ended", "seconds", "input", "output", "cache write", "cache read", "children", "children input", "children output", "children cache write", "children cache read", "agent id", "transcript", "report"];
+export const LAUNCH_COLUMNS = ["launch", "stage", "agent", "description", "model", "started", "ended", "seconds", "input", "output", "cache write", "cache read", "boot", "children", "children input", "children output", "children cache write", "children cache read", "agent id", "transcript", "report"];
+
+export const usageLimitStop = (text) => text.trim().length < 200 && /hit your .*limit|usage limit|rate limit/i.test(text);
 
 export function save(runDir, stage, ref, descriptionGiven) {
   if (!parseStage(stage)) throw new Error(`unknown stage "${stage}"`);
@@ -1773,17 +1817,21 @@ export function save(runDir, stage, ref, descriptionGiven) {
     throw new Error(`no transcript for ${ref} — no agent by that id, no such file, no launch of run ${runId} by that description; relaunch it`);
   const t = readTranscript(transcript);
   if (!t.finalText) throw new Error(`${transcript}: no final message — the launch did not finish; relaunch it`);
+  if (usageLimitStop(t.finalText)) throw new Error(`${transcript}: stopped on a usage limit, no report ("${t.finalText.trim()}") — relaunch it after the reset`);
 
   const launchesPath = join(runDir, "launches.md");
   const existing = parseTable(read(launchesPath));
-  const same = existing.find((r) => cell(r, "transcript") === transcript);
+  const sameRows = existing.filter((r) => cell(r, "transcript") === transcript);
+  const same = sameRows.at(-1);
   if (same && cell(same, "stage") !== stage)
     throw new Error(`already saved as ${cell(same, "launch")} in stage ${cell(same, "stage")}, not ${stage}`);
-  if (same) return { id: cell(same, "launch"), report: cell(same, "report"), existed: true };
+  const continued = Boolean(same) && orNull(cell(same, "ended")) !== null && t.endedAt > cell(same, "ended") && t.finalText.trim() !== read(join(runDir, cell(same, "report"))).trim();
+  if (same && !continued) return { id: cell(same, "launch"), report: cell(same, "report"), existed: true };
+  if (continued && t.lastCallsTool) throw new Error(`${transcript}: the continuation did not finish — its last message calls a tool; wait for it`);
 
-  const description = t.description ?? descriptionGiven;
+  const description = continued ? cell(same, "description") : (t.description ?? descriptionGiven);
   if (!description) throw new Error(`${transcript}: no meta file names the launch — pass its description: save <run folder> <stage> <ref> "<description>"`);
-  const base = `${stage}-${slug(description)}`;
+  const base = continued ? `${cell(sameRows[0], "launch")}-c${sameRows.length}` : `${stage}-${slug(description)}`;
   const taken = new Set(existing.map((r) => cell(r, "launch")));
   mkdirSync(join(runDir, "reports"), { recursive: true });
   let id = base;
@@ -1806,24 +1854,28 @@ export function save(runDir, stage, ref, descriptionGiven) {
     if (e.code !== "EEXIST") throw e;
   }
   const c = childSpend(transcript);
+  const prior = (k) => sameRows.reduce((sum, r) => sum + (Number(cell(r, k)) || 0), 0);
+  const delta = (k, total) => (continued ? Math.max(0, total - prior(k)) : total);
+  const started = continued ? cell(same, "ended") : t.startedAt;
   const values = {
     launch: id,
     stage,
     agent: t.agent,
     description,
     model: t.model,
-    started: t.startedAt,
+    started,
     ended: t.endedAt,
-    seconds: t.seconds,
-    input: t.spend.input,
-    output: t.spend.output,
-    "cache write": t.spend.cacheWrite,
-    "cache read": t.spend.cacheRead,
-    children: c.launches,
-    "children input": c.input,
-    "children output": c.output,
-    "children cache write": c.cacheWrite,
-    "children cache read": c.cacheRead,
+    seconds: continued ? Math.max(0, Math.round((Date.parse(t.endedAt) - Date.parse(started)) / 1000)) : t.seconds,
+    input: delta("input", t.spend.input),
+    output: delta("output", t.spend.output),
+    "cache write": delta("cache write", t.spend.cacheWrite),
+    "cache read": delta("cache read", t.spend.cacheRead),
+    boot: continued ? 0 : t.boot,
+    children: delta("children", c.launches),
+    "children input": delta("children input", c.input),
+    "children output": delta("children output", c.output),
+    "children cache write": delta("children cache write", c.cacheWrite),
+    "children cache read": delta("children cache read", c.cacheRead),
     "agent id": t.agentId,
     transcript,
     report,
@@ -1838,7 +1890,8 @@ export function save(runDir, stage, ref, descriptionGiven) {
 
 const USAGE = `usage:
   node fsl.mjs save  <run folder> <stage> <agent id | output_file | "<description>"> ["<description>"]
-                     file a launch's final block; by description on Resume; the last argument names a launch with no meta file
+                     file a launch's final block; by description on Resume; the last argument names a launch with no meta file;
+                     a transcript saved before whose final block is new (a SendMessage continuation) files as <launch>-c<n> with the spend since
   node fsl.mjs gate   <run folder> <stage>   is the stage done? exit 1 when not
   node fsl.mjs report <run folder>           write the run folder's tables into report.md
   node fsl.mjs build  <run folder>           write run.json and summary.json

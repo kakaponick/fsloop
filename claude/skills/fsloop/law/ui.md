@@ -7,11 +7,11 @@ How to build UI — fsloop's base law for every surface a run builds or judges; 
 **The law grows with the code.** `PRODUCT.md` and `DESIGN.md` describe the product as built, so the change that alters what they describe updates them in the same commit:
 - **`PRODUCT.md`** — a new surface adds its Surfaces row: the one question it answers. A surface whose question changes rewrites its row. Users, purpose and success criteria change only from the user's words.
 - **`DESIGN.md`** — a new or changed token, a shared component's look or variant, a new shared component, or a new named rule updates its section; then the sidecar `.impeccable/design.json` is refreshed with impeccable `document`, the sidecar alone.
-- **The role map** (Roles below) — a component that comes to play a role is named under the implementer's NOTES; the orchestrator records it (`ui.md` → A new surface).
+- **The role map** (Roles below) — a component that comes to play a role is named on a `role:` line of the implementer's NOTES; the orchestrator records it (`fsloop/ui.md` → A new surface).
 
 A change that leaves any of them behind the code breaks this rule.
 
-**On screen.** A component's states and interactions are proven by the code and the tests; a run's frames are `ui.md` → Frames.
+**On screen.** A component's states and interactions are proven by the code and the tests; a run's frames are `fsloop/ui.md` → Frames.
 
 ## Roles
 
@@ -21,12 +21,12 @@ The rules below name the parts of an interface by **role**, not by component: th
 |---|---|
 | primitives | the component library: input, select, combobox, radio group, textarea, switch, checkbox, slider, button, date and time pickers, file dropzone, dialog, tooltip, popover, tabs |
 | status dot | a dot in a signal tone beside a label in regular text — the one way a state shows its color |
-| glossary tooltip | a quiet help icon after a label whose tooltip defines a term or each value of a set |
+| glossary tooltip | a tooltip on a column header's dotted label that defines a term or each value of a set |
 | blocked action | a disabled control that stays focusable and says why it cannot run now and what would let it |
 | confirm dialog / confirm button | the confirmation of a destructive action outside a modal; armed in place inside one |
 | toast | the result of an async action that has no visible refresh |
 | empty state | why a view is empty and what to do next; a table's own variant |
-| fact list | the label–value table of an object page (`ux 9`), with its fold row |
+| fact list | the label–value table of an object page (`ux 9`) |
 | page header | the toolbar strip: navigation, title or breadcrumb, controls, the toolbar fact |
 | adaptive toolbar | a one-line toolbar whose items collapse into a `…` overflow (`table #14`) |
 | status bar | the page's bottom strip: pagination or counts, data age (`table #8`) |
@@ -49,10 +49,14 @@ Light and dark are equal first-class surfaces when the product has both. *Defaul
 
 - **A time names its zone** — a wall-clock time the server acts on is ambiguous without its zone: show the zone the executor actually uses; a browser-local picker states the local zone. A confidently wrong zone is worse than none.
 
-- **Glossary** — the glossary tooltip defines a term, or each value of a set, a new user may not know (`ux 0`), right after the label that names it — a column header, a field label, a section title. A settings page has none: there a setting's description says what it is and does, and every setting stays in view, none folded. One line per term or value, `Value — meaning`; one muted closing line for an exception.
-  - **A glossary line reads the same on every instance of its label** — true on every row, in every state, at any moment. What belongs to the instance — this row's cause, a date, a count, a consequence the user decides by, what a control does, the step that fixes it — is the element's own text or the step its link opens (`ux 1`): the fix a link or a button, an action that cannot run the blocked action, a destructive consequence its confirm.
-  - **The icon is earned by a term**: a label the user reads without one, or a field whose description already says it, has none (`ux 2`). The values a column's cells show are defined once, in its header's glossary; a cell carries none of its own.
-  - Built from the glossary role alone — a hand-rolled icon plus tooltip is a defect. Inside a sortable header it does not trigger the sort.
+- **Glossary** — the glossary tooltip defines a term, or the values of a set a new user may not know (`ux 0`), on the column header that names it. A settings page has none: there a setting's description says what it is and does, and every setting stays in view, none folded.
+  - **Bound** — one entry per term or value, `Value — meaning`, at most 80 characters with its value, wrapping at the tooltip's width; at most 8 entries, a muted closing entry included — the one place for an exception: a case in which a value above means something else. A test over each glossary pins both bounds, as a toolbar fact's test pins its words.
+  - **An entry says what the value is** — a definition, true on every row, in every state, at any moment. What to do about it, why it happened, this row's cause, a date, a count, what a control does, the step that fixes it — each is the element's own text or the step its link opens (`ux 1`): the fix a link or a button, an action that cannot run the blocked action, a destructive consequence its confirm.
+  - **Only the values that leave a question** — a set's glossary lists, in the set's order, the values whose label a new user cannot read alone; a value that reads alone is not listed. A value whose meaning will not fit one entry is renamed until its label carries it (`ux 1`), or its explanation moves to the step the row opens. A cell's second part (the age after a state, a cause after « · ») that leaves a question takes one more entry within the bound.
+  - **The glossary is earned by a term**: a header the user reads without one has none (`ux 2`). The values a column's cells show are defined once, in its header's glossary; a cell carries none of its own.
+  - Built from the glossary role alone — a hand-rolled tooltip is a defect.
+
+- **Tooltip** — holds one of three: a glossary (above), a blocked action's reason (one sentence of at most 100 characters: why it cannot run now, then what would let it), or an icon-only control's name (at most three words — a verb and its object, or the noun of what it opens; its shortcut as `Kbd`). Plain text only: a link, a button, a bulleted list or anything that scrolls makes it a popover or the step it leads to. A preview of an object lives in its row or the step it opens; hover opens nothing else.
 
 - **A new page or control announces itself** — when the product keeps a what's-new registry: a change that adds a page the menu opens, or a control on an existing page its user would not find unprompted, adds its entry with a title that names it and a body of two sentences — what the page or control does, with the system or the user as its subject, then when to open it (`ux 1`). An entry past its window goes whenever the registry is touched.
 
@@ -62,7 +66,8 @@ Light and dark are equal first-class surfaces when the product has both. *Defaul
   - Toolbar filter, combobox and popover triggers hug their content — no floor, no fixed width; a dialog's combobox may floor; collapsed into the `…` overflow, controls span its width (`table #14`).
   - Inline table-cell editors — a floor **and** a cap, inner truncation; never a hard width, never a bare floor.
   - Search inputs: flexible with a cap in toolbars; a fixed width matching the field in dialogs.
-  - Primary calls to action never span their container — right-aligned at content width in dialog footers; icon-only with a tooltip in toolbars with three or more controls.
+  - Primary calls to action never span their container — right-aligned at content width in dialog footers; in a toolbar the page's main action keeps its text label (`ux 0`).
+  - An icon-only toolbar control — a trigger with a conventional icon that holds no value (columns, refresh, more) — is named by its tooltip; search and filters show their field and value (`table #11`, `#12`).
   - Tabs stay content-width, left-aligned.
   - Full width only on layout-only containers, table cells, media wrappers and controls inside the `…` overflow.
 
@@ -70,9 +75,13 @@ Light and dark are equal first-class surfaces when the product has both. *Defaul
 
 - **Content-sized cards keep their own height** — masonry or start-aligned; equal height only for structurally uniform stat tiles.
 
-- **Truncation only for variable-length content in a hard-capped container** — never a defensive default; removing the width cap removes the truncation.
+- **Truncation only for variable-length content in a hard-capped container** — never a defensive default; removing the width cap removes the truncation. A truncated value comes back in full on the step it opens or by copy (in a table, `table #10`).
 
-- **Empty states** — the empty-state role; a table its own variant. It says why it is empty and what to do next (`ux 0`).
+- **Empty states** — the empty-state role; a table its own variant. It says why it is empty and what to do next (`ux 0`), as one of three: nothing yet (what creates it, the action that does), filtered to none (the active filters, Clear), no right (which right, who grants it). A failed load shows its error with Retry in the view's place — an empty state there is a false state.
+
+- **Loading** — a first load draws the skeleton of the final layout under the real page header; a refetch keeps the previous content in place under a progress indicator, never a skeleton or a blank; a spinner sits only in the control whose action runs.
+
+- **Choosing from a list** — a fixed set of at most 7 options is a select; a longer set, or one that grows with data (chats, people, accounts, objects to link), is a combobox whose search runs in the query. A popover list shows at most 10 rows and scrolls inside, under its search.
 
 - **Type, density and component sizes come from `DESIGN.md`** — set once in the shared components and the theme, chosen at a call site by the component's size prop, never by a height or size override; a container never sizes primary text smaller than the body size. Controls that sit together share one height — mixed heights in one group are a visible defect.
 
@@ -80,9 +89,15 @@ Light and dark are equal first-class surfaces when the product has both. *Defaul
 
 - **Persisted preferences have one source of truth** — the persisted store, never mirrored into local state with a sync effect (the async load races the persist and overwrites). Persisted state renders on first paint — no flash of the default then a snap; fix the source of truth, never mask it with a loading gate.
 
-- **Toggles are optimistic** — a switch, checkbox, pin or status flip changes at once: the optimistic value set before the request, no await-then-refresh gate, no disabling while pending.
+- **Toggles are optimistic when the user alone writes the state** — a preference, a pin, a read mark only this user sees, a switch on the user's own setting changes at once: the optimistic value set before the request, no await-then-refresh gate, no disabling while pending. An action on a shared object — take, status, assign, transfer, link — or one that reaches an outside system shows pending in place, then the server's state; a lost race names who won and when.
 
-- **Every async action surfaces its full lifecycle** — pending: a spinner and disabled. Result: a toast and/or a visible refresh — silent inaction and double-fire are both defects. A row-menu action also shows pending in the row (the menu closes on select), and its item reopens disabled with an «…ing» label. Optimistic toggles are exempt.
+- **Every async action surfaces its full lifecycle** — pending: a spinner, disabled, and an «…ing» label — pending is not a blocked action. Result: a toast and/or a visible refresh — silent inaction and double-fire are both defects. A row-menu action also shows pending in the row (the menu closes on select), and its item reopens disabled with its «…ing» label. Optimistic toggles are exempt.
+
+- **Toast** — reports the result of the user's own action: a title of at most 60 characters, at most one action (Retry, Undo, Open). Success leaves on its own; a failure stays until closed. An event the user did not start — a new item, an incoming message, a lost connection — is a live count, a toolbar fact or the product's notification list, never a toast.
+
+- **Live data** — a view fed by an event stream updates in place. Rows never move under the pointer or the focus: new rows, and rows whose sort position changes, gather in one «N new» strip that places them on click, a changed row updating in place until then; a row that changes under an open menu or dialog keeps it open and shows its new state. While the stream is lost a toolbar fact says the connection is lost and the status bar's age counts from the last update. One polite live region per surface announces count changes, batched; single incoming rows are not announced.
+
+- **Keyboard** — a list moves by ↑/↓ and runs its row's pinned action by Enter (`table #13`); no single-character shortcut (a letter, a digit, `/`, `?`) fires while focus is in a text field.
 
 - **Destructive action** — destructive: it deletes, removes, cancels or stops something, or takes away what work runs on (a key, a token, a server), and the same control cannot undo it in one click. Outside a modal — a page, a settings row, a toolbar, a card — it opens the confirm dialog: the title asks the action on its object («Remove the DeepSeek key?»), the description names every loss and what stops, the confirm button repeats the verb. Inside a modal it arms in place, never a dialog on top (`ux 7`). It arms in place with no dialog when it spends but destroys nothing (a run, a build), or edits a draft applied only by Save.
 

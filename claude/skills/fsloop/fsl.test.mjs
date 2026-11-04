@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { build, collect, gate, parseBlock, parseBrief, parseDeploy, parseFinding, parseTable, save, writeReport, writeRunJson } from "./fsl.mjs";
+import { build, collect, gate, parseBlock, parseBrief, parseDeploy, parseFinding, parseTable, save, trailersVisible, usageLimitStop, writeReport, writeRunJson } from "./fsl.mjs";
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "fsl.mjs");
 
@@ -39,7 +39,7 @@ const critic = (lens, findings) =>
 const table = (header, rows) =>
   [`| ${header.join(" | ")} |`, `|${header.map(() => "---").join("|")}|`, ...rows.map((r) => `| ${r.join(" | ")} |`)].join("\n") + "\n";
 
-const brief = ({ kind = "full", blocked = "—", seams = "`createCabinet` in lib/cabinet.ts", closes = "—" } = {}) =>
+const brief = ({ kind = "full", blocked = "—", seams = "`createCabinet` in lib/cabinet.ts", closes = "—", files = ["lib/cabinet.ts"] } = {}) =>
   [
     `Kind: ${kind}`,
     `Blocked by: ${blocked}`,
@@ -51,7 +51,7 @@ const brief = ({ kind = "full", blocked = "—", seams = "`createCabinet` in lib
     "## Done-criteria",
     "- `bun test lib/cabinet.test.ts` red → green",
     "## Files",
-    "- lib/cabinet.ts",
+    ...files.map((f) => `- \`${f}\``),
     "## Reference",
     "- lib/accounts.ts",
     "## Settled",
@@ -163,7 +163,7 @@ describe("save", () => {
     save(run, "p1-review", "sp1");
     const launch = build(collect(run)).launches[0];
     assert.equal(launch.seconds, 90);
-    assert.deepEqual(launch.spend, { input: 12, output: 340, cacheWrite: 1200, cacheRead: 1000, children: { launches: 0, input: 0, output: 0, cacheWrite: 0, cacheRead: 0 } });
+    assert.deepEqual(launch.spend, { input: 12, output: 340, cacheWrite: 1200, cacheRead: 1000, boot: 1010, children:{ launches: 0, input: 0, output: 0, cacheWrite: 0, cacheRead: 0 } });
     assert.deepEqual([launch.agentId, launch.startedAt, launch.endedAt, launch.transcriptGone], ["sp1", "2026-10-18T10:00:00.000Z", "2026-10-18T10:01:30.000Z", false]);
   });
 
@@ -263,7 +263,7 @@ describe("gate", () => {
     put(join(run, "findings", "p1-map.md"), table(["finding", "decision", "ref", "repeat", "why"], [["p1-map-baseline-craft-cabinets#craft-1", "fix", "u1", "—", "ux 2 major"]]));
     put(join(run, "units.md"), table(["unit", "pass", "state", "tree", "title"], [["u1", "1", "implement", "—", "cabinet page"], ["u2", "1", "implement", "—", "list"]]));
     put(join(run, "units", "u1", "brief.md"), brief({ seams: "—" }));
-    put(join(run, "units", "u2", "brief.md"), brief({ kind: "ui", blocked: "u9", seams: "—" }).replace("## Reference\n- lib/accounts.ts\n", ""));
+    put(join(run, "units", "u2", "brief.md"), brief({ kind: "ui", blocked: "u9", seams: "—", files: ["app/cabinets/list.tsx"] }).replace("## Reference\n- lib/accounts.ts\n", ""));
     green("p1-map", "p1-spike");
     const problems = gate(collect(run), "p1-decompose");
     assert.deepEqual(problems.sort(), [
@@ -271,6 +271,19 @@ describe("gate", () => {
       "u1: Kind full has a backend part — its seams cannot be —",
       "u2: Blocked by u9, no such unit in units.md",
       'u2: brief has no "## reference" section',
+    ]);
+  });
+
+  test("decompose reads each manifest and holds two units that write one file, a shared catalog excepted", () => {
+    common();
+    put(join(run, "units.md"), table(["unit", "pass", "state", "tree", "title"], [["u1", "1", "implement", "—", "cabinet page"], ["u2", "1", "implement", "—", "cabinet list"], ["u3", "1", "implement", "—", "balance"]]));
+    put(join(run, "units", "u1", "brief.md"), brief({ files: ["lib/cabinet.ts", "./app/cabinet.tsx", "messages/ru.json"] }));
+    put(join(run, "units", "u2", "brief.md"), brief({ files: ["app/cabinet.tsx", "messages/ru.json"] }));
+    put(join(run, "units", "u3", "brief.md"), brief().replace("- `lib/cabinet.ts`", "- lib/balance.ts"));
+    green("p1-map", "p1-spike");
+    assert.deepEqual(gate(collect(run), "p1-decompose").sort(), [
+      "u1, u2: both write app/cabinet.tsx — one unit, or one Blocked by the other with a journal row that refs both and says why one launch cannot carry them",
+      'u3: brief\'s "## Files" has no "- `<path>`" line — one path per line from the repo root',
     ]);
   });
 
@@ -843,6 +856,24 @@ describe("run.json for a UI", () => {
     assert.deepEqual([offline.commits, offline.units[0].sha], [null, "1111111"]);
   });
 
+  test("units names a commit whose trailers a blank line hides from %(trailers)", () => {
+    common();
+    put(join(run, "units.md"), table(["unit", "pass", "state", "tree", "title"], [["u1", "1", "committed 2222222", "—", "page"], ["u2", "1", "committed 3333333", "—", "list"]]));
+    for (const u of ["u1", "u2"]) put(join(run, "units", u, "brief.md"), brief());
+    const record = (sha, subject, trailers) => `${sha}\x1f2026-10-18T10:00:00+00:00\x1f${subject}\x1f${subject}\n\n${trailers.join("\n")}\n\0`;
+    const attribution = "Co-Authored-By: Claude <noreply@anthropic.com>";
+    const fake = (_start, args) =>
+      args[0] === "rev-parse"
+        ? "x\n"
+        : [
+            record("2222222aaaa", "feat: page", ["Fsloop-Run: ab12cd34", "Fsloop-Step: u1 1/2", attribution]),
+            record("3333333bbbb", "feat: list", ["Fsloop-Run: ab12cd34", "Fsloop-Step: u2 2/2", "", attribution]),
+          ].join("\n");
+    green("p1-decompose");
+    const problems = gate(collect(run, { git: fake }), "p1-units", { commitMessage });
+    assert.deepEqual(problems.filter((p) => p.startsWith("commit ")), ["commit 3333333: a blank line inside its trailers hides Fsloop-Run from %(trailers) — reword it"]);
+  });
+
   test("a launch keeps its whole block; verdicts are exported matched or not; a JUDGED finding is named; OPEN lines are findings", () => {
     common();
     transcript("o1", {
@@ -983,5 +1014,27 @@ describe("run.json for a UI", () => {
     assert.equal(build(collect(home)).mirror, false);
     put(join(run, "common.md"), ["Run: ab12cd34", "Mode: worktree", `Start: ${join(root, "repo")}`].join("\n"));
     assert.equal(build(collect(run)).mirror, true);
+  });
+});
+
+describe("trailersVisible", () => {
+  const body = "fix(x): do y\n\nWhy.\n\n";
+
+  test("attribution directly under the trailers keeps them in the last paragraph", () => {
+    assert.equal(trailersVisible(`${body}Fsloop-Run: 6ab74c3e\nFsloop-Step: f7 9/9\nCo-Authored-By: Claude <noreply@anthropic.com>\n`, "6ab74c3e"), true);
+  });
+
+  test("a blank line before the attribution hides them, as on commit 6777064", () => {
+    assert.equal(trailersVisible(`${body}Fsloop-Run: 6ab74c3e\nFsloop-Step: f7 9/9\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n`, "6ab74c3e"), false);
+  });
+});
+
+describe("usageLimitStop", () => {
+  test("the one-line stop of run f1e9b903 is no report", () => {
+    assert.equal(usageLimitStop("You've hit your 5-hour limit · resets 4:20pm (Europe/Moscow)"), true);
+  });
+
+  test("a real report that mentions Telegram's rate limit stays a report", () => {
+    assert.equal(usageLimitStop(`LENS: code\nFINDINGS:\ncode-1 major the rate limit of resolveUsername is not honoured ${"x".repeat(200)}`), false);
   });
 });

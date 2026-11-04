@@ -213,23 +213,18 @@ async function serve(opts) {
   if (!opts.cmd || !opts.url || !opts.pidfile) throw new Error("serve needs --cmd, --url and --pidfile");
   const log = resolve(opts.log ?? `${opts.pidfile}.log`);
   mkdirSync(dirname(log), { recursive: true });
-  const fd = openSync(log, "a");
-  const child = spawn(opts.cmd, {
-    shell: true,
-    cwd: opts.cwd ?? process.cwd(),
-    env: { ...process.env, ...opts.env },
-    detached: true,
-    stdio: ["ignore", fd, fd],
-    windowsHide: true,
-  });
-  closeSync(fd);
-  writeFileSync(opts.pidfile, `${child.pid} ${startTime(child.pid) ?? ""}\n`);
-  let exited = null;
-  child.on("exit", (code) => (exited = code));
-  child.unref();
+  const cwd = opts.cwd ?? process.cwd();
+  const env = { ...process.env, ...opts.env };
+  const server = process.platform === "win32" ? launchHidden(opts.cmd, cwd, env, log) : launchDetached(opts.cmd, cwd, env, log);
+  if (!server.pid) {
+    console.error(`serve: the server did not start — ${server.error}`);
+    return 2;
+  }
+  writeFileSync(opts.pidfile, `${server.pid} ${server.started ?? ""}\n`);
   const started = Date.now();
   const deadline = started + Number(opts.timeout ?? 180) * 1000;
   while (Date.now() < deadline) {
+    const exited = server.exited();
     if (exited !== null) {
       console.error(`serve: the server exited ${exited} before answering — ${log}`);
       return 2;
@@ -237,15 +232,49 @@ async function serve(opts) {
     try {
       const r = await fetch(opts.url, { redirect: "manual" });
       if (r.status < 500) {
-        console.log(JSON.stringify({ ok: true, pid: child.pid, url: opts.url, status: r.status, ms: Date.now() - started, log }));
+        console.log(JSON.stringify({ ok: true, pid: server.pid, url: opts.url, status: r.status, ms: Date.now() - started, log }));
         return 0;
       }
     } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   console.error(`serve: ${opts.url} did not answer in ${opts.timeout ?? 180} s — ${log}`);
-  stopPid(child.pid);
+  stopPid(server.pid);
   return 2;
+}
+
+function launchDetached(cmd, cwd, env, log) {
+  const fd = openSync(log, "a");
+  const child = spawn(cmd, { shell: true, cwd, env, detached: true, stdio: ["ignore", fd, fd] });
+  closeSync(fd);
+  let code = null;
+  child.on("exit", (c) => (code = c ?? "by a signal"));
+  child.unref();
+  return { pid: child.pid, started: startTime(child.pid), exited: () => code, error: "spawn failed" };
+}
+
+const HIDDEN_LAUNCH = [
+  `$i = New-Object System.Diagnostics.ProcessStartInfo 'cmd.exe', '/d /c %FSL_SERVE_CMD%'`,
+  "$i.UseShellExecute = $false",
+  "$i.CreateNoWindow = $true",
+  "$i.WorkingDirectory = $env:FSL_SERVE_CWD",
+  "$p = [System.Diagnostics.Process]::Start($i)",
+  "Set-Content -LiteralPath $env:FSL_SERVE_PID -Value $p.Id",
+].join("; ");
+
+function launchHidden(cmd, cwd, env, log) {
+  const pidOut = `${log}.launch`;
+  rmSync(pidOut, { force: true });
+  const r = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", HIDDEN_LAUNCH], {
+    stdio: "ignore",
+    windowsHide: true,
+    env: { ...env, FSL_SERVE_CMD: `(${cmd}) >> "${log}" 2>&1`, FSL_SERVE_CWD: cwd, FSL_SERVE_PID: pidOut },
+  });
+  const pid = existsSync(pidOut) ? Number(readFileSync(pidOut, "utf8").trim()) : NaN;
+  rmSync(pidOut, { force: true });
+  if (r.status !== 0 || !Number.isInteger(pid) || pid <= 0) return { pid: null, error: `powershell exited ${r.status} — ${log}` };
+  const started = startTime(pid);
+  return { pid, started, exited: () => (started !== null && startTime(pid) === started ? null : "(exit code unknown)") };
 }
 
 function stopPid(pid) {

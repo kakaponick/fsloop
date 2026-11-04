@@ -78,7 +78,9 @@ function collect(path) {
   for (const v of byId.values()) for (const k of Object.keys(sum)) sum[k] += v[k];
   const last = lastId ? byId.get(lastId) : null;
   const window = last ? last.input + last.output + last.cacheWrite + last.cacheRead : 0;
-  return { ...sum, window, steps, tools: tools.size, shots, images };
+  const first = byId.values().next().value;
+  const boot = first ? first.input + first.cacheWrite + first.cacheRead : 0;
+  return { ...sum, window, boot, steps, tools: tools.size, shots, images };
 }
 
 const rows = [];
@@ -111,6 +113,7 @@ for (const arg of args) {
         output: t.output,
         input: t.input + t.cacheWrite + t.cacheRead,
         window: t.window,
+        boot: t.boot,
       });
     }
   }
@@ -138,7 +141,7 @@ const agents = (n) => {
   return `${n} ${word}`;
 };
 
-const SUMMED =["shots", "images", "input", "output", "window"];
+const SUMMED =["shots", "images", "input", "output", "window", "boot"];
 const total = (list) => {
   const t = Object.fromEntries(SUMMED.map((k) => [k, 0]));
   for (const r of list) for (const k of SUMMED) t[k] += r[k];
@@ -153,29 +156,29 @@ for (const r of rows) {
 }
 
 const out = [
-  "| Юнит | Роль | Раунд | Шаги | Снимков | Просмотров | Контекст | Вывод | Прочитано с кэшем |",
-  "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+  "| Юнит | Роль | Раунд | Шаги | Снимков | Просмотров | Загрузка | Контекст | Вывод | Прочитано с кэшем |",
+  "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
 ];
 for (const u of units) {
   for (const r of u.rows)
     out.push(
-      `| ${r.unit} | ${r.role} | ${r.round} | ${r.steps} | ${r.shots} | ${r.images} | ${fmt(r.window)} | ${fmt(r.output)} | ${fmt(r.input)} |`,
+      `| ${r.unit} | ${r.role} | ${r.round} | ${r.steps} | ${r.shots} | ${r.images} | ${fmt(r.boot)} | ${fmt(r.window)} | ${fmt(r.output)} | ${fmt(r.input)} |`,
     );
   if (units.length > 1 && u.rows.length > 1) {
     const t = total(u.rows);
     out.push(
-      `| **${u.unit}** | | | | **${t.shots}** | **${t.images}** | **${fmt(t.window)}** | **${fmt(t.output)}** | **${fmt(t.input)}** |`,
+      `| **${u.unit}** | | | | **${t.shots}** | **${t.images}** | **${fmt(t.boot)}** | **${fmt(t.window)}** | **${fmt(t.output)}** | **${fmt(t.input)}** |`,
     );
   }
 }
 
 const grand = total(rows);
 out.push(
-  `| **Всего** | ${agents(rows.length)} | | | **${grand.shots}** | **${grand.images}** | **${fmt(grand.window)}** | **${fmt(grand.output)}** | **${fmt(grand.input)}** |`,
+  `| **Всего** | ${agents(rows.length)} | | | **${grand.shots}** | **${grand.images}** | **${fmt(grand.boot)}** | **${fmt(grand.window)}** | **${fmt(grand.output)}** | **${fmt(grand.input)}** |`,
 );
 out.push("");
 out.push(
-  "Контекст — токены агента в панели агентов (контекст последнего шага), «Всего» — её Σ; Вывод — всё, что модель написала; Прочитано с кэшем — справка: каждый шаг перечитывает весь контекст заново.",
+  "Загрузка — промпт первого шага (системный промпт, CLAUDE.md, инструменты, бриф): цена самого запуска, которую продолжение через SendMessage не платит; Контекст — токены агента в панели агентов (контекст последнего шага), «Всего» — её Σ; Вывод — всё, что модель написала; Прочитано с кэшем — справка: каждый шаг перечитывает весь контекст заново.",
 );
 
 const byRole = new Map();
@@ -199,7 +202,7 @@ if (shotsDir && existsSync(shotsDir)) {
 
 out.push(
   "",
-  `**Расход:** ${agents(rows.length)}, ${fmt(grand.window)} токенов контекста — Σ панели агентов. Дороже всего ${costliest[0]}: ${fmt(costliest[1])}. Ревью к реализации — ${ratio} (ревью ${fmt(crit)}, реализация ${fmt(impl)}).`,
+  `**Расход:** ${agents(rows.length)}, ${fmt(grand.window)} токенов контекста — Σ панели агентов; загрузка запусков ${fmt(grand.boot)}. Дороже всего ${costliest[0]}: ${fmt(costliest[1])}. Ревью к реализации — ${ratio} (ревью ${fmt(crit)}, реализация ${fmt(impl)}).`,
 );
 for (const o of orchestrators)
   out.push(
