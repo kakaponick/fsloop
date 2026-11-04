@@ -6,27 +6,28 @@
 
 | Путь | Что |
 | --- | --- |
-| `claude/skills/fsloop/SKILL.md` | оркестратор `/fsloop [N] [jK] <goal>` |
-| `claude/skills/fsloop/law/` | закон fsloop: `ux.md` (законы 0–9), `ui.md` (вёрстка, конвенции, шапка страницы, порядок приоритетов), `table.md` (таблицы #1–15), `code.md`, `tests.md` (1–12) — базовая планка для любого репо |
-| `claude/skills/fsloop/inline.md` | режим inline: маленькая цель в текущей рабочей копии, без worktree |
-| `claude/skills/fsloop/ui.md` | UI-часть: impeccable по стадиям, baseline, новая поверхность, кадры |
-| `claude/skills/fsloop/backend.md` | сессии и живые критерии |
-| `claude/skills/fsloop/spike.md` | `/fsloop spike <question>` — исследование неизвестного |
-| `claude/skills/fsloop/assess.md` | оценка и повторные проходы при `N` |
-| `claude/skills/fsloop/json-merge.mjs`, `merge.attributes` | merge-драйвер i18n-каталогов по ключам: юниты, дописывающие ключи в один JSON, не конфликтуют |
-| `claude/skills/fsloop/spike-lease.mjs` | аренда аккаунтов из `.spike/sessions/` и зеркало `.spike/` в worktree — [опционально](#spike-lease-опционально) |
-| `claude/skills/fsloop/fsl.mjs` | хранитель папки прогона: `save` сохраняет отчёт каждого запуска агента, `gate` проверяет, что шаг завершён, `report` пишет таблицы отчёта, `build` собирает `run.json` — [подробнее](#папка-прогона) |
-| `claude/skills/fsloop/init.md` | `/fsloop init`: агент сам заполняет и проверяет `.claude/fsloop/config.md` — [подробнее](#init) |
-| `claude/skills/fsloop/shot.mjs` | движок съёмки для проектов без своего инструмента: поднять dev-сервер, войти, снять кадр (страница, диалог по шагам, регион), остановить по pid |
-| `claude/skills/fsloop/spend.mjs` | расход токенов по сабагентам сессии, для отчёта |
-| `claude/skills/fsloop/debug.md` | приёмы `fsloop-debug`: тест красный в общем прогоне и зелёный один, неверное значение глубоко в стеке |
-| `claude/skills/fsloop/find-polluter.mjs` | бисекция тест-файла, который загрязняет состояние жертвы; любой раннер с JUnit-отчётом (`--run`), для bun — без настройки |
-| `claude/agents/` | `fsloop-implement`, `fsloop-debug`, `fsloop-critic`, `spike-researcher`, `prod-check`, `cold-read` (холодное чтение новых UI-строк), `fsloop-shots` (подбор и проверка способа съёмки для init), `shots-proof` (подтверждает, что кадр init показывает нужную страницу) |
-| `claude/hooks/spike-guard.mjs` | блок ручных ссылок, копий сессий и удаления аренды |
+| `skills/fsloop/SKILL.md` | оркестратор `/fsloop [N] [jK] <goal>` |
+| `skills/fsloop/law/` | закон fsloop: `ux.md` (законы 0–9), `ui.md` (вёрстка, конвенции, шапка страницы, порядок приоритетов), `table.md` (таблицы #1–15), `code.md`, `tests.md` (1–12) — базовая планка для любого репо |
+| `skills/fsloop/inline.md` | режим inline: маленькая цель в текущей рабочей копии, без worktree |
+| `skills/fsloop/ui.md` | UI-часть: impeccable по стадиям, baseline, новая поверхность, кадры |
+| `skills/fsloop/backend.md` | сессии и живые критерии |
+| `skills/fsloop/spike.md` | `/fsloop spike <question>` — исследование неизвестного |
+| `skills/fsloop/assess.md` | оценка и повторные проходы при `N` |
+| `skills/fsloop/json-merge.mjs`, `merge.attributes` | merge-драйвер i18n-каталогов по ключам: юниты, дописывающие ключи в один JSON, не конфликтуют |
+| `skills/fsloop/spike-lease.mjs` | аренда аккаунтов из `.spike/sessions/` и зеркало `.spike/` в worktree — [опционально](#spike-lease-опционально) |
+| `skills/fsloop/fsl.mjs` | хранитель папки прогона: `save` сохраняет отчёт каждого запуска агента, `gate` проверяет, что шаг завершён, `report` пишет таблицы отчёта, `build` собирает `run.json` — [подробнее](#папка-прогона) |
+| `skills/fsloop/init.md` | `/fsloop init`: агент сам заполняет и проверяет `.claude/fsloop/config.md` — [подробнее](#init) |
+| `skills/fsloop/shot.mjs` | движок съёмки для проектов без своего инструмента: поднять dev-сервер, войти, снять кадр (страница, диалог по шагам, регион), остановить по pid |
+| `skills/fsloop/spend.mjs` | расход токенов по сабагентам сессии, для отчёта |
+| `skills/fsloop/debug.md` | приёмы `fsloop-debug`: тест красный в общем прогоне и зелёный один, неверное значение глубоко в стеке |
+| `skills/fsloop/find-polluter.mjs` | бисекция тест-файла, который загрязняет состояние жертвы; любой раннер с JUnit-отчётом (`--run`), для bun — без настройки |
+| `agents/` | `fsloop-implement`, `fsloop-debug`, `fsloop-critic`, `spike-researcher`, `prod-check`, `cold-read` (холодное чтение новых UI-строк), `fsloop-shots` (подбор и проверка способа съёмки для init), `shots-proof` (подтверждает, что кадр init показывает нужную страницу) |
+| `hooks/spike-guard.mjs` | блок ручных ссылок, копий сессий и удаления аренды |
+| `install.mjs` | установка: ссылки в `~/.claude`, хук, подготовка проекта — [подробнее](#установка) |
 
 ## Требования
 
-- git, Node 20+.
+- git, Node 24+ (хук `spike-guard` опирается на `import.meta.main`).
 - Плагин `mattpocock-skills`: агенты грузят `tdd`, `diagnosing-bugs`, `codebase-design`, `code-review`.
   ```
   /plugin marketplace add mattpocock/skills
@@ -38,20 +39,23 @@
   - скилл `prod` (или раздел в `CLAUDE.md`) с командами чтения продакшена — для формы данных на Map и для `prod-check` после пуша. Без него форма берётся из схемы, проверки деплоя нет.
 - Windows: `spike-lease` делает junction (`mklink /J`) и hardlink, прав администратора не нужно.
 
-## Установка в проект
+## Установка
+
+fsloop ставится один раз на машину, а не в каждый проект: `~/.claude` ссылается на этот клон, и правка в нём сразу видна во всех проектах.
 
 ```
 git clone https://github.com/kakaponick/fsloop
-node fsloop/install.mjs <путь к репо проекта>
+node fsloop/install.mjs                  # машина
+node fsloop/install.mjs <путь к репо>    # машина и проект
 ```
 
 Установщик:
-- копирует `claude/` в `<repo>/.claude/`;
-- добавляет хук `spike-guard` в `.claude/settings.json`;
-- добавляет `.spike/` в `.gitignore`, а в `.git/info/exclude` — `.claude/fsloop/*` и `!.claude/fsloop/config.md`: папки прогонов не попадают в git, `config.md` попадает;
-- создаёт `.spike/{data,sessions,toolkits}` и шаблон `README.md`.
+- ставит три ссылки — `~/.claude/skills/fsloop` → `skills/fsloop`, `~/.claude/agents/fsloop` → `agents`, `~/.claude/hooks/fsloop` → `hooks`. Это junction: файловый симлинк Windows делает только в режиме разработчика, junction — всегда; агентов из папки внутри `agents/` Claude Code читает так же, как лежащих в ней;
+- добавляет хук `spike-guard` в `~/.claude/settings.json`;
+- ссылку, которая ведёт в другое место, переставляет на этот клон; настоящую папку или файл на месте ссылки не трогает и останавливается;
+- с путём к репо — добавляет `.spike/` в `.gitignore`, а в `.git/info/exclude` — `.claude/fsloop/*` и `!.claude/fsloop/config.md` (папки прогонов не попадают в git, `config.md` попадает), создаёт `.spike/{data,sessions,toolkits}` и шаблон `README.md`, и называет копию fsloop, которая осталась в проекте (`.claude/skills/fsloop`, агенты, хук в `.claude/settings.json`), — её надо удалить, чтобы работала только глобальная.
 
-Повторный запуск обновляет файлы и не дублирует хук.
+`--claude-dir <папка>` ставит ссылки и хук в другую папку вместо `~/.claude`. Повторный запуск ничего не дублирует.
 
 ## Проект
 
@@ -65,7 +69,7 @@ fsloop берёт всё про проект из его `CLAUDE.md` (и фай�
 
 Для UI fsloop читает `PRODUCT.md` и `DESIGN.md` (это файлы impeccable), закон fsloop `law/ui.md` и `law/ux.md`, а поверх — правила UI/UX проекта, если `CLAUDE.md` их называет. Кадры снимаются по рецепту из `config.md` → Shots, который проверил `/fsloop init`. Без него — инструментом скриншотов проекта, если `CLAUDE.md` его называет, иначе `shot.mjs`.
 
-i18n-каталоги, которые сливаются по ключам, перечислены в `claude/skills/fsloop/merge.attributes` (`messages/*.json`, `locales/**/*.json` …). Если у вас другой путь — допишите его туда.
+i18n-каталоги, которые сливаются по ключам, перечислены в `skills/fsloop/merge.attributes` (`messages/*.json`, `locales/**/*.json` …). Если у вас другой путь — допишите его туда.
 
 ## Spike lease (опционально)
 
@@ -191,7 +195,7 @@ Id находки — `<запуск>#<id>` (`p1-review-critic-code#code-3`). П
 ## Проверка скриптов
 
 ```
-node --test claude/skills/fsloop/find-polluter.test.mjs claude/skills/fsloop/fsl.test.mjs claude/skills/fsloop/shot.test.mjs
+node --test install.test.mjs skills/fsloop/find-polluter.test.mjs skills/fsloop/fsl.test.mjs skills/fsloop/shot.test.mjs
 ```
 
 Настоящая съёмка в `shot.test.mjs` идёт, только если найдены `puppeteer-core` (в проекте или в `FSLOOP_HOME`) и Chrome; иначе этот тест пропускается.
