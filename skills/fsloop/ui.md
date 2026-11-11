@@ -9,7 +9,7 @@ Read once per run, when first needed: at Map when any unit will have a UI part. 
 | Decompose | `fsloop-critic` `LENS: design`, with two or more UI units (Design check) | the briefs' UI parts and the conventions across them |
 | Implement | `fsloop-implement` | `craft-floor` → build → `harden` · `clarify` · `layout` as the change calls → `polish` → `detect` |
 | Review | `fsloop-critic` `LENS: craft` | `critique` + `audit` per surface, consistency across surfaces |
-| Fix | `fsloop-implement`, one fix unit per surface | the ORDER lines' commands in sequence, `polish` last; then one `LENS: craft verdict` without `N` |
+| Fix | `fsloop-implement`, one fix unit per surface | the ORDER lines' commands in sequence, `polish` last; then one `LENS: craft verdict` |
 | Integrate | `fsloop-critic` `LENS: craft verdict`, when the merge changed a surface's files | the merge's diff against the surface's final frame |
 
 ## impeccable in a launch
@@ -67,7 +67,7 @@ A frame is a judge's view of the surface in its context, showing what changed as
   - each surface the run made or reshaped — a reshaped one at its typical state, a new one at its volume;
   - for each shared file a unit changed (a shared component, the theme, a lint contract), its first consumer by `git -C <wt> grep -l` of its import, the busiest page first when it is one.
 
-  Review's craft critic, every craft verdict, Assess and the Finish summary read these, each with the patches landed since.
+  Review's craft critic, every craft verdict, the improvement search (`assess.md`) and the Finish summary read these, each with the patches landed since.
 
 A unit's UI is proven by its tests, `detect` and the lint until the final frames (impeccable in a launch → Screen evidence). A frame is never retaken — what it shows is a finding for Fix.
 

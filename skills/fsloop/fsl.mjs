@@ -706,6 +706,9 @@ export function collect(runDir, { git: runGit = git } = {}) {
       if (FINDING_ID.test(f.id)) take(f.id, f);
       else unparsed("FINDINGS", k, line);
     });
+    block.CANDIDATES?.items.forEach((line, k) => {
+      if (!NONE.test(line.trim())) take(`cand-${k + 1}`, { parsed: "loose", severity: "minor", cand: true, raw: line });
+    });
     // An implementer's or debugger's OPEN line is above the bar (SKILL.md → Bar): a finding, decided like the critics'.
     const openLines = opensFindings(l);
     if (openLines) block.OPEN?.items.forEach((line, k) => take(`open-${k + 1}`, { parsed: "loose", severity: null, raw: line }));
@@ -804,7 +807,7 @@ export function collect(runDir, { git: runGit = git } = {}) {
 
   const passes = parseTable(read(join(runDir, "passes.md"))).map((r) => ({
     pass: Number(cell(r, "pass").replace(/^p/, "")),
-    criticalMajor: Number(cell(r, "critical+major")),
+    taken: Number(cell(r, "taken") || cell(r, "critical+major")),
     outcome: cell(r, "outcome").toLowerCase(),
     why: cell(r, "why"),
   }));
@@ -949,15 +952,42 @@ export function refKind(run, ref) {
   return "text";
 }
 
-/** Critical and major assess findings above the bar — the count the pass rule runs on. */
-export function weight(run, pass) {
-  let n = 0;
+export function takenFor(run, pass) {
+  return [...run.decisions.values()].filter((d) => d.decision === "fix" && d.ref === `p${pass + 1}`).length;
+}
+
+const searchedAt = (run, stage) => run.launches.some((l) => l.stage === stage && l.description === "critic improve" && isCritic(l, "improve"));
+const ofFirstPass = (f) => /^p1-/.test(f.stage) && f.category !== "improve";
+
+export function carriedTo(run, pass) {
+  if (pass !== 2) return [];
+  return [...run.findings.values()].filter((f) => {
+    const d = run.decisions.get(f.id);
+    return ofFirstPass(f) && d?.decision === "fix" && (d.ref === "p2" || run.units.some((u) => u.id === d.ref && u.pass === 2));
+  });
+}
+
+export function leftByFirstPass(run) {
+  const left = [];
+  const carried = new Set(carriedTo(run, 2));
   for (const f of run.findings.values()) {
-    if (f.stage !== `p${pass}-assess` || !["critical", "major"].includes(f.severity)) continue;
-    const d = run.decisions.get(f.id)?.decision;
-    if (d === "fix" || d === "open") n++;
+    if (!ofFirstPass(f)) continue;
+    const d = run.decisions.get(f.id);
+    if (!d) {
+      if (f.cand) left.push({ f, status: "candidate" });
+    } else if (d.decision === "candidate" || d.decision === "open") left.push({ f, status: d.decision });
+    else if (d.decision === "fix" && !carried.has(f)) {
+      const v = verdictOf(run, f.id);
+      if (v && v.result !== "resolved") left.push({ f, status: v.result });
+    }
   }
-  return n;
+  return left;
+}
+
+export function passKind(run, pass) {
+  if (pass === 1) return "build";
+  if (pass === 2 && !searchedAt(run, "p1-assess") && carriedTo(run, 2).length) return "carry";
+  return "improve";
 }
 
 // ── gate ──────────────────────────────────────────────────────────────────────────────────────
@@ -994,23 +1024,25 @@ function prerequisites(run, stage) {
     const outcome = run.passes.find((p) => p.pass === pass - 1)?.outcome;
     return outcome === "next" ? [] : [`p${pass - 1} outcome is ${outcome ?? "missing"}, not next`];
   };
+  const carry = passKind(run, pass) === "carry";
   const order = {
     map: [],
     spike: [`p${pass}-map`],
     decompose: [`p${pass}-map`, `p${pass}-spike`],
     units: [`p${pass}-decompose`],
     review: [`p${pass}-units`],
-    fix: [`p${pass}-review`],
+    fix: carry ? [] : [`p${pass}-review`],
     verdict: [`p${pass}-fix`],
-    assess: [`p${pass}-fix`],
+    assess: [`p${pass}-verdict`],
   }[step];
   const problems = [];
-  if (pass > 1 && ["map", "spike", "decompose"].includes(step)) problems.push(...previousAssess());
+  if (carry && ["map", "spike", "decompose", "units", "review"].includes(step))
+    problems.push(`p${pass} carries pass ${pass - 1}'s findings — its stages are fix, verdict and assess (assess.md → Passes)`);
+  if (pass > 1 && (["map", "spike", "decompose"].includes(step) || (carry && step === "fix"))) problems.push(...previousAssess());
   for (const s of order) {
     const optional = pass > 1 && /-(map|spike)$/.test(s) && !gated(s);
     if (!optional && !isGreen(run, s)) problems.push(`${s} is not green`);
   }
-  if (step === "verdict" && N) problems.push("verdict runs without N — this run has N, its check is assess");
   if (step === "assess" && !N) problems.push("assess runs only with N — common.md has none");
   return problems;
 }
@@ -1037,7 +1069,7 @@ function checkJournal(run) {
 
 function checkDecisions(run, stage) {
   const problems = [];
-  const expected = [...run.findings.values()].filter((f) => f.stage === stage);
+  const expected = [...run.findings.values()].filter((f) => f.stage === stage && !f.cand);
   const rows = run.rowsByStage[stage] ?? [];
   const seen = new Map();
   for (const row of rows) seen.set(row.finding, (seen.get(row.finding) ?? 0) + 1);
@@ -1066,8 +1098,8 @@ function checkDecisions(run, stage) {
         if (!next) problems.push(`${where}: an assess finding is fixed by the next pass — ref p${pass + 1}`);
         else if (Number(next[1]) !== pass + 1) problems.push(`${where}: ref ${row.ref} — the next pass is p${pass + 1}`);
         else if (run.common.N && pass + 1 > run.common.N) problems.push(`${where}: p${pass + 1} is past N=${run.common.N} — open, not fix`);
-      } else if (!NONE.test(row.ref) && !/^[uf]\d+$/.test(row.ref))
-        problems.push(`${where}: a fix's ref is the unit that takes it (u<k>, f<k>) or —`);
+      } else if (!NONE.test(row.ref) && !/^[uf]\d+$/.test(row.ref) && !(pass === 1 && run.common.N > 1 && row.ref === "p2"))
+        problems.push(`${where}: a fix's ref is the unit that takes it (u<k>, f<k>) or —${pass === 1 && run.common.N > 1 ? ", or p2 when pass 2 carries it" : ""}`);
     }
     if (row.decision === "duplicate" && (!run.findings.has(row.ref) || row.ref === row.finding))
       problems.push(`${where}: duplicate needs the finding it repeats as ref`);
@@ -1347,7 +1379,7 @@ function releaseOf(run, key, entry) {
     const s = parseStage(stage);
     if (!s) return false;
     if (s.pass === null) return s.step === "integrate";
-    return s.pass <= lastPass(run) && (s.step === "assess" ? Boolean(run.common.N) : s.step === "verdict" ? !run.common.N : true);
+    return s.pass <= lastPass(run) && (s.step === "assess" ? Boolean(run.common.N) : true);
   };
   const j = run.journal.filter((r) => Number(r.n) > (entry.listedMark ?? entry.mark) && ran(r.stage) && /^(drop|defer)\b/i.test(r.decision) && refsOf(r).includes(key)).at(-1);
   return j ? { key, fate: /^defer/i.test(j.decision) ? "defer" : "drop", ref: `j${j.n}`, unit: null, state: null, pass: entry.pass, via: "journal" } : null;
@@ -1682,7 +1714,7 @@ function checkParityCritics(run, stage) {
   const stages = [];
   for (let q = 1; q <= upTo; q++) {
     const past = q < upTo || pass === null;
-    if (past || AFTER_UNITS.includes(step)) stages.push(`p${q}-review`);
+    if ((past || AFTER_UNITS.includes(step)) && passKind(run, q) !== "carry") stages.push(`p${q}-review`);
     if (run.common.N && (past || step === "assess")) stages.push(`p${q}-assess`);
   }
   const problems = [];
@@ -1697,8 +1729,8 @@ function checkParityCritics(run, stage) {
         );
     }
   }
-  if ((step === "review" || step === "assess") && !run.launches.some((l) => l.stage === stage && l.description === "critic code" && isCritic(l, step === "assess" ? "code assess" : "code")))
-    problems.push(`${stage}: no "critic code" report of fsloop-critic with LENS: ${step === "assess" ? "code assess" : "code"} saved — a parity critic is no code review`);
+  if (step === "review" && !run.launches.some((l) => l.stage === stage && l.description === "critic code" && isCritic(l, "code")))
+    problems.push(`${stage}: no "critic code" report of fsloop-critic with LENS: code saved — a parity critic is no code review`);
   return problems;
 }
 
@@ -1867,7 +1899,8 @@ function checkLanded(run, units, stage, commitMessage) {
 // Statuses a run gave up on: they hold the push. A `fixed` finding holds it until some check saw it (closedBy).
 const GAVE_UP = ["open", "blocked", "unresolved"];
 const SETTLED = ["closed", "candidate", "dropped", "declined", "duplicate"];
-const holdsPushScope = (f) => Boolean(f) && ["critical", "major"].includes(f.severity) && /-(review|verdict)$|^integrate$/.test(f.stage);
+const holdsPushScope = (f) =>
+  Boolean(f) && ["critical", "major"].includes(f.severity) && (/-(review|verdict)$|^integrate$/.test(f.stage) || (/-assess$/.test(f.stage) && f.category !== "improve" && !f.cand));
 
 /** What still stands between `stage` and done; empty → green. */
 export function gate(run, stage, { commitMessage = defaultCommitMessage, exists = defaultExists, changed = defaultChanged } = {}) {
@@ -1892,33 +1925,48 @@ export function gate(run, stage, { commitMessage = defaultCommitMessage, exists 
   if (step === "review" && !run.launches.some((l) => l.stage === stage && l.description.startsWith("critic ")))
     problems.push(`${stage}: no critic report saved`);
   if (step === "integrate" || AFTER_UNITS.includes(step)) problems.push(...checkParityCritics(run, stage), ...(run.source ? checkParityDecisions(run, stage) : []));
+  const carry = passKind(run, pass) === "carry";
   if (step === "fix") {
     const units = ofPass("f");
-    problems.push(...checkBriefs(run, units), ...checkTaken(run, [`p${pass}-review`], pass, "f"));
+    const taken = carry
+      ? carriedTo(run, pass)
+          .filter((f) => !closers(run, f.id).some((u) => u.pass === pass && u.id.startsWith("f")))
+          .map((f) => `${f.id}: decided fix, but no f-unit brief of pass ${pass} lists it under Closes`)
+      : checkTaken(run, [`p${pass}-review`], pass, "f");
+    problems.push(...checkBriefs(run, units), ...taken);
     problems.push(...checkLanded(run, units, stage, commitMessage));
   }
   if (step === "verdict") {
-    for (const row of run.rowsByStage[`p${pass}-review`] ?? []) {
-      if (row.decision !== "fix" || !closers(run, row.finding).some((u) => u.state === "committed")) continue;
-      if (!verdictOf(run, row.finding)) problems.push(`${row.finding}: fixed, but no VERDICT line scores it in ${stage}`);
+    const fixed = carry ? carriedTo(run, pass).map((f) => f.id) : (run.rowsByStage[`p${pass}-review`] ?? []).filter((r) => r.decision === "fix").map((r) => r.finding);
+    for (const id of fixed) {
+      if (!closers(run, id).some((u) => u.state === "committed" && (!carry || u.pass === pass))) continue;
+      const scored = carry ? run.verdicts.some((v) => v.matched === id && v.stage === stage) : verdictOf(run, id);
+      if (!scored) problems.push(`${id}: fixed, but no VERDICT line scores it in ${stage}`);
     }
   }
   if (step === "assess") {
+    const N = run.common.N;
+    const missing = `${stage}: no "critic improve" report of fsloop-critic with LENS: improve saved — the next pass is built from its improvements (assess.md → Passes)`;
+    const searched = searchedAt(run, stage);
+    if (pass === 1 && N > 1) {
+      const left = leftByFirstPass(run);
+      for (const { f, status } of left)
+        problems.push(`${f.id}: pass 1 left it ${status} — pass 2 takes every finding pass 1 left: fix ref p2, or dropped, declined or duplicate`);
+      const carries = left.length > 0 || carriedTo(run, 2).length > 0;
+      if (carries && searched) problems.push(`${stage}: pass 1 left findings — pass 2 carries them; the improvement search runs from pass 2's Assess`);
+      if (!carries && !searched) problems.push(missing);
+    } else if (N && pass < N && !searched) problems.push(missing);
     const row = run.passes.find((p) => p.pass === pass);
-    const n = weight(run, pass);
+    const n = takenFor(run, pass);
     if (!row) problems.push(`passes.md has no row for pass ${pass}`);
     else {
-      if (row.criticalMajor !== n) problems.push(`passes.md p${pass}: critical+major is ${row.criticalMajor}, the findings count ${n}`);
+      if (row.taken !== n) problems.push(`passes.md p${pass}: taken is ${row.taken}, the findings count ${n}`);
       const allowed = allowedOutcomes(run, pass, n);
       if (!allowed.includes(row.outcome)) problems.push(`passes.md p${pass}: outcome ${row.outcome || "—"}, the rule allows ${allowed.join(" | ")}`);
       if (row.outcome !== "next")
-        for (const r of run.rowsByStage[stage] ?? [])
-          if (r.decision === "fix") problems.push(`${r.finding}: fix, but the run stops at p${pass} — open`);
+        for (const d of run.decisions.values()) if (d.decision === "fix" && d.ref === `p${pass + 1}`) problems.push(`${d.finding}: fix, but the run stops at p${pass} — open`);
     }
   }
-  // Green here is the push's precondition: a critical or major finding of a review, a verdict or the
-  // merge still open after Fix holds it (SKILL.md step 7). Assess findings are the passes' to judge.
-  // A finding a later one repeats speaks through the end of that chain; within this scope, the later one speaks.
   if (step === "integrate") {
     for (const f of run.findings.values()) {
       if (!holdsPushScope(f)) continue;
@@ -1934,11 +1982,9 @@ export function gate(run, stage, { commitMessage = defaultCommitMessage, exists 
       else if (HOLDS_PUSH.includes(s.status)) problems.push(`${f.id}: ${f.severity}, ${s.status} — settle it before the push`);
     }
   }
-  // Each question an implementer left to judge is answered by the next critic, or recorded open in the journal:
-  // units' at Review, fix units' at the verdicts (with N, Assess takes no prior work — the journal), Integrate's own.
-  const asked = { review: `p${pass}-units`, verdict: `p${pass}-fix`, assess: `p${pass}-fix`, integrate: "integrate" }[step];
+  const asked = { review: `p${pass}-units`, verdict: `p${pass}-fix`, integrate: "integrate" }[step];
   if (asked) {
-    const answered = new Set(run.judged.filter((j) => j.stage === stage && step !== "assess").map((j) => j.id));
+    const answered = new Set(run.judged.filter((j) => j.stage === stage).map((j) => j.id));
     for (const q of run.judges.filter((j) => j.stage === asked))
       if (!answered.has(q.id) && !run.journal.some((r) => refsOf(r).includes(q.id)))
         problems.push(`${q.id}: to judge "${q.text}" — no JUDGED line opens with its id, no journal row refs it`);
@@ -2036,14 +2082,9 @@ function checkInit(run) {
   return problems;
 }
 
-/** The pass rule of assess.md: what outcome the count permits. */
 export function allowedOutcomes(run, pass, n) {
-  if (n === 0) return ["converged"];
-  const previous = run.passes.find((p) => p.pass === pass - 1)?.criticalMajor;
-  const allowed = ["stalled"];
-  if (run.common.N && pass >= run.common.N) allowed.push("cap");
-  else if (previous === undefined || n < previous) allowed.push("next");
-  return allowed;
+  if (run.common.N && pass >= run.common.N) return ["cap"];
+  return n === 0 ? ["converged"] : ["next"];
 }
 
 function verdictOf(run, findingId) {
@@ -2070,7 +2111,7 @@ const isFixLaunch = (l) => /^integrate (?:fix|debug)$/.test(l.description);
 
 function statusOf(run, f) {
   const d = run.decisions.get(f.id);
-  if (!d) return { status: "undecided" };
+  if (!d) return { status: f.cand ? "candidate" : "undecided" };
   if (d.decision !== "fix") return { status: d.decision };
   const repeated = run.repeaters.has(f.id);
   if (f.stage === "integrate") {
@@ -2127,10 +2168,11 @@ function nextStage(run, stage) {
   if (step === "init" || step === "finish") return null;
   if (step === "integrate") return "finish";
   const N = run.common.N;
-  if (step === (N ? "assess" : "verdict")) return N && run.passes.find((p) => p.pass === pass)?.outcome === "next" ? `p${pass + 1}-decompose` : "integrate";
-  let i = STEPS.indexOf(step) + 1;
-  if (STEPS[i] === (N ? "verdict" : "assess")) i++;
-  return `p${pass}-${STEPS[i]}`;
+  if (step === (N ? "assess" : "verdict")) {
+    if (!N || run.passes.find((p) => p.pass === pass)?.outcome !== "next") return "integrate";
+    return passKind(run, pass + 1) === "carry" ? `p${pass + 1}-fix` : `p${pass + 1}-decompose`;
+  }
+  return `p${pass}-${STEPS[STEPS.indexOf(step) + 1]}`;
 }
 
 /** Each stage the run reached — gated, launched or with a findings file — in the run's order, each gate kept. */
@@ -2566,7 +2608,7 @@ export function reportTables(json) {
     ["To judge", mdTable(["question", "asked", "answer"], json.judges.map((q) => [q.id, q.text, q.answer ? q.answer.text : q.journal ? `open — journal #${q.journal}` : "—"]))],
     ["Candidates", mdTable(["finding", "why"], json.findings.filter((f) => f.decision === "candidate").map((f) => [f.id, f.why]))],
   ];
-  if (json.N) sections.push(["Passes", mdTable(["pass", "critical+major", "outcome", "why"], json.passes.map((p) => [`p${p.pass}`, p.criticalMajor, p.outcome, p.why]))]);
+  if (json.N) sections.push(["Passes", mdTable(["pass", "taken", "outcome", "why"], json.passes.map((p) => [`p${p.pass}`, p.taken, p.outcome, p.why]))]);
   const scores = Object.entries(json.surfaces).map(([s, row]) => [s, row.map((r) => `${r.stage} ${r.audit ?? "?"}/${r.auditMax ?? "?"} · ${r.critique ?? "?"}/${r.critiqueMax ?? "?"}`).join(" → ")]);
   if (scores.length) sections.push(["Surfaces (audit · critique)", mdTable(["surface", "baseline → now"], scores)]);
   if (json.parity)

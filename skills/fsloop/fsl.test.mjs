@@ -1157,3 +1157,135 @@ describe("probes of the seventh audit — each red on 636bb6d", () => {
     assert.equal(gate(reload(dir), "integrate", opts).filter((p) => p.startsWith("p2-")).length, 0);
   });
 });
+
+describe("passes after the first", () => {
+  const plain = (closes) => brief({ slice: null, parity: null }).replace("## Closes\n—", `## Closes\n${closes}`);
+  const withLines = (text, section, lines) => text.replace(`${section}\n- —`, [section, ...lines].join("\n"));
+  const codeCritic = (findings = [], candidates = []) => ({
+    id: "p1-review-critic-code",
+    stage: "p1-review",
+    agent: "fsloop-critic",
+    description: "critic code",
+    report: withLines(withLines(criticReport("code"), "FINDINGS (ranked):", findings), "CANDIDATES:", candidates),
+  });
+  const improve = (stage, lines) => ({ id: `${stage}-critic-improve`, stage, agent: "fsloop-critic", description: "critic improve", report: withLines(criticReport("improve"), "FINDINGS (ranked):", lines) });
+  const codeVerdict = (lines) => ({ id: "p2-verdict-critic-code-verdict", stage: "p2-verdict", agent: "fsloop-critic", description: "critic code verdict", report: withLines(criticReport("code verdict"), "VERDICT:", lines) });
+  const CODE = "- code-1 [standards] minor high local src/a.ts:3 — code.md Names — rename it";
+  const IDEA = "- improve-1 [improve] major med conceptual src/a.tsx:1 — ux 0 — show the next step";
+  const LEFT = "p1-review-critic-code#code-1";
+  const CAND = "p1-review-critic-code#cand-1";
+  const PASS1 = ["p1-map", "p1-spike", "p1-decompose", "p1-units", "p1-review", "p1-fix", "p1-verdict"];
+  const rowsOf = (rows) => ["| finding | decision | ref | repeat | why | severity | evidence |", "|---|---|---|---|---|---|---|", ...rows.map((r) => `| ${[...r, "", ""].slice(0, 7).join(" | ")} |`), ""].join("\n");
+
+  function passRun({ N = 3, gates = PASS1, launches = [], units = [], findings = {}, passes = [] }) {
+    const r = runFolder({ source: false, N, journal: [], gates, launches, units });
+    mkdirSync(join(r.dir, "findings"), { recursive: true });
+    for (const [stage, rows] of Object.entries(findings)) writeFileSync(join(r.dir, "findings", `${stage}.md`), rowsOf(rows));
+    writeFileSync(join(r.dir, "passes.md"), ["| pass | taken | outcome | why |", "|---|---|---|---|", ...passes.map((p) => `| ${p.join(" | ")} |`), ""].join("\n"));
+    return reload(r.dir);
+  }
+  const has = (problems, text) => problems.some((p) => p.includes(text));
+  const carried = { "p1-review": [[LEFT, "fix", "p2", "—", "pass 2 takes it"], [CAND, "fix", "p2", "—", "pass 2 takes it"]] };
+  const handed = [["p1", "2", "next", "pass 1 left two findings"]];
+
+  test("a critic's CANDIDATES line is a finding that needs no row until a pass takes it", () => {
+    const run = passRun({ N: null, gates: PASS1.slice(0, 4), launches: [codeCritic([], ["- extract the scorer"])] });
+    assert.ok(run.findings.has(CAND));
+    assert.ok(!has(gate(run, "p1-review"), CAND));
+  });
+
+  test("pass 1's Assess hands pass 2 every finding pass 1 left, its candidates included", () => {
+    const left = passRun({ launches: [codeCritic([CODE], ["- extract the scorer"])], findings: { "p1-review": [[LEFT, "candidate", "—", "—", "a minor in a file no unit touched"]] }, passes: [["p1", "0", "converged", "—"]] });
+    const problems = gate(left, "p1-assess");
+    assert.ok(problems.some((p) => p.startsWith(`${LEFT}: pass 1 left it candidate`)));
+    assert.ok(problems.some((p) => p.startsWith(`${CAND}: pass 1 left it candidate`)));
+    const taken = passRun({ launches: [codeCritic([CODE], ["- extract the scorer"])], findings: carried, passes: handed });
+    const after = gate(taken, "p1-assess");
+    assert.ok(!has(after, "pass 1 left it"));
+    assert.ok(!has(after, "critic improve"));
+    assert.ok(!has(after, "passes.md"));
+  });
+
+  test("a verdict now closes every pass, with N too, and Assess follows it", () => {
+    const run = passRun({ gates: PASS1.slice(0, 6) });
+    assert.ok(!has(gate(run, "p1-verdict"), "runs without N"));
+    assert.ok(has(gate(passRun({ gates: PASS1.slice(0, 6) }), "p1-assess"), "p1-verdict is not green"));
+  });
+
+  test("the carry pass runs Fix, its verdict and Assess — no Decompose, no review", () => {
+    const base = { launches: [codeCritic([CODE], ["- extract the scorer"])], findings: carried, passes: handed, gates: [...PASS1, "p1-assess"] };
+    const bare = passRun(base);
+    assert.ok(has(gate(bare, "p2-review"), "p2 carries pass 1's findings"));
+    assert.ok(has(gate(bare, "p2-decompose"), "p2 carries pass 1's findings"));
+    const fix = gate(bare, "p2-fix");
+    assert.ok(!has(fix, "p2-review is not green"));
+    assert.ok(fix.some((p) => p.startsWith(`${LEFT}: decided fix, but no f-unit brief of pass 2 lists it`)));
+    const briefed = passRun({ ...base, units: [{ id: "f1", pass: 2, state: "drafted", brief: plain(`- ${LEFT}\n- ${CAND}`) }] });
+    assert.ok(!has(gate(briefed, "p2-fix"), "no f-unit brief of pass 2"));
+  });
+
+  test("the carry pass's verdict scores every carried finding a pass-2 unit landed", () => {
+    const base = { findings: carried, passes: handed, gates: [...PASS1, "p1-assess", "p2-fix"], units: [{ id: "f1", pass: 2, state: "committed abc1234", brief: plain(`- ${LEFT}\n- ${CAND}`) }] };
+    const unscored = gate(passRun({ ...base, launches: [codeCritic([CODE], ["- extract the scorer"])] }), "p2-verdict");
+    assert.ok(unscored.some((p) => p.startsWith(`${LEFT}: fixed, but no VERDICT line scores it`)));
+    assert.ok(unscored.some((p) => p.startsWith(`${CAND}: fixed, but no VERDICT line scores it`)));
+    const scored = gate(passRun({ ...base, launches: [codeCritic([CODE], ["- extract the scorer"]), codeVerdict([`- ${LEFT} resolved — src/a.ts:3`, `- ${CAND} resolved — src/score.ts:1`])] }), "p2-verdict");
+    assert.ok(!has(scored, "no VERDICT line"));
+  });
+
+  test("from pass 2 on, Assess builds the next pass from the improvement search", () => {
+    const base = { findings: carried, gates: [...PASS1, "p1-assess", "p2-fix", "p2-verdict"] };
+    const launches = [codeCritic([CODE], ["- extract the scorer"])];
+    assert.ok(has(gate(passRun({ ...base, launches, passes: handed }), "p2-assess"), 'no "critic improve" report'));
+    const searched = {
+      ...base,
+      launches: [...launches, improve("p2-assess", [IDEA])],
+      findings: { ...carried, "p2-assess": [["p2-assess-critic-improve#improve-1", "fix", "p3", "—", "the next step is missing"]] },
+    };
+    const right = gate(passRun({ ...searched, passes: [...handed, ["p2", "1", "next", "one improvement taken"]] }), "p2-assess");
+    assert.ok(!has(right, "critic improve"));
+    assert.ok(!has(right, "passes.md"));
+    const miscounted = gate(passRun({ ...searched, passes: [...handed, ["p2", "0", "converged", "—"]] }), "p2-assess");
+    assert.ok(has(miscounted, "passes.md p2: taken is 0, the findings count 1"));
+  });
+
+  test("a pass 1 that left nothing hands pass 2 to the improvement search, and one that left something never does", () => {
+    const clean = passRun({ passes: [["p1", "0", "converged", "—"]] });
+    assert.ok(has(gate(clean, "p1-assess"), 'no "critic improve" report'));
+    const both = passRun({ launches: [codeCritic([CODE]), improve("p1-assess", [IDEA])], findings: { "p1-review": [[LEFT, "fix", "p2", "—", "pass 2 takes it"]] }, passes: handed });
+    assert.ok(has(gate(both, "p1-assess"), "pass 1 left findings — pass 2 carries them"));
+  });
+
+  test("the last pass ends at the cap without a search for more", () => {
+    const base = {
+      N: 2,
+      gates: [...PASS1, "p1-assess", "p2-decompose", "p2-units", "p2-review", "p2-fix", "p2-verdict"],
+      launches: [improve("p1-assess", [IDEA])],
+      findings: { "p1-assess": [["p1-assess-critic-improve#improve-1", "fix", "p2", "—", "the next step is missing"]] },
+    };
+    const converged = gate(passRun({ ...base, passes: [["p1", "1", "next", "—"], ["p2", "0", "converged", "—"]] }), "p2-assess");
+    assert.ok(has(converged, "the rule allows cap"));
+    const capped = gate(passRun({ ...base, passes: [["p1", "1", "next", "—"], ["p2", "0", "cap", "pass N"]] }), "p2-assess");
+    assert.ok(!has(capped, "passes.md"));
+    assert.ok(!has(capped, "critic improve"));
+  });
+
+  test("at Integrate a critical the run's own check left open holds the push, an improvement left over never does", () => {
+    const run = passRun({
+      N: 2,
+      gates: [...PASS1, "p1-assess", "p2-decompose", "p2-units", "p2-review", "p2-fix", "p2-verdict", "p2-assess"],
+      launches: [improve("p1-assess", [IDEA]), improve("p2-assess", [IDEA])],
+      findings: {
+        "p1-assess": [["p1-assess-critic-improve#improve-1", "fix", "p2", "—", "taken"]],
+        "p2-assess": [
+          ["p2-assess-critic-improve#improve-1", "open", "—", "—", "the cap"],
+          ["p2-assess-own#1", "open", "—", "—", "the scenario failed", "critical", "logs/p2-assess-e2e.log.lines:3"],
+        ],
+      },
+      passes: [["p1", "1", "next", "—"], ["p2", "0", "cap", "pass N"]],
+    });
+    const problems = gate(run, "integrate");
+    assert.ok(has(problems, "p2-assess-own#1: critical, open"));
+    assert.ok(!has(problems, "p2-assess-critic-improve#improve-1"));
+  });
+});

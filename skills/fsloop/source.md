@@ -75,7 +75,7 @@ On every pass with a committed or blocked unit whose `Slice:` is other than `—
 
 A fate, a ported test or a unit's state changed after its critic changes the part's seal: every gate from Review to Integrate is red until `fsl.mjs parity <run folder> p<p>-review` runs again and each changed part gets its critic again, saved at the current stage — Fix, Verdict and Integrate included.
 
-With `N`, Assess runs `fsl.mjs parity <run folder> p<p>-assess` and launches one critic per part as `assess.md` → Assess briefs its critics — the goal, the spike docs, the file list, no briefs and no settled decisions — plus `LENS: parity assess` and the part's path: the parts cover every row of each source slice a committed or blocked unit or a green Decompose named, whatever its fate, each `drop` and `defer` with its journal why — the one decision Assess hands a critic. `gate p<p>-assess` and every later gate count them alike, by seal, with `critic code` at `LENS: code assess`.
+With `N`, Assess runs `fsl.mjs parity <run folder> p<p>-assess` and launches one critic per part, `LENS: parity assess`, briefed as `assess.md` → Assess → Parity says: the parts cover every row of each source slice a committed or blocked unit or a green Decompose named, whatever its fate, each `drop` and `defer` with its journal why — the one decision Assess hands a critic. `gate p<p>-assess` and every later gate count them alike, by seal.
 
 `fsl.mjs report` and `run.json` carry each source slice's coverage — rows, ported, ported earlier, dropped, deferred, open; a row a parity finding cites is open until that finding is fixed and checked again — a verdict scores it resolved, or a later critic reads the landed fix and raises it no more — or let go by its drop or defer.
 
