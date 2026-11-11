@@ -29,7 +29,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  for (const link of ["skills/fsloop", "agents/fsloop", "hooks/fsloop"]) if (isLink(join(claude, link))) unlinkSync(join(claude, link));
+  for (const link of ["skills/fsloop", "skills/fsloop-audit", "agents/fsloop", "hooks/fsloop"]) if (isLink(join(claude, link))) unlinkSync(join(claude, link));
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -39,6 +39,7 @@ describe("install", () => {
     writeFileSync(join(claude, "settings.json"),'{\r\n  "env": {\r\n    "A": "1"\r\n  }\r\n}\r\n');
     for (let run = 0; run < 2; run++) assert.equal(install().status, 0);
     assert.equal(real(join(claude, "skills", "fsloop")), real(join(ROOT, "skills", "fsloop")));
+    assert.equal(real(join(claude, "skills", "fsloop-audit")), real(join(ROOT, "skills", "fsloop-audit")));
     assert.equal(real(join(claude, "agents", "fsloop")), real(join(ROOT, "agents")));
     assert.ok(existsSync(join(claude, "agents", "fsloop", "fsloop-critic.md")));
     assert.ok(existsSync(join(claude, "hooks", "fsloop", "spike-guard.mjs")));
@@ -79,6 +80,9 @@ describe("install", () => {
     const repo = repoAt("repo");
     mkdirSync(join(repo, ".claude", "agents"));
     writeFileSync(join(repo, ".claude", "agents", "fsloop-critic.md"), "old");
+    mkdirSync(join(repo, ".claude", "skills", "fsloop-audit"), { recursive: true });
+    mkdirSync(join(repo, ".claude", "fsloop"));
+    writeFileSync(join(repo, ".claude", "fsloop", "config.md"), "- serve: `node <start>/.claude/skills/fsloop/shot.mjs serve`\n");
     writeFileSync(join(repo, ".claude", "settings.json"), JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/spike-guard.mjs"' }] }] } }));
     writeFileSync(join(repo, "CLAUDE.md"), "- **`.spike/` — полный доступ.**\n");
     const r = install(repo);
@@ -90,6 +94,8 @@ describe("install", () => {
     assert.ok(!existsSync(join(repo, ".spike")));
     assert.match(r.stdout, /the project keeps its own fsloop/);
     assert.match(r.stdout, /fsloop-critic\.md/);
+    assert.match(r.stdout, /skills[\\/]fsloop-audit/);
+    assert.match(r.stdout, /<skill>\/[\s\S]*config\.md/);
     assert.match(r.stdout, /its spike-guard hook/);
     assert.match(r.stdout, /still name \.spike\/[\s\S]*CLAUDE\.md/);
   });

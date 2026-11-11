@@ -16,6 +16,7 @@ if (target && !existsSync(join(target, ".git"))) fail(`${target} is not a git re
 
 const LINKS = [
   ["skills/fsloop", "skills/fsloop"],
+  ["skills/fsloop-audit", "skills/fsloop-audit"],
   ["agents", "agents/fsloop"],
   ["hooks", "hooks/fsloop"],
 ];
@@ -130,6 +131,7 @@ function setUpRepo(repo) {
 
   const copies = [
     join(local, "skills", "fsloop"),
+    join(local, "skills", "fsloop-audit"),
     ...agents.map((name) => join(local, "agents", name)),
     ...["spike-guard.mjs", "shell-text.mjs"].map((name) => join(local, "hooks", name)),
   ].filter((p) => existsSync(p));
@@ -142,6 +144,10 @@ function setUpRepo(repo) {
     (p) => existsSync(p) && lstatSync(p).isFile() && /(^|[^\w/])\.spike\b/.test(readFileSync(p, "utf8")),
   );
   if (notes.length) console.log(`warning: these still name .spike/ — point them at .claude/fsloop/spike/:\n${notes.map((p) => `  ${p}`).join("\n")}`);
+
+  const config = join(local, "fsloop", "config.md");
+  if (existsSync(config) && readFileSync(config, "utf8").includes(".claude/skills/fsloop/"))
+    console.log(`warning: a path into the project's own skill copy — write <start>/.claude/skills/fsloop/ as <skill>/ in:\n  ${config}`);
 
   for (const d of ["data", "sessions", "toolkits"]) mkdirSync(join(spike, d), { recursive: true });
   const readme = join(spike, "README.md");

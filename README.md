@@ -7,6 +7,8 @@
 | Путь | Что |
 | --- | --- |
 | `skills/fsloop/SKILL.md` | оркестратор `/fsloop [N] [jK] <goal>` |
+| `skills/fsloop/source.md` | проект переписывает старую систему: какое её поведение перенесено, отброшено или отложено, и критик parity — когда в `config.md` есть `## Source` |
+| `skills/fsloop-audit/` | `/fsloop-audit`: аудит fsloop по записям его прогонов — куда уходит время, какие находки теряет фильтр критиков, какие баги не поднял ни один критик, соблюдают ли прогоны скилл; отчёт, файл находок для `/fsloop` и предложения для `/evolve` |
 | `skills/fsloop/law/` | закон fsloop: `ux.md` (законы 0–9), `ui.md` (вёрстка, конвенции, шапка страницы, порядок приоритетов), `table.md` (таблицы #1–15), `code.md`, `tests.md` (1–12) — базовая планка для любого репо |
 | `skills/fsloop/inline.md` | режим inline: маленькая цель в текущей рабочей копии, без worktree |
 | `skills/fsloop/ui.md` | UI-часть: impeccable по стадиям, baseline, новая поверхность, кадры |
@@ -26,6 +28,8 @@
 | `install.mjs` | установка: ссылки в `~/.claude`, хук, подготовка проекта — [подробнее](#установка) |
 
 ## Требования
+
+- Claude Code, который подставляет `${CLAUDE_SKILL_DIR}` в текст скилла (проверено на 2.1.319): из неё оркестратор пишет строку `Skill:` в `common.md`, и по ней скилл и агенты находят `fsl.mjs`, `law/` и остальные файлы — в файлах fsloop эта папка записана как `<skill>`.
 
 - git, Node 24+ (хук `spike-guard` опирается на `import.meta.main`).
 - Плагин `mattpocock-skills`: агенты грузят `tdd`, `diagnosing-bugs`, `codebase-design`, `code-review`.
@@ -50,10 +54,10 @@ node fsloop/install.mjs <путь к репо>    # машина и проект
 ```
 
 Установщик:
-- ставит три ссылки — `~/.claude/skills/fsloop` → `skills/fsloop`, `~/.claude/agents/fsloop` → `agents`, `~/.claude/hooks/fsloop` → `hooks`. Это junction: файловый симлинк Windows делает только в режиме разработчика, junction — всегда; агентов из папки внутри `agents/` Claude Code читает так же, как лежащих в ней;
+- ставит четыре ссылки — `~/.claude/skills/fsloop` → `skills/fsloop`, `~/.claude/skills/fsloop-audit` → `skills/fsloop-audit`, `~/.claude/agents/fsloop` → `agents`, `~/.claude/hooks/fsloop` → `hooks`. Это junction: файловый симлинк Windows делает только в режиме разработчика, junction — всегда; агентов из папки внутри `agents/` Claude Code читает так же, как лежащих в ней;
 - добавляет хук `spike-guard` в `~/.claude/settings.json`;
 - ссылку, которая ведёт в другое место, переставляет на этот клон; настоящую папку или файл на месте ссылки не трогает и останавливается;
-- с путём к репо — переносит старый `.spike/` в `.claude/fsloop/spike/` целиком (не трогает его, пока у сессии есть аренда или worktree держит его зеркало), добавляет `.claude/fsloop/spike/` в `.gitignore`, а в `.git/info/exclude` — `.claude/fsloop/*` и `!.claude/fsloop/config.md` (папки прогонов не попадают в git, `config.md` попадает), создаёт `.claude/fsloop/spike/{data,sessions,toolkits}` и шаблон `README.md`, и называет копию fsloop, которая осталась в проекте (`.claude/skills/fsloop`, агенты, хук в `.claude/settings.json`), — её надо удалить, чтобы работала только глобальная, — и `CLAUDE.md` или файл `.claude/rules/`, где ещё написано `.spike/`.
+- с путём к репо — переносит старый `.spike/` в `.claude/fsloop/spike/` целиком (не трогает его, пока у сессии есть аренда или worktree держит его зеркало), добавляет `.claude/fsloop/spike/` в `.gitignore`, а в `.git/info/exclude` — `.claude/fsloop/*` и `!.claude/fsloop/config.md` (папки прогонов не попадают в git, `config.md` попадает), создаёт `.claude/fsloop/spike/{data,sessions,toolkits}` и шаблон `README.md`, и называет копию fsloop, которая осталась в проекте (`.claude/skills/fsloop`, `.claude/skills/fsloop-audit`, агенты, хук в `.claude/settings.json`), — её надо удалить, чтобы работала только глобальная, — `CLAUDE.md` или файл `.claude/rules/`, где ещё написано `.spike/`, и `config.md`, где команды съёмки ещё идут через `<start>/.claude/skills/fsloop/` вместо `<skill>/`.
 
 `.claude/fsloop/spike/` попадает в `.gitignore`, хотя `.git/info/exclude` и так прячет всё под `.claude/fsloop/`, кроме `config.md`: exclude живёт только в этом клоне, а сессии и токены не должны попасть в коммит и из свежего клона.
 
@@ -85,11 +89,11 @@ i18n-каталоги, которые сливаются по ключам, пе
 - `spike-guard` блокирует обход: ручные ссылки в `.claude/fsloop/spike`, копирование из `sessions/`, удаление `.lease`. Старый `.spike/` он охраняет так же, пока проект не перенесён.
 
 ```
-node .claude/skills/fsloop/spike-lease.mjs link <checkout>
-node .claude/skills/fsloop/spike-lease.mjs acquire <checkout> <session> [--wait s]
-node .claude/skills/fsloop/spike-lease.mjs release <checkout> <session>
-node .claude/skills/fsloop/spike-lease.mjs unlink <checkout>
-node .claude/skills/fsloop/spike-lease.mjs status
+node ~/.claude/skills/fsloop/spike-lease.mjs link <checkout>
+node ~/.claude/skills/fsloop/spike-lease.mjs acquire <checkout> <session> [--wait s]
+node ~/.claude/skills/fsloop/spike-lease.mjs release <checkout> <session>
+node ~/.claude/skills/fsloop/spike-lease.mjs unlink <checkout>
+node ~/.claude/skills/fsloop/spike-lease.mjs status
 ```
 
 Пробы в worktree не кладите под `.claude/fsloop/spike/`: это ссылка в основную копию, файл окажется там, а импорты разрешатся от её конфигурации, а не от worktree.
@@ -147,10 +151,10 @@ report.md
 - в `report.md` нет таблиц, которые пишет `fsl.mjs report`.
 
 ```
-node .claude/skills/fsloop/fsl.mjs save   <run folder> <stage> <agent id | output_file | "описание запуска"> ["описание"]
-node .claude/skills/fsloop/fsl.mjs gate   <run folder> <stage>
-node .claude/skills/fsloop/fsl.mjs report <run folder>
-node .claude/skills/fsloop/fsl.mjs build  <run folder>
+node ~/.claude/skills/fsloop/fsl.mjs save   <run folder> <stage> <agent id | output_file | "описание запуска"> ["описание"]
+node ~/.claude/skills/fsloop/fsl.mjs gate   <run folder> <stage>
+node ~/.claude/skills/fsloop/fsl.mjs report <run folder>
+node ~/.claude/skills/fsloop/fsl.mjs build  <run folder>
 ```
 
 Id находки — `<запуск>#<id>` (`p1-review-critic-code#code-3`). Повтор того же id в одном отчёте получает номер по порядку (`code-3~2`), строка OPEN исполнителя или отладчика — `<запуск>#open-<n>`. Каждая строка отчёта сохраняется: `parsed: "strict"`, если она по формату критика, `"loose"`, если поля восстановлены (тогда рядом и исходная строка `raw`).

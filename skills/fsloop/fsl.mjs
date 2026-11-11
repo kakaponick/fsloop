@@ -11,7 +11,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** run.json's shape; bumped on every change to it. */
-export const VERSION = 3;
+export const VERSION = 4;
 export const STEPS = ["map", "spike", "decompose", "units", "review", "fix", "verdict", "assess"];
 export const DECISIONS = ["fix", "candidate", "dropped", "declined", "duplicate", "open"];
 export const OUTCOMES = ["converged", "stalled", "next", "cap"];
@@ -150,10 +150,72 @@ export function parseDeploy(text) {
   return { verdict: v[1], line: v[2].trim() || null, sha: sha?.[1] ?? null, deployedAt: sha?.[2]?.trim() ?? null, anomalies };
 }
 
+export function parseInventoryLines(text) {
+  const lines = text.split(/\r?\n/);
+  const rows = [];
+  const rejects = [];
+  let tables = 0;
+  let inTable = false;
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (!t.startsWith("|")) {
+      inTable = false;
+      continue;
+    }
+    if (isSeparator(t)) continue;
+    const reject = (why) => rejects.push({ line: i + 1, text: t, why });
+    if (i + 1 < lines.length && isSeparator(lines[i + 1])) {
+      tables++;
+      inTable = true;
+      if (tables > 1) reject("the header of a second table");
+      continue;
+    }
+    if (!inTable || tables !== 1) {
+      reject(tables > 1 ? "a row of a second table" : "a table line outside the table");
+      continue;
+    }
+    const cells = splitRow(t).map((c) => c.replace(/[`*]/g, "").trim());
+    const [slice = "", key = "", name = ""] = cells;
+    if (cells.length < 3) reject("fewer than three cells");
+    else if (!/^[^\s,]+$/.test(slice)) reject("the slice is not one token with no space or comma");
+    else if (!/^\S+:\d+$/.test(key)) reject("the second cell is not <file>:<line> with no space");
+    else rows.push({ slice, key, name });
+  }
+  return { rows, rejects };
+}
+
+export const parseInventory = (text) => parseInventoryLines(text).rows;
+
+export const PARITY_FATES = ["port", "ported-earlier", "drop", "defer"];
+export const PARITY_CAP = 60;
+
+const FILE_LINE = /^([^`\s]+):(\d+)$/;
+const splitFileLine = (text) => {
+  const m = FILE_LINE.exec(text ?? "");
+  return m ? { file: m[1], line: Number(m[2]) } : null;
+};
+
+export function parseParityLine(line) {
+  const m = /^\s*- `?([^`\s]+:\d+)`?\s+(port|ported-earlier|drop|defer)(?=\s|$)(?:\s+`?([^`\s]+)`?)?/.exec(line);
+  if (!m) return null;
+  const [, key, fate, arg = null] = m;
+  if (fate === "ported-earlier") return { key, fate, test: arg && splitFileLine(arg) ? arg : null, ref: null };
+  if (fate === "port") return { key, fate, test: null, ref: null };
+  return { key, fate, test: null, ref: arg && /^j\d+$/.test(arg) ? arg : null };
+}
+
+export function parsePortedLine(line) {
+  const m = /^`?([^`\s]+:\d+)`?(?:\s+port)?\s+(?:—|--?)\s+(ported|not ported)(?=\s|$)\s*`?([^`\s]*)`?/.exec(line);
+  if (!m) return null;
+  const test = m[2] === "ported" && splitFileLine(m[3]) ? m[3] : null;
+  return { key: m[1], ported: Boolean(test), test };
+}
+
 /** `Kind:`, `Blocked by:` and the `## <section>` bodies of a brief. */
 export function parseBrief(text) {
   const kind = /^Kind:\s*(.+)$/im.exec(text)?.[1].trim() ?? "";
   const blocked = /^Blocked by:\s*(.+)$/im.exec(text)?.[1].trim() ?? "";
+  const slice = /^Slice:\s*(.+)$/im.exec(text)?.[1].replace(/`/g, "").trim() ?? null;
   const sections = {};
   let name = null;
   for (const line of text.split(/\r?\n/)) {
@@ -164,11 +226,14 @@ export function parseBrief(text) {
     } else if (name) sections[name].push(line);
   }
   for (const k of Object.keys(sections)) sections[k] = sections[k].join("\n").trim();
+  const parityLines = (sections.parity ?? "").split("\n").filter((l) => /^\s*- /.test(l) && !NONE.test(l.replace(/^\s*- /, "").trim()));
   return {
     kind,
     blockedBy: NONE.test(blocked) ? [] : blocked.split(/[\s,]+/).filter(Boolean),
     sections,
     closes: findingIds(sections.closes ?? ""),
+    slices: slice === null ? null : NONE.test(slice) ? [] : slice.split(/\s*,\s*/).filter(Boolean),
+    parity: parityLines.map((line) => parseParityLine(line) ?? { line: line.trim() }),
   };
 }
 
@@ -180,6 +245,8 @@ const nativePath = (p) => (p && process.platform === "win32" ? p.replace(/^\/([a
 /** The head lines of common.md (`Run:`, `Mode:`, `N:`, `K:`, `Start:`, `Worktree:`, `Started:`, each `Session:`) and its `## Goal`. */
 export function parseCommon(text) {
   const field = (k) => new RegExp(`^${k}:\\s*(.+)$`, "m").exec(text)?.[1].trim() ?? null;
+  const head = text.split(/^## /m)[0];
+  const headField = (k) => new RegExp(`^${k}:\\s*(.+)$`, "m").exec(head)?.[1].replace(/`/g, "").trim() || null;
   const n = field("N");
   const goal = /^## Goal\s*\r?\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(text)?.[1].trim() ?? null;
   return {
@@ -191,6 +258,9 @@ export function parseCommon(text) {
     worktree: nativePath(field("Worktree")),
     started: field("Started"),
     sessions: [...text.matchAll(/^Session:\s*(\S+)/gm)].map((m) => m[1]),
+    source: nativePath(headField("Source")),
+    inventory: nativePath(headField("Inventory")),
+    sourceSection: hasSourceSection(text),
     goal,
   };
 }
@@ -448,6 +518,13 @@ function git(start, args) {
 }
 
 const defaultCommitMessage = (start, sha) => (start ? git(start, ["log", "-1", "--format=%B", sha]) : null);
+const defaultExists = (tree, rev, path) => {
+  if (!tree) return null;
+  const text = git(tree, ["cat-file", "-p", `${rev}:${path}`]);
+  return text === null ? false : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+};
+const defaultChanged = (start, sha) =>
+  git(start, ["-c", "core.quotePath=false", "diff-tree", "--root", "--no-commit-id", "--name-only", "-r", "--diff-merges=first-parent", "-z", sha])?.split("\0").filter(Boolean) ?? null;
 
 export const trailersVisible = (message, runId) => message.trim().split(/\n[ \t]*\n/).at(-1).includes(`Fsloop-Run: ${runId}`);
 
@@ -550,9 +627,30 @@ const samePath = (a, b) => {
 
 const opensFindings = (l) => ["fsloop-implement", "fsloop-debug"].includes(l.agent) || /^(?:[uf]\d+ (?:implement|debug)|integrate (?:fix|debug))$/.test(l.description);
 
+function sourceOf(common) {
+  if (!common.source) return null;
+  const tests = join(resolve(common.source, common.inventory ?? join("docs", "inventory")), "tests.md");
+  const text = read(tests);
+  const header = text ? tableHeader(text) : null;
+  const { rows, rejects } = text ? parseInventoryLines(text) : { rows: [], rejects: [] };
+  const problem = !text.trim()
+    ? `no inventory at ${tests}`
+    : !header || header.length < 3 || !/slice/.test(header[0]) || !/file/.test(header[1])
+      ? `${tests}: its first table's header is not | slice | file:line | describe › it |`
+      : !rows.length
+        ? `${tests}: no row parsed — each row is | <slice> | <file>:<line> | <describe › it> |`
+        : null;
+  return { repo: common.source, tests, rows: problem ? null : rows, rejects, problem };
+}
+
+const withoutFences = (text) => text.replace(/^[ \t]*(```|~~~)[^\n]*\n[\s\S]*?^[ \t]*\1[^\n]*$/gm, "");
+export const hasSourceSection = (text) => /^#{2,}[ \t]+source[ \t]*(?:[:—–-][^\n]*)?$/im.test(withoutFences(text));
+
 /** Everything the run folder holds, parsed and joined. `git` is injectable, as `gate`'s commitMessage is. */
 export function collect(runDir, { git: runGit = git } = {}) {
   const common = parseCommon(read(join(runDir, "common.md")));
+  const config = common.start ? read(join(common.start, ".claude", "fsloop", "config.md")) : "";
+  if (config) common.sourceSection = hasSourceSection(config);
   const id = common.run ?? basename(runDir);
 
   const launches = parseTable(read(join(runDir, "launches.md"))).map((r) => {
@@ -689,7 +787,7 @@ export function collect(runDir, { git: runGit = git } = {}) {
       tree: cell(r, "tree"),
       title: cell(r, "title"),
       brief: briefText ? briefPath.replace(/\\/g, "/") : null,
-      ...(briefText ? parseBrief(briefText) : { kind: "", blockedBy: [], sections: null, closes: [] }),
+      ...(briefText ? parseBrief(briefText) : { kind: "", blockedBy: [], sections: null, closes: [], slices: null, parity: [] }),
       launches: launches.filter((l) => l.unit === unit).map((l) => l.id),
       checks: checkLines(join(runDir, "units", unit), ""),
     };
@@ -794,6 +892,8 @@ export function collect(runDir, { git: runGit = git } = {}) {
     decisionLog,
     human,
     shots: shotsOf(runDir),
+    source: sourceOf(common),
+    rekeys: common.source ? readJsonl(join(runDir, "parity", "rekey.jsonl")) : [],
     logs: checkLines(join(runDir, "logs"), "logs/"),
     running,
     orchestrator,
@@ -1041,6 +1141,683 @@ function checkOverlap(run, units) {
   return problems;
 }
 
+const sample = (keys) => (keys.length > 8 ? `${keys.slice(0, 8).join(", ")} and ${keys.length - 8} more` : keys.join(", "));
+
+const PARITY_FORMS = "`<file:line>` port | ported-earlier <test file>:<line> | drop j<n> | defer j<n>";
+const PORTED_FORMS = "`<file:line>` — ported <test file>:<line> | not ported — <why>";
+const sourceBriefs = (run) => run.units.filter((u) => u.brief && u.id.startsWith("u"));
+const sameRow = (reported, key) => reported === key || reported.replaceAll("\\", "/").endsWith(`/${key}`);
+const repoFile = (fileLine) => repoPath(splitFileLine(fileLine).file.replaceAll("\\", "/"));
+
+function rekeyed(run, key, launchAt) {
+  let k = key;
+  for (const r of run.rekeys ?? []) {
+    if ((r.launches ?? 0) <= launchAt) continue;
+    const from = Object.keys(r.map ?? {}).find((old) => sameRow(k, old));
+    if (from) k = r.map[from].key;
+  }
+  return k;
+}
+
+function reportedParity(run, unitId) {
+  return run.launches.flatMap((l, i) =>
+    l.unit !== unitId
+      ? []
+      : (l.block?.PARITY?.items ?? []).map((item) => {
+          const r = parsePortedLine(item);
+          return r ? { ...r, key: rekeyed(run, r.key, i) } : { line: item, launch: l.id };
+        }),
+  );
+}
+
+const portedTest = (run, unitId, key) => reportedParity(run, unitId).filter((r) => r.key && sameRow(r.key, key)).at(-1) ?? null;
+
+const briefsUpTo = (run, pass) => sourceBriefs(run).filter((u) => pass === null || u.pass <= pass);
+
+function latestLines(run, pass = null) {
+  const lines = new Map();
+  for (const u of [...briefsUpTo(run, pass)].sort((a, b) => a.pass - b.pass))
+    for (const p of u.parity) {
+      if (!p.key) continue;
+      const prev = lines.get(p.key);
+      if (prev && u.state === "blocked" && prev.state !== "blocked" && !DECIDED.includes(prev.fate)) continue;
+      lines.set(p.key, { ...p, unit: u.id, pass: u.pass, state: u.state });
+    }
+  return lines;
+}
+
+const DECIDED = ["drop", "defer"];
+const INVENTORY_STEPS = ["decompose", "units", "review", "fix", "verdict", "assess", "integrate"];
+const AFTER_DECOMPOSE = ["units", "review", "fix", "verdict", "assess", "integrate"];
+const TEST_FILE = /(?:^|\/)(?:__tests__|tests?|specs?)\/|[._-](?:test|spec)s?\.[^/]+$/i;
+const STUB_WHY =
+  /^(?:n\/?a|na|tbd|to ?do|wip|none|nothing|same|ok|okay|as is|see above|see below|later|skip|skip it|ignore|whatever|drop it|defer it|decided|we decided|just because|because|not needed|x+|\?+|\.+|-+|—|см\.? ?выше|см\.? ?ниже|позже|потом|пропустить|нет|так решили|решили|не нужно|не надо)$/i;
+const NO_GROUND = [
+  "no time", "out of time", "not enough time", "lack of time", "short on time", "time box", "time boxed", "timebox", "timeboxed", "too big", "too large",
+  "too much work", "too much effort", "too hard", "too costly", "too expensive", "a lot of work", "lots of work", "not worth it", "not worth the effort",
+  "takes too long", "would take too long", "said so", "we decided", "decided so", "so decided", "just because", "because i said",
+  "нет времени", "не хватает времени", "не успеем", "не успеваем", "слишком большой", "слишком большая", "слишком большое", "слишком долго", "слишком сложно",
+  "много работы", "трудоёмко", "трудоемко", "долго делать", "долго переносить", "лень", "не стоит того", "так решили", "так надо", "так сказали",
+].map((p) => p.split(" "));
+const wordsOf = (text) => text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+const saysPhrase = (words, phrase) => words.some((_, i) => phrase.every((w, k) => words[i + k] === w));
+
+export const stubWhy = (why) => {
+  const w = (why ?? "").trim().replace(/[.!?;:,]+$/, "").replace(/\s+/g, " ").trim();
+  if (!w || NONE.test(w) || STUB_WHY.test(w)) return true;
+  const words = wordsOf(w);
+  if (NO_GROUND.some((phrase) => saysPhrase(words, phrase))) return true;
+  return words.length < 2 && !/\d/.test(w);
+};
+
+function sliceRow(run, pass, slice) {
+  const j = run.journal.filter((r) => r.stage === `p${pass}-decompose` && refsOf(r).includes(`slice:${slice}`) && /^(drop|defer)\b/i.test(r.decision)).at(-1);
+  return j ? { fate: /^defer/i.test(j.decision) ? "defer" : "drop", ref: `j${j.n}` } : null;
+}
+
+const slicesOfSliceRows = (run, pass) =>
+  run.journal.filter((r) => r.stage === `p${pass}-decompose` && /^(drop|defer)\b/i.test(r.decision)).flatMap((r) => refsOf(r).filter((x) => x.startsWith("slice:")).map((x) => x.slice(6)));
+
+const canonical = (v) => (Array.isArray(v) ? v.map(canonical) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonical(v[k])])) : v);
+export const sealOf = (v) => createHash("sha256").update(JSON.stringify(canonical(v))).digest("hex").slice(0, 16);
+const snapshotSeal = (pass, s) => sealOf({ pass, slices: s.slices, rows: s.rows, names: s.names });
+const sameEntry = (a, b) => JSON.stringify(canonical(a ?? null)) === JSON.stringify(canonical(b ?? null));
+const normName = (name) => (name ?? "").replace(/\s+/g, " ").trim();
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const journalMark = (run) => Math.max(0, ...run.journal.map((j) => Number(j.n) || 0));
+const landedUnit = (u) => (u.state === "committed" && u.commits.length > 0) || u.state === "blocked";
+
+export function lastPass(run) {
+  const landed = run.units.filter(landedUnit).map((u) => u.pass);
+  const decomposed = run.gates.filter((g) => g.green && parseStage(g.stage)?.step === "decompose").map((g) => parseStage(g.stage).pass);
+  return Math.max(0, ...decomposed, ...landed) || Math.max(1, ...run.units.map((u) => u.pass));
+}
+
+export function decomposeSnapshot(run, stage) {
+  const { pass, step } = parseStage(stage) ?? {};
+  if (!run.source?.rows || step !== "decompose") return null;
+  const lines = latestLines(run, pass);
+  const slices = [...new Set([...run.units.filter((u) => u.pass === pass && u.id.startsWith("u")).flatMap((u) => u.slices ?? []), ...slicesOfSliceRows(run, pass)])];
+  const rows = {};
+  const names = {};
+  for (const r of run.source.rows.filter((x) => slices.includes(x.slice))) {
+    const line = lines.get(r.key);
+    const whole = line ? null : sliceRow(run, pass, r.slice);
+    if (line) rows[r.key] = { slice: r.slice, fate: line.fate, unit: line.unit, ...(line.ref ? { ref: line.ref } : {}) };
+    else if (whole) rows[r.key] = { slice: r.slice, fate: whole.fate, ref: whole.ref, via: "slice" };
+    if (rows[r.key]) names[r.key] = r.name;
+  }
+  const held = snapshotState(run).passes.get(pass);
+  if (held?.rows) return { slices: [...new Set([...held.slices, ...slices])], rows: { ...rows, ...held.rows }, names: { ...names, ...(held.names ?? {}) } };
+  return { slices, rows, names };
+}
+
+export function snapshotState(run) {
+  const passes = new Map();
+  const problems = [];
+  const rekeys = run.rekeys ?? [];
+  let applied = 0;
+  const rename = (obj, map, value = (k, v) => v) => obj && Object.fromEntries(Object.entries(obj).map(([k, v]) => (map[k] ? [map[k].key, value(k, v)] : [k, v])));
+  const rekeyTo = (i) => {
+    for (; applied < rekeys.length && (rekeys[applied].gates ?? 0) <= i; applied++) {
+      const map = rekeys[applied].map ?? {};
+      for (const [pass, s] of passes) {
+        if (!s.rows) continue;
+        s.rows = rename(s.rows, map);
+        s.names = rename(s.names, map, (k) => map[k].name);
+        s.marks = rename(s.marks, map);
+        if (s.seal) s.seal = snapshotSeal(pass, s);
+      }
+    }
+  };
+  const flagged = new Set();
+  const OLDER = " (a run with Source begun before 636bb6d starts over from Decompose)";
+  run.gates.forEach((g, i) => {
+    rekeyTo(i);
+    const st = parseStage(g.stage);
+    if (!st || st.step === "init") return;
+    const at = `gates.jsonl line ${i + 1} (${g.stage})`;
+    for (const p of new Set([...[...passes].filter(([, s]) => s.seal).map(([k]) => k), ...Object.keys(g.seals ?? {}).map(Number)])) {
+      const seal = passes.get(p)?.seal ?? null;
+      if (flagged.has(p) || (g.seals?.[p] ?? null) === seal) continue;
+      flagged.add(p);
+      problems.push(
+        `${at}: ${g.seals ? `seals p${p}'s snapshot as ${g.seals[p] ?? "—"}, the lines before it give ${seal ?? "none"}` : "no seals, where fsl.mjs gate writes one per snapshot"} — gates.jsonl or parity/rekey.jsonl was edited${OLDER}`,
+      );
+    }
+    if (!g.green || st.step !== "decompose") return;
+    const prev = passes.get(st.pass);
+    if (!g.parity?.rows) {
+      if (prev?.rows) problems.push(`${at}: no snapshot over p${st.pass}'s — gates.jsonl was edited`);
+      else passes.set(st.pass, { pass: st.pass, slices: [], rows: null, names: null, marks: null, seal: null });
+      return;
+    }
+    const s = { pass: st.pass, slices: g.parity.slices ?? [], rows: g.parity.rows, names: g.names ?? null };
+    s.seal = g.seal ? snapshotSeal(st.pass, s) : null;
+    if (g.seal && s.seal !== g.seal) problems.push(`${at}: its snapshot does not match its seal — gates.jsonl was edited`);
+    const lost = prev?.rows ? Object.keys(prev.rows).filter((k) => !sameEntry(prev.rows[k], s.rows[k])) : [];
+    if (lost.length) {
+      problems.push(`${at}: drops or rewrites ${lost.length} rows of p${st.pass}'s snapshot — ${sample(lost)}; gates.jsonl was edited${OLDER}`);
+      s.rows = { ...s.rows, ...prev.rows };
+    }
+    s.marks = { ...Object.fromEntries(Object.keys(s.rows).map((k) => [k, g.journal ?? 0])), ...(prev?.marks ?? {}) };
+    passes.set(st.pass, s);
+  });
+  for (const r of rekeys.slice(applied)) if ((r.gates ?? 0) > run.gates.length) problems.push(`parity/rekey.jsonl: a rekey after gates.jsonl line ${r.gates}, which holds ${run.gates.length} lines — gates.jsonl was edited`);
+  rekeyTo(run.gates.length);
+  return { passes, problems };
+}
+
+export function gateRecord(run, stage, problems, at = new Date().toISOString()) {
+  const record = { stage, green: !problems.length, at, problems };
+  const snapshot = problems.length ? null : decomposeSnapshot(run, stage);
+  if (snapshot) {
+    record.parity = { slices: snapshot.slices, rows: snapshot.rows };
+    record.names = snapshot.names;
+    record.seal = snapshotSeal(parseStage(stage).pass, snapshot);
+    record.journal = journalMark(run);
+  }
+  if (run.source) {
+    const seals = Object.fromEntries([...snapshotState(run).passes].filter(([, s]) => s.seal).map(([p, s]) => [p, s.seal]));
+    if (Object.keys(seals).length) record.seals = seals;
+  }
+  return record;
+}
+
+function snapshots(run, pass = null) {
+  return [...snapshotState(run).passes.values()].filter((s) => pass === null || s.pass <= pass).sort((a, b) => a.pass - b.pass);
+}
+
+function snapshotRows(run, pass = null) {
+  const rows = new Map();
+  const units = new Map();
+  for (const s of snapshots(run, pass))
+    for (const [key, entry] of Object.entries(s.rows ?? {})) {
+      const mark = s.marks?.[key] ?? 0;
+      const seen = units.get(key) ?? units.set(key, new Set()).get(key);
+      const listed = entry.unit && !seen.has(entry.unit) ? { listedPass: s.pass, listedMark: mark } : { listedPass: rows.get(key)?.listedPass ?? s.pass, listedMark: rows.get(key)?.listedMark ?? mark };
+      if (entry.unit) seen.add(entry.unit);
+      rows.set(key, { ...entry, pass: s.pass, name: s.names?.[key] ?? null, mark, ...listed });
+    }
+  return rows;
+}
+
+function releaseOf(run, key, entry) {
+  const ran = (stage) => {
+    const s = parseStage(stage);
+    if (!s) return false;
+    if (s.pass === null) return s.step === "integrate";
+    return s.pass <= lastPass(run) && (s.step === "assess" ? Boolean(run.common.N) : s.step === "verdict" ? !run.common.N : true);
+  };
+  const j = run.journal.filter((r) => Number(r.n) > (entry.listedMark ?? entry.mark) && ran(r.stage) && /^(drop|defer)\b/i.test(r.decision) && refsOf(r).includes(key)).at(-1);
+  return j ? { key, fate: /^defer/i.test(j.decision) ? "defer" : "drop", ref: `j${j.n}`, unit: null, state: null, pass: entry.pass, via: "journal" } : null;
+}
+
+function actingFate(run, lines, snap, key) {
+  const entry = snap.get(key);
+  const line = lines.get(key);
+  if (line && !((entry?.listedPass ?? 0) > line.pass && DECIDED.includes(line.fate))) return line;
+  if (entry?.via === "slice") return { key, fate: entry.fate, ref: entry.ref, unit: null, state: null, pass: entry.pass, via: "slice" };
+  return entry ? releaseOf(run, key, entry) : null;
+}
+
+function staleRows(run, snap, lines) {
+  const inventory = new Map(run.source.rows.map((r) => [r.key, r]));
+  return [...snap].filter(
+    ([key, e]) => (!inventory.has(key) || (e.name !== null && normName(e.name) !== normName(inventory.get(key).name))) && actingFate(run, lines, snap, key)?.via !== "journal",
+  );
+}
+
+function ownRow(run, ref, key, what) {
+  const j = journalRow(run, ref);
+  if (!j || !run.source?.rows) return [];
+  const keys = new Set([...run.source.rows.map((r) => r.key), ...snapshotRows(run).keys()]);
+  const others = refsOf(j).filter((x) => x !== key && keys.has(x));
+  return others.length ? [`${what} ${ref} — that journal row refs ${others.length + 1} rows (${sample([key, ...others])}); each drop or defer is a journal row of its own, one row's key in its refs`] : [];
+}
+
+const isParityFinding = (f) => /^parity/i.test(f.local ?? f.id.split("#").at(-1));
+function parityKeyOf(run, f) {
+  const key = /source:\s*`?([^\s`]+)`?/.exec(`${f.rule ?? ""} ${f.raw ?? ""}`)?.[1] ?? null;
+  return key && rekeyed(run, key, run.launches.findIndex((l) => l.id === f.launch));
+}
+
+function parityLetGo(run, f) {
+  const d = run.decisions.get(f.id);
+  const key = parityKeyOf(run, f);
+  if (!d || !["declined", "dropped"].includes(d.decision) || !key) return false;
+  const j = journalRow(run, d.ref);
+  return Boolean(j) && /^(drop|defer)\b/i.test(j.decision) && refsOf(j).includes(key) && !stubWhy(j.why) && !ownRow(run, d.ref, key, "").length;
+}
+
+function parityFindingOpen(run, key) {
+  return [...run.findings.values()].some((f) => {
+    if (!isParityFinding(f) || parityKeyOf(run, f) !== key || parityLetGo(run, f)) return false;
+    const s = statusOf(run, f);
+    return !(s.status === "closed" || (s.status === "fixed" && s.closedBy));
+  });
+}
+
+function checkParityDecisions(run, stage) {
+  return [...run.findings.values()]
+    .filter((f) => isParityFinding(f) && compareStages(f.stage, stage) <= 0 && run.decisions.has(f.id))
+    .filter((f) => !["fix", "open"].includes(run.decisions.get(f.id).decision) && !parityLetGo(run, f))
+    .map(
+      (f) =>
+        `${f.id}: a lost behaviour decided ${run.decisions.get(f.id).decision} — a parity finding is fix or open, or declined or dropped with ref j<n>: a journal row of its own deciding drop or defer of ${parityKeyOf(run, f) ?? "its row"}, with a why`,
+    );
+}
+
+function checkSource(run, step) {
+  const problems = [];
+  if (run.common.sourceSection && !run.common.source)
+    problems.push("common.md has a Source section but no Source: head line — every source check is off; add Source: and Inventory: under the Session: lines (source.md → Config)");
+  if (run.source?.problem && INVENTORY_STEPS.includes(step)) problems.push(`common.md Source: ${run.source.repo} — ${run.source.problem}`);
+  return problems;
+}
+
+function checkJournalWhy(run, ref, what) {
+  const j = journalRow(run, ref);
+  if (!j) return [`${what} ${ref} — journal.md has no row # ${ref.slice(1)}`];
+  return stubWhy(j.why) ? [`${what} ${ref} — that journal row's why "${j.why}" is no reason; write the ground the goal, PRODUCT.md or the stack gives`] : [];
+}
+
+function checkParityLines(run, units, exists) {
+  if (!run.source?.rows) return [];
+  const problems = [];
+  const rowOf = new Map(run.source.rows.map((r) => [r.key, r]));
+  const tree = run.common.worktree ?? run.common.start;
+  const first = run.commits?.[0]?.sha;
+  const base = first ? `${first}^` : "HEAD";
+  for (const u of units) {
+    if (!u.brief) continue;
+    for (const p of u.parity) {
+      if (!p.key) {
+        problems.push(`${u.id}: Parity line "${p.line}" is not ${PARITY_FORMS}`);
+        continue;
+      }
+      const row = rowOf.get(p.key);
+      if (!row) problems.push(`${u.id}: Parity ${p.key} is no row of ${run.source.tests} — after a rebuilt inventory, node fsl.mjs rekey <run folder> moves each line to its row's new file:line (source.md → Rebuilt inventory)`);
+      else if (!(u.slices ?? []).includes(row.slice)) problems.push(`${u.id}: Parity ${p.key} is a row of slice ${row.slice}, which its Slice line does not name`);
+      if (p.fate === "ported-earlier") {
+        if (!p.test) problems.push(`${u.id}: Parity ${p.key} ported-earlier needs the existing test as <test file>:<line>`);
+        else if (!TEST_FILE.test(repoFile(p.test))) problems.push(`${u.id}: Parity ${p.key} ported-earlier ${p.test} — not a test file (*.test.*, *.spec.*, tests/, __tests__/)`);
+        else {
+          const at = exists(tree, base, repoFile(p.test));
+          const line = splitFileLine(p.test).line;
+          if (at === false) problems.push(`${u.id}: Parity ${p.key} ported-earlier ${p.test} — no such file before this run's first commit (${base} in ${tree})`);
+          else if (typeof at === "number" && (line < 1 || line > at)) problems.push(`${u.id}: Parity ${p.key} ported-earlier ${p.test} — line ${line} is past the file's ${at} lines before this run's first commit`);
+        }
+      }
+      if (DECIDED.includes(p.fate)) {
+        const j = p.ref ? journalRow(run, p.ref) : null;
+        if (!p.ref) problems.push(`${u.id}: Parity ${p.key} ${p.fate} needs j<n> — the journal row with its why`);
+        else if (!j) problems.push(`${u.id}: Parity ${p.key} ${p.fate} ${p.ref} — journal.md has no row # ${p.ref.slice(1)}`);
+        else {
+          if (!new RegExp(`^${p.fate}\\b`, "i").test(j.decision)) problems.push(`${u.id}: Parity ${p.key} ${p.fate} ${p.ref} — that journal row decides "${j.decision}", not ${p.fate}`);
+          if (!refsOf(j).includes(p.key)) problems.push(`${u.id}: Parity ${p.key} ${p.fate} ${p.ref} — that journal row's refs lack ${p.key}`);
+          problems.push(...ownRow(run, p.ref, p.key, `${u.id}: Parity ${p.key} ${p.fate}`), ...checkJournalWhy(run, p.ref, `${u.id}: Parity ${p.key} ${p.fate}`));
+        }
+      }
+    }
+  }
+  return problems;
+}
+
+function checkListing(run, units, pass) {
+  const problems = [];
+  const listed = new Map();
+  for (const u of briefsUpTo(run, pass)) for (const p of u.parity) if (p.key) (listed.get(p.key) ?? listed.set(p.key, []).get(p.key)).push({ u, p });
+  for (const [key, entries] of listed) {
+    for (const k of new Set(entries.map((e) => e.u.pass))) {
+      const same = entries.filter((e) => e.u.pass === k);
+      if (same.length > 1 && same.some((e) => units.includes(e.u))) problems.push(`${key}: in the Parity of ${same.map((e) => e.u.id).join(", ")}, one pass — one brief of a pass carries each row`);
+    }
+    const first = Math.min(...entries.map((e) => e.u.pass));
+    for (const e of entries.filter((x) => x.u.pass > first && x.p.fate !== "port" && units.includes(x.u)))
+      problems.push(`${e.u.id}: Parity ${key} ${e.p.fate} — pass ${first} listed it already; a later pass re-lists a row only as port — take the line out to keep pass ${first}'s fate`);
+  }
+  return { problems, listed };
+}
+
+function checkDecompose(run, units, exists, pass) {
+  const source = run.source;
+  if (!source?.rows) return [];
+  const problems = [];
+  const bySlice = new Map();
+  for (const r of source.rows) (bySlice.get(r.slice) ?? bySlice.set(r.slice, []).get(r.slice)).push(r);
+  for (const x of source.rejects) problems.push(`${source.tests}:${x.line}: "${x.text}" — ${x.why}; the inventory's one table holds | <slice> | <file>:<line> | <describe › it> | rows only`);
+  for (const u of units) {
+    if (!u.brief) continue;
+    if (u.slices === null) problems.push(`${u.id}: brief has no "Slice:" line — the source slices it ports, or —`);
+    if (u.sections.parity === undefined) problems.push(`${u.id}: brief has no "## Parity" section — each row of its slices as ${PARITY_FORMS}, or —`);
+    for (const s of u.slices ?? [])
+      if (!bySlice.has(s) && !run.journal.some((r) => refsOf(r).includes(`slice:${s}`)))
+        problems.push(`${u.id}: slice "${s}" has no row in ${source.tests} — name it as the inventory does, or a journal row refs slice:${s} and says why it pins no test`);
+  }
+  problems.push(...checkParityLines(run, units, exists));
+  const { problems: listing, listed } = checkListing(run, units, pass);
+  const snap = snapshotRows(run, pass);
+  problems.push(...listing);
+  for (const s of new Set([...units.flatMap((u) => u.slices ?? []), ...slicesOfSliceRows(run, pass)])) {
+    const rows = bySlice.get(s) ?? [];
+    const whole = sliceRow(run, pass, s);
+    const listedRows = rows.filter((r) => listed.has(r.key));
+    if (whole) {
+      if (listedRows.length) problems.push(`slice ${s}: ${whole.ref} decides the whole slice, but briefs list ${listedRows.length} of its rows — a slice row covers a slice no brief lists; give each row its own line instead`);
+      else problems.push(...checkJournalWhy(run, whole.ref, `slice ${s} ${whole.fate}`));
+      continue;
+    }
+    const missing = rows.filter((r) => !listed.has(r.key) && !(snap.has(r.key) && releaseOf(run, r.key, snap.get(r.key)))).map((r) => r.key);
+    if (missing.length)
+      problems.push(`slice ${s}: ${missing.length} rows in no brief's Parity — ${sample(missing)}; each one ${PARITY_FORMS}, or, when no brief lists any row of it, one journal row of this stage deciding drop or defer with slice:${s} in its refs`);
+  }
+  return problems;
+}
+
+const UNIT_STATES = ["drafted", "ready", "implement", "verify", "debug", "land", "committed", "blocked"];
+const AFTER_UNITS = ["review", "fix", "verdict", "assess"];
+
+function checkInvariant(run, pass, step, exists, changed) {
+  if (!run.source?.rows) return [];
+  const upTo = pass ?? lastPass(run);
+  const problems = [...snapshotState(run).problems];
+  for (const s of snapshots(run, upTo)) {
+    const again = `gate p${s.pass}-decompose again (fsl.mjs gate <run folder> p${s.pass}-decompose)`;
+    if (!s.rows) problems.push(`p${s.pass}-decompose: its green gate recorded no parity snapshot — ${again}`);
+    else if (!s.seal) problems.push(`p${s.pass}-decompose: its snapshot carries no seal, so nothing shows it unedited — ${again}`);
+  }
+  const briefs = briefsUpTo(run, upTo);
+  problems.push(...checkParityLines(run, briefs, exists), ...checkListing(run, briefs, upTo).problems);
+  for (const u of briefs) {
+    if (u.pass === upTo && step === "units") continue;
+    if (!UNIT_STATES.includes(u.state)) problems.push(`${u.id}: state "${u.state}" is none of units.md's (drafted, ready, implement, verify, debug, land, committed <sha>, blocked: <why>) — its Parity rows have no acting fate`);
+    else if (!["committed", "blocked"].includes(u.state) && u.parity.some((p) => p.key) && (u.pass < upTo || pass === null || AFTER_UNITS.includes(step)))
+      problems.push(`${u.id}: ${u.state} past p${u.pass}-units — its Parity rows act only once it is committed or blocked`);
+  }
+  const lines = latestLines(run, upTo);
+  const snap = snapshotRows(run, upTo);
+  const filesOf = new Map();
+  const changedFiles = (u) => {
+    if (!filesOf.has(u.id)) {
+      const lists = u.commits.map((sha) => changed(run.common.start, sha));
+      filesOf.set(u.id, lists.length && lists.every(Boolean) ? new Set(lists.flat()) : null);
+    }
+    return filesOf.get(u.id);
+  };
+  const inRunTree = (what, test) => {
+    const tree = run.common.worktree ?? run.common.start;
+    const at = exists(tree, "HEAD", repoFile(test));
+    const line = splitFileLine(test).line;
+    const out = "restore the test, or take the line out and release the row (source.md → Decompose)";
+    if (at === false || at === null) return [`${what} ${test}, which the run's tree (HEAD in ${tree ?? "—"}) does not hold: ${out}`];
+    return typeof at === "number" && (line < 1 || line > at) ? [`${what} ${test}, past the file's ${at} lines in the run's tree: ${out}`] : [];
+  };
+  const slicesHeld = new Set(snapshots(run, upTo).flatMap((s) => s.slices ?? []));
+  for (const u of briefs)
+    for (const s of (u.slices ?? []).filter((x) => !slicesHeld.has(x)))
+      problems.push(`${u.id}: Slice ${s} is in no snapshot — its rows have no fate yet; gate p${u.pass}-decompose again, which adds them (source.md → Decompose)`);
+  const unlanded = new Set();
+  for (const u of briefs.filter((x) => x.state === "committed"))
+    for (const bad of reportedParity(run, u.id).filter((r) => !r.key)) problems.push(`${u.id}: PARITY line "${bad.line}" of ${bad.launch} is not ${PORTED_FORMS}`);
+  const stale = staleRows(run, snap, lines).map(([key]) => key);
+  if (stale.length)
+    problems.push(
+      `the inventory was rebuilt: ${stale.length} rows of the snapshot are no row of ${run.source.tests} under their describe › it now — ${sample(stale)}; node fsl.mjs rekey <run folder> moves each to its new file:line (source.md → Rebuilt inventory)`,
+    );
+  const keys = new Set([...snap.keys(), ...[...lines.values()].filter((l) => l.fate === "port").map((l) => l.key)].filter((k) => !stale.includes(k)));
+  const unported = new Map();
+  for (const key of keys) {
+    const f = actingFate(run, lines, snap, key);
+    if (!f) {
+      const was = snap.get(key);
+      problems.push(`${key}: ${was.fate}${was.unit ? ` in ${was.unit}` : ""} at p${was.pass}-decompose, no line now — each row keeps one acting fate: restore its line, or release the row by a journal row of its own written after Decompose: drop or defer, ${key} in its refs, a why`);
+      continue;
+    }
+    if (f.via === "slice") {
+      const j = journalRow(run, f.ref);
+      if (!j || !new RegExp(`^${f.fate}\\b`, "i").test(j.decision)) problems.push(`${key}: ${f.fate} ${f.ref} by its slice at p${f.pass}-decompose — that journal row no longer decides ${f.fate}`);
+      else problems.push(...checkJournalWhy(run, f.ref, `${key}: ${f.fate} by its slice`));
+      continue;
+    }
+    if (f.via === "journal") {
+      problems.push(...ownRow(run, f.ref, key, `${key}: ${f.fate}`), ...checkJournalWhy(run, f.ref, `${key}: ${f.fate}`));
+      continue;
+    }
+    if (f.fate === "ported-earlier" && f.test && TEST_FILE.test(repoFile(f.test))) problems.push(...inRunTree(`${f.unit}: Parity ${key} — ported-earlier`, f.test));
+    if (f.fate !== "port") continue;
+    const u = run.units.find((x) => x.id === f.unit);
+    if (u.state === "blocked") {
+      problems.push(
+        `${key}: port in ${u.id}, which is blocked — the row has no acting fate and holds every gate: write defer j<n> or drop j<n> on its line, each with a journal row of its own; for a row an earlier pass listed, take the line out and release the row (source.md → Units)`,
+      );
+      continue;
+    }
+    if (u.state !== "committed") continue;
+    if (!u.commits.length) {
+      unlanded.add(u.id);
+      continue;
+    }
+    const r = portedTest(run, u.id, key);
+    if (!r?.ported) (unported.get(u.id) ?? unported.set(u.id, []).get(u.id)).push(key);
+    else if (!TEST_FILE.test(repoFile(r.test))) problems.push(`${u.id}: Parity ${key} — ported ${r.test}, which is no test file (*.test.*, *.spec.*, tests/, __tests__/)`);
+    else if (!changedFiles(u)) problems.push(`${u.id}: Parity ${key} — git gave no file list for ${u.commits.join(", ")} in ${run.common.start}; a port stands only on files its commits change`);
+    else if (!changedFiles(u).has(repoFile(r.test))) problems.push(`${u.id}: Parity ${key} — ported ${r.test}, which no commit of ${u.id} changes`);
+    else problems.push(...inRunTree(`${u.id}: Parity ${key} — ported`, r.test));
+  }
+  const named = new Set(snapshots(run, upTo).flatMap((s) => s.slices ?? []));
+  const unclaimed = run.source.rows.filter((r) => named.has(r.slice) && !snap.has(r.key)).map((r) => r.key);
+  if (unclaimed.length)
+    problems.push(
+      `${unclaimed.length} rows of ${run.source.tests} in slices a snapshot holds are in no snapshot — ${sample(unclaimed)}; the inventory gained them after Decompose: give each a line in a brief and gate that pass's Decompose again, which adds them (source.md → Rebuilt inventory)`,
+    );
+  for (const id of unlanded)
+    problems.push(
+      run.commits === null
+        ? `${id}: committed, but git gave no commits of run ${run.id} (Start: ${run.common.start ?? "—"}) — its port rows act only on a commit git shows`
+        : `${id}: committed, but no commit with Fsloop-Run: ${run.id} and Fsloop-Step: ${id} is on the run branch — its port rows have no acting fate`,
+    );
+  for (const [id, ks] of unported)
+    problems.push(`${id}: Parity ${sample(ks)} — port, but no PARITY line of a ${id} launch names its ported test; port it, or drop it: a journal row and drop j<n> in the brief`);
+  return problems;
+}
+
+function rowFates(run, pass, slices) {
+  const lines = latestLines(run, pass ?? lastPass(run));
+  const snap = snapshotRows(run, pass ?? lastPass(run));
+  return run.source.rows
+    .filter((r) => slices.includes(r.slice))
+    .map((r) => {
+      const f = actingFate(run, lines, snap, r.key);
+      const test = f?.fate === "port" ? (portedTest(run, f.unit, r.key)?.test ?? null) : (f?.test ?? null);
+      const why = f?.ref ? (journalRow(run, f.ref)?.why ?? null) : null;
+      return { ...r, unit: f?.unit ?? null, state: f?.state ?? null, fate: f?.fate ?? null, ref: f?.ref ?? null, via: f?.via ?? null, why, test };
+    });
+}
+
+const snapshotSlices = (run, pass) => [...new Set(snapshots(run, pass).flatMap((s) => s.slices ?? []))];
+
+const partRow = (r) =>
+  `| \`${r.key}\` | ${escapeCell(r.name)} | ${r.unit ? `${r.unit}${r.state === "blocked" ? " (blocked)" : ""}` : "—"} | ${r.fate ? `${r.fate}${r.ref ? ` ${r.ref}` : ""}${r.via === "slice" ? " (whole slice)" : r.via === "journal" ? " (by its journal row)" : ""}${r.fate === "ported-earlier" ? " — check the test covers this row" : ""}` : "—"} | ${escapeCell(r.why ?? "—")} | ${r.test ? `\`${r.test}\`` : "—"} |`;
+
+export function parityParts(run, stage) {
+  const { pass, step } = parseStage(stage) ?? {};
+  if (!run.source?.rows || (step !== "review" && step !== "assess")) return [];
+  const done = sourceBriefs(run).filter((u) => (u.state === "committed" || u.state === "blocked") && u.pass <= pass);
+  const scope = step === "review" ? done.filter((u) => u.pass === pass) : done;
+  const slices = [...new Set([...scope.flatMap((u) => u.slices ?? []), ...(step === "assess" ? snapshotSlices(run, pass) : [])])];
+  const parts = [];
+  for (const slice of slices) {
+    const rows = rowFates(run, pass, [slice]).filter((r) => step === "assess" || ((r.fate === "port" || r.fate === "ported-earlier") && scope.some((u) => u.id === r.unit)));
+    if (!rows.length) continue;
+    const n = Math.ceil(rows.length / PARITY_CAP);
+    for (let k = 1; k <= n; k++) {
+      const description = n === 1 ? `critic parity ${slice}` : `critic parity ${slice} ${k}/${n}`;
+      const part = rows.slice((k - 1) * PARITY_CAP, k * PARITY_CAP);
+      parts.push({ slice, k, n, description, file: `parity/${stage}-${slice}${n === 1 ? "" : `-${k}`}.md`, rows: part, seal: sealOf({ description, rows: part.map(partRow) }) });
+    }
+  }
+  return parts;
+}
+
+const ROW_VERDICT = /^`?([^`\s]+:\d+)`?\s+(?:—|--?)\s+(kept|lost|settled)\b(.*)$/;
+
+function criticCovers(run, l, part) {
+  if ((l.block?.ROWS?.value ?? "").replace(/`/g, "").trim() !== part.seal) return false;
+  const said = (l.block?.ROWS?.items ?? []).map((item) => ROW_VERDICT.exec(item)).filter(Boolean);
+  return part.rows.every((r) => {
+    const v = said.find((m) => sameRow(m[1], r.key));
+    if (!v) return false;
+    if (v[2] === "settled") return DECIDED.includes(r.fate);
+    if (v[2] === "kept") return Boolean(r.fate);
+    const id = /\b(parity-\d+)\b/.exec(v[3])?.[1];
+    return Boolean(id) && run.findings.has(`${l.id}#${id}`);
+  });
+}
+
+function checkParityCritics(run, stage) {
+  if (!run.source) return [];
+  const { pass, step } = parseStage(stage);
+  const upTo = pass ?? lastPass(run);
+  const stages = [];
+  for (let q = 1; q <= upTo; q++) {
+    const past = q < upTo || pass === null;
+    if (past || AFTER_UNITS.includes(step)) stages.push(`p${q}-review`);
+    if (run.common.N && (past || step === "assess")) stages.push(`p${q}-assess`);
+  }
+  const problems = [];
+  for (const s of stages) {
+    const lens = s.endsWith("-assess") ? "parity assess" : "parity";
+    for (const p of parityParts(run, s)) {
+      const reports = run.launches.filter((l) => l.description === p.description && isCritic(l, lens) && parseStage(l.stage) && compareStages(l.stage, s) >= 0);
+      if (!reports.length) problems.push(`${s}: no "${p.description}" report of fsloop-critic with LENS: ${lens} saved — its rows are the run folder's ${p.file} (fsl.mjs parity <run folder> ${s})`);
+      else if (!reports.some((l) => criticCovers(run, l, p)))
+        problems.push(
+          `${s}: no "${p.description}" report of fsloop-critic carries ROWS: ${p.seal} with a kept, lost or settled line per row — its ${p.rows.length} rows changed since its critic (a fate, a test, a unit's state) or the report skips some; fsl.mjs parity <run folder> ${s}, then that critic again`,
+        );
+    }
+  }
+  if ((step === "review" || step === "assess") && !run.launches.some((l) => l.stage === stage && l.description === "critic code" && isCritic(l, step === "assess" ? "code assess" : "code")))
+    problems.push(`${stage}: no "critic code" report of fsloop-critic with LENS: ${step === "assess" ? "code assess" : "code"} saved — a parity critic is no code review`);
+  return problems;
+}
+
+function agentOf(l) {
+  const meta = l.transcript?.endsWith(".jsonl") ? (readMeta(l.transcript.replace(/\.jsonl$/, ".meta.json")).agentType ?? null) : null;
+  if (meta && l.agent && meta !== l.agent) return null;
+  return meta ?? (l.agent || null);
+}
+
+const isCritic = (l, lens) => agentOf(l) === "fsloop-critic" && (l.block?.LENS?.value ?? "").trim().toLowerCase() === lens;
+
+export function parityCoverage(run) {
+  if (!run.source?.rows) return null;
+  const upTo = lastPass(run);
+  const slices = [...new Set([...sourceBriefs(run).filter((u) => u.pass <= upTo).flatMap((u) => u.slices ?? []), ...snapshotSlices(run, upTo)])];
+  const decided = (r) => {
+    const j = r.ref ? journalRow(run, r.ref) : null;
+    return Boolean(j) && new RegExp(`^${r.fate}\\b`, "i").test(j.decision) && (r.via === "slice" || (refsOf(j).includes(r.key) && !ownRow(run, r.ref, r.key, "").length)) && !stubWhy(j.why);
+  };
+  const letGo = (key) => {
+    const f = [...run.findings.values()].find((x) => isParityFinding(x) && parityKeyOf(run, x) === key && parityLetGo(run, x));
+    return f ? (/^defer/i.test(journalRow(run, run.decisions.get(f.id).ref).decision) ? "defer" : "drop") : null;
+  };
+  return slices.map((slice) => {
+    const c = { slice, rows: 0, ported: 0, portedEarlier: 0, dropped: 0, deferred: 0, open: 0 };
+    for (const r of rowFates(run, null, [slice])) {
+      c.rows++;
+      const gone = letGo(r.key);
+      if (gone === "drop") c.dropped++;
+      else if (gone === "defer") c.deferred++;
+      else if (r.fate === "ported-earlier" && !parityFindingOpen(run, r.key)) c.portedEarlier++;
+      else if (r.fate === "drop" && decided(r)) c.dropped++;
+      else if (r.fate === "defer" && decided(r)) c.deferred++;
+      else if (r.fate === "port" && r.state === "committed" && portedTest(run, r.unit, r.key)?.ported && !parityFindingOpen(run, r.key)) c.ported++;
+      else c.open++;
+    }
+    return c;
+  });
+}
+
+export function writeParityParts(runDir, stage) {
+  const run = collect(runDir);
+  const parts = parityParts(run, stage);
+  for (const p of parts) {
+    const lines = [
+      `# critic parity — ${p.slice}${p.n === 1 ? "" : ` ${p.k}/${p.n}`}`,
+      "",
+      `Stage: ${stage}`,
+      `Source: ${run.source.repo}`,
+      `Rows: ${p.rows.length}${p.k === 1 ? " · this part also judges the slice beyond its rows" : ""}`,
+      `Seal: ${p.seal}`,
+      "",
+      "| row | describe › it | unit | fate | why | test |",
+      "|---|---|---|---|---|---|",
+      ...p.rows.map(partRow),
+      "",
+    ];
+    mkdirSync(join(runDir, "parity"), { recursive: true });
+    writeAtomic(join(runDir, p.file), lines.join("\n"));
+  }
+  return parts;
+}
+
+export function rekey(runDir, pairs = []) {
+  const run = collect(runDir);
+  if (!run.source?.rows) return { map: {}, problems: [run.source?.problem ? `common.md Source: ${run.source.repo} — ${run.source.problem}` : "common.md has no Source: head line — no inventory to rekey"] };
+  const inventory = new Map(run.source.rows.map((r) => [r.key, r]));
+  const snap = snapshotRows(run);
+  const stale = new Map(staleRows(run, snap, latestLines(run, lastPass(run))));
+  const held = new Set([...snap.keys()].filter((k) => !stale.has(k) && inventory.has(k)));
+  const fileOf = (key) => splitFileLine(key)?.file ?? key;
+  const clean = (s) => s?.replace(/`/g, "").trim();
+  const split = pairs.map((pair) => pair.split("=").map(clean));
+  const files = new Map(split.filter(([from, to]) => from && to && !splitFileLine(from) && !splitFileLine(to)));
+  const movedTo = (key) => files.get(fileOf(key)) ?? fileOf(key);
+  const map = {};
+  const problems = [];
+  for (const [from, to, flag] of split.filter(([from, to]) => splitFileLine(from) || splitFileLine(to))) {
+    const e = stale.get(from);
+    const row = inventory.get(to);
+    const where = `${from}=${to}${flag ? `=${flag}` : ""}`;
+    if (!from || !to || (flag && flag !== "renamed")) problems.push(`"${where}": write <old file:line>=<new file:line>, with =renamed when its describe › it changed, or <old file>=<new file>`);
+    else if (!e) problems.push(`${where}: ${from} is no row of the snapshot that moved`);
+    else if (!row) problems.push(`${where}: ${to} is no row of ${run.source.tests}`);
+    else if (row.slice !== e.slice) problems.push(`${where}: ${to} is a row of slice ${row.slice}, ${from} of ${e.slice}`);
+    else if (fileOf(to) !== movedTo(from)) problems.push(`${where}: ${to} is in ${fileOf(to)}, ${from} in ${fileOf(from)} — name a renamed file as its own pair, ${fileOf(from)}=${fileOf(to)}`);
+    else if (normName(row.name) !== normName(e.name) && flag !== "renamed") problems.push(`${where}: ${to} is «${row.name}», ${from} was «${e.name ?? "—"}» — confirm with ${from}=${to}=renamed`);
+    else map[from] = { key: to, name: row.name };
+  }
+  for (const [key, e] of stale) {
+    if (map[key] || split.some(([from]) => from === key)) continue;
+    const found = e.name === null ? [] : run.source.rows.filter((r) => r.slice === e.slice && fileOf(r.key) === movedTo(key) && normName(r.name) === normName(e.name) && !held.has(r.key));
+    if (found.length === 1) map[key] = { key: found[0].key, name: found[0].name };
+    else
+      problems.push(
+        `${key} «${e.name ?? "no name in the snapshot"}» — ${found.length ? `${found.length} rows of ${movedTo(key)} carry that name` : `no row of slice ${e.slice} in ${movedTo(key)} carries that name`}: map it by hand, ${key}=<new file:line>[=renamed], or take its brief line out and release it (source.md → Rebuilt inventory)`,
+      );
+  }
+  const targets = new Map();
+  for (const [from, to] of Object.entries(map)) {
+    if (held.has(to.key)) problems.push(`${from}=${to.key}: ${to.key} is a row the snapshot already holds`);
+    if (targets.has(to.key)) problems.push(`${targets.get(to.key)} and ${from} both map to ${to.key}`);
+    targets.set(to.key, from);
+  }
+  if (problems.length || !Object.keys(map).length) return { map, problems };
+  const olds = Object.keys(map).sort((a, b) => b.length - a.length);
+  const re = new RegExp(`(?<![^\\s\`|(])(${olds.map(escapeRe).join("|")})(?![^\\s\`|),;])`, "g");
+  const swap = (path) => {
+    const text = read(path);
+    const next = text.replace(re, (k) => map[k].key);
+    if (next !== text) writeAtomic(path, next);
+  };
+  for (const u of sourceBriefs(run)) swap(join(runDir, u.brief));
+  swap(join(runDir, "journal.md"));
+  mkdirSync(join(runDir, "parity"), { recursive: true });
+  appendFileSync(join(runDir, "parity", "rekey.jsonl"), JSON.stringify({ at: new Date().toISOString(), gates: run.gates.length, launches: run.launches.length, map }) + "\n");
+  return { map, problems };
+}
+
 /** Every fix decision of `stages` is closed by a unit of `pass` whose id starts with `prefix`. */
 function checkTaken(run, stages, pass, prefix) {
   const problems = [];
@@ -1093,12 +1870,12 @@ const SETTLED = ["closed", "candidate", "dropped", "declined", "duplicate"];
 const holdsPushScope = (f) => Boolean(f) && ["critical", "major"].includes(f.severity) && /-(review|verdict)$|^integrate$/.test(f.stage);
 
 /** What still stands between `stage` and done; empty → green. */
-export function gate(run, stage, { commitMessage = defaultCommitMessage } = {}) {
+export function gate(run, stage, { commitMessage = defaultCommitMessage, exists = defaultExists, changed = defaultChanged } = {}) {
   const parsed = parseStage(stage);
   if (!parsed) return [`unknown stage "${stage}" — p<n>-{${STEPS.join("|")}}, integrate, finish or init`];
   if (parsed.step === "init") return [...checkLaunches(run, stage), ...checkInit(run)];
   const { pass, step } = parsed;
-  const problems = [...prerequisites(run, stage), ...checkLaunches(run, stage), ...checkUnparsed(run, stage), ...checkDecisions(run, stage), ...checkJournal(run)];
+  const problems = [...prerequisites(run, stage), ...checkLaunches(run, stage), ...checkUnparsed(run, stage), ...checkDecisions(run, stage), ...checkJournal(run), ...checkSource(run, step)];
   const ofPass = (prefix) => run.units.filter((u) => u.pass === pass && u.id.startsWith(prefix));
 
   if (["units", "fix", "integrate"].includes(step)) problems.push(...checkTrailers(run));
@@ -1106,13 +1883,15 @@ export function gate(run, stage, { commitMessage = defaultCommitMessage } = {}) 
   if (step === "decompose") {
     const units = ofPass("u");
     if (!units.length) problems.push(`no u-unit of pass ${pass} in units.md`);
-    problems.push(...checkBriefs(run, units), ...checkOverlap(run, units));
+    problems.push(...checkBriefs(run, units), ...checkOverlap(run, units), ...checkDecompose(run, units, exists, pass));
     const sources = [`p${pass}-map`, `p${pass}-decompose`, ...(pass > 1 ? [`p${pass - 1}-assess`] : [])];
     problems.push(...checkTaken(run, sources, pass, "u"));
   }
   if (step === "units") problems.push(...checkLanded(run, ofPass("u"), stage, commitMessage));
+  if (AFTER_DECOMPOSE.includes(step)) problems.push(...checkInvariant(run, pass, step, exists, changed));
   if (step === "review" && !run.launches.some((l) => l.stage === stage && l.description.startsWith("critic ")))
     problems.push(`${stage}: no critic report saved`);
+  if (step === "integrate" || AFTER_UNITS.includes(step)) problems.push(...checkParityCritics(run, stage), ...(run.source ? checkParityDecisions(run, stage) : []));
   if (step === "fix") {
     const units = ofPass("f");
     problems.push(...checkBriefs(run, units), ...checkTaken(run, [`p${pass}-review`], pass, "f"));
@@ -1661,6 +2440,7 @@ export function build(run) {
       return { ...q, answer: answer ? { launch: answer.launch, stage: answer.stage, text: answer.text, result: answer.result, finding: answer.finding } : null, journal: journal?.n ?? null };
     }),
     surfaces: run.surfaces,
+    ...(run.source ? { parity: parityCoverage(run) } : {}),
     audits: run.audits,
     shots: run.shots,
     logs: run.logs,
@@ -1700,6 +2480,7 @@ export function summarize(json) {
       commits: json.commits?.length ?? null,
       findings: { total: json.findings.length, status: count(json.findings, "status"), effectiveStatus: count(json.findings, "effectiveStatus"), severity: count(json.findings, "severity") },
     },
+    ...(json.parity ? { parity: Object.fromEntries(["rows", "ported", "portedEarlier", "dropped", "deferred", "open"].map((k) => [k, json.parity.reduce((sum, c) => sum + c[k], 0)])) } : {}),
     spend: { launches: spend, orchestrator: json.orchestrator.spend },
   };
 }
@@ -1788,6 +2569,8 @@ export function reportTables(json) {
   if (json.N) sections.push(["Passes", mdTable(["pass", "critical+major", "outcome", "why"], json.passes.map((p) => [`p${p.pass}`, p.criticalMajor, p.outcome, p.why]))]);
   const scores = Object.entries(json.surfaces).map(([s, row]) => [s, row.map((r) => `${r.stage} ${r.audit ?? "?"}/${r.auditMax ?? "?"} · ${r.critique ?? "?"}/${r.critiqueMax ?? "?"}`).join(" → ")]);
   if (scores.length) sections.push(["Surfaces (audit · critique)", mdTable(["surface", "baseline → now"], scores)]);
+  if (json.parity)
+    sections.push(["Parity (source slices)", mdTable(["slice", "rows", "ported", "ported earlier", "dropped", "deferred", "open"], json.parity.map((c) => [c.slice, c.rows, c.ported, c.portedEarlier, c.dropped, c.deferred, c.open]))]);
   return [TABLES_START, ...sections.map(([h, t]) => `\n## ${h}\n\n${t}`), "", TABLES_END].join("\n");
 }
 
@@ -1897,6 +2680,8 @@ const USAGE = `usage:
   node fsl.mjs build  <run folder>           write run.json and summary.json
   node fsl.mjs mark   <run folder> <step> [end]   stamp the start of an init step — ${INIT_STEPS.join(" | ")} — or, with end, its end (design: the interview has no artifact)
   node fsl.mjs timeline <run folder>         the run by step — started, took, what each command and launch took
+  node fsl.mjs parity <run folder> <p<n>-review|p<n>-assess>   a rebuild's parity critics: one per source slice, ${PARITY_CAP} rows a part — each part's rows to parity/
+  node fsl.mjs rekey  <run folder> [<old file:line>=<new file:line>[=renamed] | <old file>=<new file> …]   after the inventory is rebuilt: move each snapshot row to its new key by slice, file and describe › it
 stage: p<n>-{${STEPS.join("|")}} | integrate | finish | init`;
 
 function main(argv) {
@@ -1925,8 +2710,7 @@ function main(argv) {
     if (!stage) return (console.error(USAGE), 4);
     const run = collect(runDir);
     const problems = gate(run, stage);
-    if (parseStage(stage))
-      appendFileSync(join(runDir, "gates.jsonl"), JSON.stringify({ stage, green: !problems.length, at: new Date().toISOString(), problems }) + "\n");
+    if (parseStage(stage)) appendFileSync(join(runDir, "gates.jsonl"), JSON.stringify(gateRecord(run, stage, problems)) + "\n");
     writeRunJson(runDir);
     if (!problems.length) {
       console.log(`GATE ${stage} green`);
@@ -1959,6 +2743,41 @@ function main(argv) {
   }
   if (command === "timeline") {
     console.log(renderTimeline(timelineOf(collect(runDir))));
+    return 0;
+  }
+  if (command === "parity") {
+    const stage = rest[0];
+    if (!/^p\d+-(review|assess)$/.test(stage ?? "")) {
+      console.error(USAGE);
+      return 4;
+    }
+    const run = collect(runDir);
+    const blocked = checkSource(run, "review");
+    if (!run.source) blocked.push("common.md has no Source: head line — no source, no parity critics");
+    if (blocked.length) {
+      for (const b of blocked) console.error(b);
+      return 1;
+    }
+    const keys = new Set(run.source.rows.map((r) => r.key));
+    const lost = sourceBriefs(run).flatMap((u) => u.parity.filter((p) => p.key && !keys.has(p.key)).map((p) => `${u.id} ${p.key}`));
+    if (lost.length) console.error(`warning: ${lost.length} Parity lines name no row of ${run.source.tests} — after a rebuilt inventory, fsl.mjs rekey <run folder> moves them: ${sample(lost)}`);
+    for (const p of writeParityParts(runDir, stage)) console.log(`${p.description} — ${p.rows.length} rows — ${resolve(runDir, p.file)}`);
+    return 0;
+  }
+  if (command === "rekey") {
+    const { map, problems } = rekey(runDir, rest);
+    if (problems.length) {
+      console.log(`REKEY red — ${problems.length}; nothing written`);
+      for (const p of problems) console.log(`- ${p}`);
+      return 1;
+    }
+    if (!Object.keys(map).length) {
+      console.log("REKEY — every snapshot row is a row of the inventory under its name; nothing to move");
+      return 0;
+    }
+    for (const [from, to] of Object.entries(map)) console.log(`${from} → ${to.key}`);
+    console.log(`${Object.keys(map).length} rows moved in the briefs, journal.md and parity/rekey.jsonl — gate the stage again, and run fsl.mjs parity and its critics for each part whose rows moved`);
+    writeRunJson(runDir);
     return 0;
   }
   console.error(USAGE);
