@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { findPolluter, victimCases } from "./find-polluter.mjs";
+import { commandFits, findPolluter, refusedAsTooLong, victimCases } from "./find-polluter.mjs";
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "find-polluter.mjs");
 
@@ -44,6 +44,22 @@ describe("findPolluter", () => {
   test("splits a half that is too long to run instead of calling it green", async () => {
     const { polluter } = await findPolluter(files, (set) => (set.length > 4 ? null : set.includes("c")));
     assert.equal(polluter, "c");
+  });
+});
+
+describe("command length on Windows", () => {
+  const line = (length) => `bun test ${"x".repeat(length - 9)}`;
+
+  test("holds a command to cmd.exe's 8191-character line on win32", () => {
+    assert.equal(commandFits(line(9_000), "win32"), false);
+    assert.equal(commandFits(line(7_900), "win32"), true);
+    assert.equal(commandFits(line(9_000), "linux"), true);
+  });
+
+  test("reads cmd.exe's refusal as too long, never as a red run", () => {
+    assert.equal(refusedAsTooLong("The command line is too long.\r\n"), true);
+    assert.equal(refusedAsTooLong("", { code: "E2BIG" }), true);
+    assert.equal(refusedAsTooLong("1 fail\n"), false);
   });
 });
 

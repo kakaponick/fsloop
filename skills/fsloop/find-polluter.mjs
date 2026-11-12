@@ -12,7 +12,7 @@ In the tree the cwd is in, finds the test file that, run before the victim in on
 --skip  a candidate path matching it stays out unless named as a file (live, browser, database tests).
 Candidates: the tracked test files under the prefixes (every one by default) without the victim.
 Exit 0 no polluter · 1 polluter found · 2 the victim is red alone · 3 inconclusive · 4 usage`;
-const MAX_COMMAND = 30_000;
+const MAX_COMMAND = { win32: 8_000, other: 30_000 };
 const TEST_FILE = /([._-](test|spec)\.[cm]?[jt]sx?|(^|\/)test_[^/]*\.py|_test\.py)$/;
 const BUN_RUN = "bun test {files} --reporter=junit --reporter-outfile={junit}";
 
@@ -79,26 +79,40 @@ export function command(template, files, junit) {
     .flatMap((part) => (part === "{files}" ? files : [part.replaceAll("{junit}", junit)]));
 }
 
+export function commandFits(line, platform) {
+  return line.length <= (platform === "win32" ? MAX_COMMAND.win32 : MAX_COMMAND.other);
+}
+
+export function refusedAsTooLong(output, error) {
+  return /command line is too long/i.test(output) || ["E2BIG", "ENAMETOOLONG"].includes(error?.code);
+}
+
 function runner(root, template, victim, logs) {
   let step = 0;
   return (files) => {
     const [bin, ...args] = command(template, [...files, victim].map((file) => `./${file}`), "{junit}");
-    if (args.join(" ").length > MAX_COMMAND) {
+    const xml = join(logs, `${step + 1}.xml`);
+    const argv = args.map((arg) => arg.replaceAll("{junit}", xml));
+    const line = [bin, ...argv].map(quote).join(" ");
+    if (!commandFits(line, process.platform)) {
       console.log(`- ${files.length} files + victim — too long for one command, split`);
       return null;
     }
     step += 1;
-    const xml = join(logs, `${step}.xml`);
     const log = join(logs, `${step}.log`);
-    const argv = args.map((arg) => arg.replaceAll("{junit}", xml));
     const windows = process.platform === "win32";
-    const run = spawnSync(windows ? [bin, ...argv].map(quote).join(" ") : bin, windows ? [] : argv, {
+    const run = spawnSync(windows ? line : bin, windows ? [] : argv, {
       cwd: root,
       encoding: "utf8",
       maxBuffer: 256 << 20,
       shell: windows,
     });
-    writeFileSync(log, `${run.stdout ?? ""}${run.stderr ?? ""}${run.error ? `\n${run.error.message}` : ""}`);
+    const output = `${run.stdout ?? ""}${run.stderr ?? ""}${run.error ? `\n${run.error.message}` : ""}`;
+    writeFileSync(log, output);
+    if (refusedAsTooLong(output, run.error)) {
+      console.log(`${step} ${files.length} files + victim — refused as too long, split — ${log}`);
+      return null;
+    }
     const cases = existsSync(xml) ? victimCases(readFileSync(xml, "utf8"), victim) : [];
     const red = cases.length === 0 || cases.some((result) => result.failed);
     console.log(`${step} ${files.length} files + victim — ${red ? "red" : "green"} — ${log}`);
