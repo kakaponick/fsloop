@@ -9,7 +9,15 @@ import { discover } from "../server/discover.ts";
 import { startServer } from "../server/main.ts";
 import { readRun } from "../server/run.ts";
 import { targetsOf, walkRun, type Walk } from "../server/walk.ts";
-import { makeFixtureRoot } from "./make.ts";
+import { makeFixtureRoot, unitCommits } from "./make.ts";
+
+describe("unitCommits", () => {
+  test("code-6 · a commit's Fsloop-Closes trailer names every id the brief's «## Closes» names, two on one line too — the set the record's unit closes", () => {
+    const brief = ["Kind: full", "", "## Closes", "", "- p1-review-critic-code#code-1, p1-review-critic-code#code-2", "- p1-review-critic-craft#craft-3", ""].join("\n");
+    const [commit] = unitCommits({ id: "c0de0006", mtime: MAKE_NOW, now: MAKE_NOW, units: [{ id: "u1", state: "committed", brief }] });
+    expect(commit.message.split("\n").filter((l) => l.startsWith("Fsloop-Closes:"))).toEqual(["Fsloop-Closes: p1-review-critic-code#code-1 p1-review-critic-code#code-2 p1-review-critic-craft#craft-3"]);
+  });
+});
 
 const NOW = MAKE_NOW;
 // The whole root at NOW, written by makeFixtureRoot once in the global setup (fixtures/global-setup.ts), not in this

@@ -112,8 +112,8 @@ describe("the live store", () => {
   });
 });
 
-describe("improve-17 · a running launch's last write and the run's tokens come with the card", () => {
-  test("a tick that moves the list and not the run: the watched run reads the card's last write and tokens, and is not read again", async () => {
+describe("improve-17 · a running launch's last write comes with the card", () => {
+  test("a tick that moves the list and not the run: the watched run reads the card's last write, and is not read again", async () => {
     const KEY = "app/11fe0017";
     const at = (ms: number) => new Date(ms).toISOString();
     const spend = (output: number) => ({ launches: { input: 1, output: 2, cacheWrite: 3, cacheRead: 4, boot: 0, continuations: 0 }, orchestrator: { input: 1, output, cacheWrite: 0, cacheRead: 0 } });
@@ -144,7 +144,6 @@ describe("improve-17 · a running launch's last write and the run's tokens come 
     list = { version: 2, list: [{ ...list.list[0], runningLastAt: { feed17: at(NOW - MIN / 2) }, spend: spend(90) }] };
     act(() => (stream as StreamHandlers | null)?.tick({ list: 2, runs: { [KEY]: 1 } }));
     await waitFor(() => expect(shown()?.running[0].lastAt).toBe(at(NOW - MIN / 2)));
-    expect(shown()?.spend?.orchestrator?.output).toBe(90);
     expect(paths.filter((p) => p.startsWith("/api/run?"))).toHaveLength(1);
     stop();
     store.stop();

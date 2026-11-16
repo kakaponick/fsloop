@@ -6,7 +6,7 @@ import { mkdirSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } f
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { crc32, deflateSync } from "node:zlib";
-import { build, collect, summarize, timelineOf } from "../../skills/fsloop/fsl.mjs";
+import { build, collect, parseBrief, summarize, timelineOf } from "../../skills/fsloop/fsl.mjs";
 
 // ── one run folder ───────────────────────────────────────────────────────────────────────────
 
@@ -204,7 +204,6 @@ const gitObject = (type: string, body: string) => {
   return { sha: createHash("sha1").update(data).digest("hex"), data };
 };
 const EMPTY_TREE = gitObject("tree", "");
-const closesOf = (brief: string | undefined) => (brief?.split("## Closes")[1] ?? "").split("\n").flatMap((l) => /^- (\S+#\S+)$/.exec(l.trim())?.[1] ?? []);
 
 /** One commit per committed unit, oldest first, chained on the run's branch, with the trailers fsloop writes; dated
  * evenly between the run's start and its last write. */
@@ -214,7 +213,8 @@ export function unitCommits(spec: RunSpec): FixtureCommit[] {
   let parent: string | null = null;
   return done.map((u, k) => {
     const at = Math.floor((from + ((k + 1) * (spec.mtime - from)) / (done.length + 1)) / 1000);
-    const closes = closesOf(u.brief);
+    // The brief's «## Closes» as fsl.mjs reads it: the trailer names the set the record's unit closes (code-6).
+    const closes: string[] = parseBrief(u.brief ?? "").closes;
     const title = u.title ?? u.id;
     const message = [`feat(${u.id}): ${title}`, "", `The ${title} part of the goal, as its brief asks.`, "", `Fsloop-Run: ${spec.id}`, `Fsloop-Step: ${u.id} ${k + 1}/${done.length}`, `Fsloop-Pass: ${u.pass ?? 1}`, ...(closes.length ? [`Fsloop-Closes: ${closes.join(" ")}`] : []), ""].join("\n");
     const o = gitObject("commit", `tree ${EMPTY_TREE.sha}\n${parent ? `parent ${parent}\n` : ""}author ${SIGNATURE} ${at} +0000\ncommitter ${SIGNATURE} ${at} +0000\n\n${message}`);

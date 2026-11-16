@@ -170,13 +170,14 @@ describe("improve-17 · withLive(run, card): what a view reads of a running laun
   const served = { key: KEY, project: "tga", version: 7, running: [running("u2", AT), running("u3", AT)], spend: spendOf(20), findings: [], launches: [] } as unknown as ServedRun;
   const card = (runningLastAt: RunCard["runningLastAt"], spend: RunSpend | null): Pick<RunCard, "runningLastAt" | "spend"> => ({ runningLastAt, spend });
 
-  test("a running launch's last write and the run's tokens come from the card, the rest of the run as read", () => {
+  test("a running launch's last write comes from the card, the rest of the run as read", () => {
     const run = withLive(served, card({ u2: LATER, u3: AT }, spendOf(90)));
     expect(run.running.map((r) => [r.agentId, r.lastAt])).toEqual([
       ["u2", LATER],
       ["u3", AT],
     ]);
-    expect(run.spend?.orchestrator).toEqual({ input: 1, output: 90, cacheWrite: 0, cacheRead: 5 });
+    // code-22: the run's tokens stay as read — the header reads the card's.
+    expect(run.spend).toBe(served.spend);
     // The same version, the same parts: nothing else was read again.
     expect(run.version).toBe(7);
     expect(run.findings).toBe(served.findings);
@@ -188,6 +189,10 @@ describe("improve-17 · withLive(run, card): what a view reads of a running laun
     // A card a tick behind a run just read: an older time and fewer tokens stay the run's.
     expect(withLive(served, card({ u2: "2026-11-16T09:59:00.000Z" }, spendOf(5)))).toBe(served);
     expect(withLive(served, undefined)).toBe(served);
+  });
+
+  test("code-22, code-5 · the run's tokens stay the run's own: no view reads them from the run, so a card with more tokens gives the run nothing", () => {
+    expect(withLive(served, card({ u2: AT, u3: AT }, spendOf(90)))).toBe(served);
   });
 });
 

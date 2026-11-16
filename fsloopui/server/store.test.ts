@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
@@ -6,7 +6,7 @@ import { criticReport, decisionTable, writeRecord, writeRun, writeRunningLaunch,
 import { createStore, type Store } from "./store.ts";
 
 /** Every folder the server lists while `on`, sync or not: the walks a tick makes, counted (improve-17). */
-const reads = vi.hoisted(() => ({ on: false, paths: [] as string[] }));
+const reads = vi.hoisted(() => ({ on: false, paths: [] as string[], walks: [] as string[] }));
 vi.mock("node:fs", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs")>();
   const readdirSync = ((p: Parameters<typeof fs.readdirSync>[0], o?: unknown) => {
@@ -18,12 +18,17 @@ vi.mock("node:fs", async (importOriginal) => {
 vi.mock("node:fs/promises", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs/promises")>();
   const readdir = ((p: Parameters<typeof fs.readdir>[0], o?: unknown) => {
-    if (reads.on) reads.paths.push(String(p));
+    if (reads.on) {
+      reads.paths.push(String(p));
+      reads.walks.push(String(p));
+    }
     return (fs.readdir as (p: unknown, o?: unknown) => unknown)(p, o);
   }) as typeof fs.readdir;
   return { ...fs, default: { ...fs, readdir }, readdir };
 });
 const listed = (dir: string) => reads.paths.filter((p) => resolve(p) === resolve(dir)).length;
+/** The walks alone (walk.ts lists asynchronously): a model read's own listing of the sub-agents is no walk. */
+const walked = (dir: string) => reads.walks.filter((p) => resolve(p) === resolve(dir)).length;
 
 const NOW = Date.parse("2026-11-16T10:00:00Z");
 const temp = mkdtempSync(join(tmpdir(), "fsloopui-store-"));
@@ -205,6 +210,43 @@ describe("improve-17 · a live run with a launch running", () => {
     expect(listed(live.runDir)).toBe(1);
     // The folder's newest write (NOW − 1 min) is newer than the launch's (NOW − 4 min).
     expect(s.list().list[0]).toMatchObject({ key: LIVE_KEY, lastWriteAt: iso(NOW - MIN), runningLastAt: { feed17: iso(NOW - 4 * MIN) } });
+  });
+
+  test("code-23 · a run folder that appears while the server is up is walked once in its tick: its folder and the session's sub-agents listed once each, the card dated from that walk", async () => {
+    const live = liveRoot();
+    // The run's folder is not there yet when the server starts.
+    const away = join(live.root, `away-${LIVE_ID}`);
+    renameSync(live.runDir, away);
+    const s = createStore({ roots: [live.root], git: () => null });
+    await s.refresh({ full: true });
+    expect(s.has(LIVE_KEY)).toBe(false);
+    renameSync(away, live.runDir);
+    reads.paths = [];
+    reads.walks = [];
+    reads.on = true;
+    await s.refresh({ full: true });
+    reads.on = false;
+    expect([listed(live.runDir), walked(live.subagents)]).toEqual([1, 1]);
+    expect(s.list().list[0]).toMatchObject({ key: LIVE_KEY, lastWriteAt: iso(NOW - MIN), runningLastAt: { feed17: iso(NOW - 4 * MIN) } });
+  });
+
+  test("code-24 · a record that names a new launch whose transcript lies outside the session's sub-agents: the tick that reads it dates the card from that transcript", async () => {
+    const live = liveRoot();
+    const s = createStore({ roots: [live.root], git: () => null });
+    await s.refresh({ full: true });
+    // A launch saved with its transcript elsewhere, written after the record's row.
+    const transcript = join(live.root, "elsewhere", "agent-be24.jsonl").replace(/\\/g, "/");
+    mkdirSync(dirname(transcript), { recursive: true });
+    writeFileSync(transcript, '{"type":"progress"}\n');
+    utimesSync(transcript, new Date(NOW + 9000), new Date(NOW + 9000));
+    const launches = join(live.runDir, "launches.md");
+    writeFileSync(launches, ["| launch | stage | agent | description | agent id | transcript | report |", "|---|---|---|---|---|---|---|", `| p1-map-critic-code | p1-map | fsloop-critic | code | be24 | ${transcript} | reports/p1-map-critic-code.md |`, ""].join("\n"));
+    utimesSync(launches, new Date(NOW + 5000), new Date(NOW + 5000));
+    // The first tick finds the folder changed and waits; the second finds it still and reads it.
+    await s.refresh();
+    await s.refresh();
+    expect(s.run(LIVE_KEY)?.launches.map((l) => l.transcript)).toEqual([transcript]);
+    expect(s.list().list[0].lastWriteAt).toBe(iso(NOW + 9000));
   });
 });
 

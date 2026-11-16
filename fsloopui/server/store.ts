@@ -118,9 +118,10 @@ export function createStore({ roots, git }: { roots: string[]; git?: Git }) {
       run = { ...before, errors: [...before.errors.filter((e) => e.file !== RECORD), ...recordFailed] };
       return entryOf(found, prev, run, { stamp: prev.stamp, readAt: prev.readAt, at });
     }
-    // A record that names other sessions than the walk read: their transcripts walked, the folder not again.
+    // A record that names other transcripts than the walk read — a session, a launch, the run now closed: those
+    // transcripts walked, the folder not again (code-24).
     const next = targetsOf(run);
-    const walk = next.sessions.join() === targets.sessions.join() ? at : await walkAgain(at, next);
+    const walk = JSON.stringify(next) === JSON.stringify(targets) ? at : await walkAgain(at, next);
     return entryOf(found, prev, run, { stamp: walk.stamp, readAt, at: walk });
   }
 
@@ -139,6 +140,8 @@ export function createStore({ roots, git }: { roots: string[]; git?: Git }) {
    * it — a file caught half-written never replaces the last good model (rules/ui → Conventions 4, 14); a folder that
    * changes on every tick is read on the third. Every walk dates its card, read or not. */
   async function refresh({ full = false }: { full?: boolean } = {}) {
+    /** The runs read this tick from their first walk: not walked again in it (code-23). */
+    const loaded = new Set<string>();
     if (full || !entries.size) {
       const found = discover(roots);
       const keys = new Set(found.map((f) => f.key));
@@ -149,11 +152,14 @@ export function createStore({ roots, git }: { roots: string[]; git?: Git }) {
       for (const [i, f] of fresh.entries()) {
         const at = walked[i];
         const e = at && !entries.has(f.key) ? await load(f, undefined, at) : null;
-        if (e) entries.set(f.key, e);
+        if (e) {
+          entries.set(f.key, e);
+          loaded.add(f.key);
+        }
       }
     }
     // The runs this tick checks, walked at once; what changed is then read one run at a time.
-    const due = [...entries].filter(([, e]) => full || e.closed !== true);
+    const due = [...entries].filter(([key, e]) => !loaded.has(key) && (full || e.closed !== true));
     const walks = await Promise.all(due.map(([, e]) => walkRun(e.found.dir, e.targets)));
     for (const [i, [key, e]] of due.entries()) {
       const at = walks[i];
