@@ -14,7 +14,7 @@ import { createApp } from "../../server/http.ts";
 import { UiProvider } from "../ui/provider.tsx";
 import { ClockProvider } from "./clock.tsx";
 import { createLiveStore, LiveProvider, type StreamHandlers, type Transport } from "./live.tsx";
-import { Shell } from "./shell.tsx";
+import { Shell, SHELL_WIDE } from "./shell.tsx";
 
 /** 16.11.2026 19:41 МСК — the fixture root's «now» and the clock of every rendered shell. */
 export const NOW = APP_NOW;
@@ -151,9 +151,19 @@ export type FixtureApp = ReturnType<typeof fixtureApp>;
 
 export const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-/** The shell as the app mounts it, on a memory router at `path`, the clock and the store's «now» at NOW. */
-export function renderShell(transport: Transport, { path = "/", extra }: { path?: string; extra?: ReactElement } = {}) {
+/** The shell above its breakpoint (`wide`) or below it: jsdom has no layout, so the shell's one media query answers
+ * as the test says; every other query keeps the setup's answer. */
+function answerShellWidth(wide: boolean) {
+  const base = window.matchMedia;
+  window.matchMedia = ((query: string) => (query === SHELL_WIDE ? { ...base.call(window, query), matches: wide } : base.call(window, query))) as typeof window.matchMedia;
+}
+
+/** The shell as the app mounts it, on a memory router at `path`, the clock and the store's «now» at NOW — above its
+ * breakpoint unless `wide` is false. `setClock` moves the shared clock (the store's reads keep NOW). */
+export function renderShell(transport: Transport, { path = "/", extra, wide = true }: { path?: string; extra?: ReactElement; wide?: boolean } = {}) {
+  answerShellWidth(wide);
   const store = createLiveStore(transport, { now: () => NOW });
+  let clock = NOW;
   const probe = { location: null as Location | null, navigate: null as NavigateFunction | null, type: null as NavigationType | null };
   function Probe() {
     probe.location = useLocation();
@@ -161,19 +171,29 @@ export function renderShell(transport: Transport, { path = "/", extra }: { path?
     probe.type = useNavigationType();
     return null;
   }
-  const tree = (
+  const router = (
+    <MemoryRouter initialEntries={[path]}>
+      <Shell />
+      <Probe />
+      {extra}
+    </MemoryRouter>
+  );
+  const tree = () => (
     <UiProvider>
-      <ClockProvider now={NOW}>
-        <LiveProvider store={store}>
-          <MemoryRouter initialEntries={[path]}>
-            <Shell />
-            <Probe />
-            {extra}
-          </MemoryRouter>
-        </LiveProvider>
+      <ClockProvider now={clock}>
+        <LiveProvider store={store}>{router}</LiveProvider>
       </ClockProvider>
     </UiProvider>
   );
-  const view = render(tree);
-  return { ...view, store, probe, again: () => view.rerender(tree) };
+  const view = render(tree());
+  return {
+    ...view,
+    store,
+    probe,
+    again: () => view.rerender(tree()),
+    setClock(at: number) {
+      clock = at;
+      view.rerender(tree());
+    },
+  };
 }

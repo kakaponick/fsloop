@@ -56,33 +56,91 @@ describe("the run page's frame", () => {
   const facts = () => [...factList().querySelectorAll("dt")].map((dt) => [dt.textContent, (dt.nextElementSibling as HTMLElement).textContent]);
   const loaded = () => screen.findByRole("tab", { name: /Находки/ });
 
-  test("ux 9 order: identity, then outcome rows, then facts, «Подробнее» last and kept", async () => {
+  test("ux 9 order (craft-2): identity, the four outcome rows, the settings in one muted row, the counts behind «Подробнее», kept", async () => {
     const user = userEvent.setup();
     renderShell(fx.transport, { path: `/r/${keyOf(40)}` });
     await loaded();
     expect(within(header()).getByRole("heading", { level: 1 })).toHaveTextContent("admin·a5b5ec85");
-    expect(facts()).toEqual([
-      ["Этап", "приёмка · проход 2 из 2 · с 15.11 21:41 МСК"],
-      ["Активность", "работает · последняя запись 19:40 МСК"],
-      ["Ждёт вас", "красный гейт: p2-assess-critic-code#code-2 has no decision row · заблокирован u23 — waits for the user — the empty state's wording (j140)"],
-      ["Юниты", "30 из 42 юнитов закоммичено · 2 в работе"],
-      ["Режим", "worktree"],
-      ["Проходы", "до 2 проходов"],
-      ["Юнитов сразу", "до 3"],
-      ["Модели", "claude-opus-5-5"],
+    expect(facts().map(([label]) => label)).toEqual(["Этап", "Активность", "Ждёт вас", "Юниты", "Настройки"]);
+    expect(facts()[0][1]).toBe("приёмка · проход 2 из 2 · с 15.11 21:41 МСК");
+    expect(facts()[1][1]).toBe("работает · последняя запись 19:40 МСК");
+    expect(facts()[3][1]).toBe("30 из 42 юнитов закоммичено · 2 в работе");
+    expect(facts()[4][1]).toBe("worktree · до 2 проходов · до 3 юнитов сразу · claude-opus-5-5");
+    const settings = factList().querySelector("[data-slot=settings]") as HTMLElement;
+    expect(settings).toHaveClass("text-muted-foreground");
+    for (const part of settings.querySelectorAll(":scope > span > span")) expect(part).toHaveClass("whitespace-nowrap");
+    await user.click(within(header()).getByRole("button", { name: "Подробнее" }));
+    expect(facts().slice(13).map(([label]) => label)).toEqual(["Версия run.json"]);
+    expect(facts().slice(5, 13)).toEqual([
       ["Начат", "14.11 19:41 МСК"],
       ["Длительность", "2 д"],
-      ["Запуски агентов", "97 запусков агента · 1 работает"],
+      ["Запуски агентов", "98 запусков агента · 1 работает"],
       ["Коммиты", "не записано"],
+      ["Зеркало .spike", "нет"],
+      ["Рабочая копия", "—нет значения"],
+      ["Сессии", "5e55a5b5ec85-0000-4000-8000-000000000001"],
+      ["Папка прогона", fx.dirOf(40)],
     ]);
-    await user.click(within(header()).getByRole("button", { name: "Подробнее" }));
-    expect(facts().slice(12).map(([label]) => label)).toEqual(["Зеркало .spike", "Рабочая копия", "Сессии", "Папка прогона", "Версия run.json"]);
-    expect(facts()[12][1]).toBe("нет");
-    expect(facts()[14][1]).toBe("5e55a5b5ec85-0000-4000-8000-000000000001");
-    expect(facts()[15][1]).toBe(fx.dirOf(40));
     expect(readPref("fold:run", false)).toBe(true);
-    // Every value is one line: a live change of its words never changes the header's height.
-    for (const dd of factList().querySelectorAll("dd")) expect(dd.firstElementChild).toHaveClass("block", "truncate");
+    // Every value a live change rewrites is one line: the header keeps its height (Strict 1). «Ждёт вас» is held in
+    // its own box, the settings wrap only between their parts.
+    for (const [i, dd] of [...factList().querySelectorAll("dd")].entries())
+      if (![2, 4].includes(i)) expect(dd.firstElementChild).toHaveClass("block", "truncate");
+  });
+
+  test("craft-3 · «Ждёт вас»: one row per cause, each in full, its finding and unit linked; craft-21 · each cause and the liveness word explained", async () => {
+    renderShell(fx.transport, { path: `/r/${keyOf(40)}` });
+    await loaded();
+    const rows = [...header().querySelectorAll<HTMLElement>("[data-slot=wait]")];
+    expect(rows.map((r) => [r.dataset.kind, r.querySelector("[data-slot=glossary-term]")?.textContent])).toEqual([
+      ["gate", "красный гейт"],
+      ["blocked", "заблокирован"],
+    ]);
+    expect(rows[0]).toHaveTextContent("красный гейтp2-assess-critic-code#code-2 has no decision row");
+    expect(rows[1]).toHaveTextContent("заблокированu23 — waits for the user — the empty state's wording (j140)");
+    for (const r of rows) expect(r.querySelector(".truncate, .line-clamp-2, [title]")).toBeNull();
+    expect(within(rows[1]).getByRole("link", { name: "u23" })).toHaveAttribute("href", "/r/admin/a5b5ec85?view=units&unit=u23");
+    expect(rows[0].querySelector("[data-slot=dot]")).toHaveAttribute("data-tone", "warning");
+    const activity = [...factList().querySelectorAll("dt")].find((dt) => dt.textContent === "Активность")?.nextElementSibling as HTMLElement;
+    expect(within(activity).getByRole("button", { name: "работает" })).toHaveAttribute("data-slot", "glossary-term");
+  });
+
+  test("craft-3 · Strict 1: «Ждёт вас» is held at the height it first took; a live change of its causes scrolls inside, a resize measures again", async () => {
+    const measured = { height: 57, width: 400 };
+    const offset = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    const client = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
+    const RO = window.ResizeObserver;
+    const observers: ResizeObserverCallback[] = [];
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", { configurable: true, get: () => measured.height });
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => measured.width });
+    window.ResizeObserver = class {
+      constructor(cb: ResizeObserverCallback) {
+        observers.push(cb);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+    try {
+      const { again } = renderShell(fx.transport, { path: `/r/${keyOf(40)}` });
+      await loaded();
+      const box = header().querySelector("[data-slot=waits-box]") as HTMLElement;
+      expect(box).toHaveClass("max-h-[6lh]", "overflow-y-auto", "[scrollbar-gutter:stable]");
+      expect(box.style.height).toBe("57px");
+      // More causes arrive: the content would take more, the box keeps its height.
+      measured.height = 120;
+      again();
+      for (const cb of observers) act(() => cb([], {} as ResizeObserver));
+      expect(box.style.height).toBe("57px");
+      // The operator narrows the window: the box is measured again at its new width.
+      measured.width = 300;
+      for (const cb of observers) act(() => cb([], {} as ResizeObserver));
+      expect(box.style.height).toBe("120px");
+    } finally {
+      if (offset) Object.defineProperty(HTMLElement.prototype, "offsetHeight", offset);
+      if (client) Object.defineProperty(HTMLElement.prototype, "clientWidth", client);
+      window.ResizeObserver = RO;
+    }
   });
 
   test("a closed run: the verdict row after the outcome, no activity and nothing waits", async () => {
@@ -97,7 +155,7 @@ describe("the run page's frame", () => {
     expect(facts().map(([label]) => label)).not.toContain("Ждёт вас");
   });
 
-  test("the goal: clamped, newlines collapsed, from the card before the run loads; «развернуть» only when the clamp hides text; expanded as running text", async () => {
+  test("the goal: clamped, each of its lines kept, from the card before the run loads; «развернуть» only when the clamp hides text; expanded as running text", async () => {
     const user = userEvent.setup();
     let release!: () => void;
     const held = new Promise<void>((done) => (release = done));
@@ -123,7 +181,7 @@ describe("the run page's frame", () => {
       renderShell(fx.transport, { path: `/r/${keyOf(40)}` });
       const line = await screen.findByText((_, el) => el?.getAttribute("data-slot") === "goal-line");
       const before = line.textContent ?? "";
-      expect(before).not.toContain("\n");
+      expect(line).toHaveClass("whitespace-pre-line");
       expect(line.closest(".line-clamp-2")).not.toBeNull();
       // The run is not read yet: no trigger, the body holds «Загрузка…».
       expect(within(header()).queryByRole("button", { name: "Развернуть цель прогона" })).toBeNull();
@@ -131,8 +189,12 @@ describe("the run page's frame", () => {
       await act(async () => release());
       await loaded();
       const after = header().querySelector("[data-slot=goal-line]")?.textContent ?? "";
-      // The clamp shows the same first two lines from the card and from the run.
-      expect(after.slice(0, 200)).toBe(before.slice(0, 200));
+      // The clamp opens on the same first line from the card and from the run; the run's numbered lines never run
+      // together inline («1. … 2. …»): each starts a line of its own.
+      const [first, second] = after.split("\n");
+      expect(before.startsWith(first)).toBe(true);
+      expect(second).toMatch(/^2\. /);
+      expect(after).not.toMatch(/\n\s*\n/);
       await user.click(within(header()).getByRole("button", { name: "Развернуть цель прогона" }));
       const region = within(header()).getByRole("region", { name: "цель прогона" });
       expect(region).toHaveClass("max-h-text-cap", "overflow-y-auto");
@@ -200,11 +262,12 @@ describe("the run page's frame", () => {
     expect(tabs.map((t) => t.textContent)).toEqual(["Находки", "Юниты", "Отчёты", "Соглашения", "Журнал"]);
     for (const t of tabs) expect(t.querySelector("[data-slot=tab-count]")).toHaveClass("min-w-count", "tabular-nums");
     const body = screen.getByRole("region", { name: "Раздел прогона" });
-    expect(body).toHaveClass("flex-1", "min-h-0", "overflow-y-auto", "[scrollbar-gutter:stable]");
+    // The view takes what the header leaves (or, below the shell's breakpoint, the page under the strip).
+    expect(body).toHaveClass("[flex:var(--view-flex,1_1_0%)]", "min-h-0", "overflow-y-auto", "[scrollbar-gutter:stable]");
     expect(within(body).getByRole("status")).toHaveClass("size-full");
     await act(async () => release());
     await waitFor(() => expect(screen.getByRole("tab", { name: /Находки/ }).querySelector("[data-slot=tab-count]")?.textContent).not.toBe(""));
-    // The strip of the lost connection lives in the tab row: its arrival adds no row.
+    // The tab row is one fixed line; the lost connection is the shell's, so nothing arrives in it.
     expect(screen.getByRole("tablist").closest("[data-slot=view-tabs]")).toHaveClass("h-10", "shrink-0");
   });
 });

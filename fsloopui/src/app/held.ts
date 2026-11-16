@@ -1,8 +1,8 @@
 // The sidebar's held order (rules/ui → Live data 1; ui → Live data): the cards keep the places they were given; a
-// card's state updates in place, while a new run, a card whose group or rank changed and a card whose folder is
-// gone wait in the strip and are placed on its click. Groups and ranks come from the card's own facts and the
-// shared clock: running by start, newest first; long-silent by last write; closed by last update; then the
-// folders without run.json.
+// card's state updates in place, while a new run and a card whose group or rank changed wait in the strip as new or
+// moved, and a card whose folder is gone as left (the verb «убрать»); all are placed on its click. Groups and ranks
+// come from the card's own facts and the shared clock: running by start, newest first; long-silent by last write;
+// closed by last update; then the folders without run.json.
 import { livenessOf } from "../../shared/liveness.ts";
 import type { RunCard } from "../../shared/model.ts";
 import type { HeldCounts } from "../ui/index.ts";
@@ -79,16 +79,19 @@ export function heldView(placement: Placement, cards: readonly RunCard[], now: n
   for (const g of GROUPS) for (const k of ideal[g]) idealGroup.set(k, g);
   const placed = new Set(Object.values(placement.order).flat());
   let moved = 0;
+  let left = 0;
   const groups = {} as Record<Group, PlacedCard[]>;
   for (const g of GROUPS) {
     const keys = placement.order[g];
     groups[g] = keys.map((key) => ({ key, card: current.get(key) ?? placement.cards[key], gone: !current.has(key) }));
-    moved += keys.filter((k) => !current.has(k) || idealGroup.get(k) !== g).length;
+    // A card whose folder is gone leaves the list on the strip's click: the strip's «left» kind, verb «убрать».
+    left += keys.filter((k) => !current.has(k)).length;
+    moved += keys.filter((k) => current.has(k) && idealGroup.get(k) !== g).length;
     // Within the group, a card out of the order it should keep with its neighbours has moved.
     const stay = keys.filter((k) => idealGroup.get(k) === g);
     const at = new Map(ideal[g].map((k, i) => [k, i]));
     moved += stay.length - keptInOrder(stay.map((k) => at.get(k) ?? 0));
   }
   const fresh = cards.filter((c) => !placed.has(c.key)).length;
-  return { groups, counts: { fresh, moved, left: 0 } };
+  return { groups, counts: { fresh, moved, left } };
 }

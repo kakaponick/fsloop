@@ -1,27 +1,27 @@
 // The run page's frame (rules/ui → Layout 3, Conventions 13): one frame for every view — the identity, the goal
-// and the fact list in `ux 9` order, the tab strip with counts, then the view. The header draws from the card the
-// list already holds, so it stands before the run is read; the view's region is at its final size from the first
-// paint and holds «Загрузка…» until then. Not found and a read error are the frame's own states. The frame draws
-// no status bar: each view renders the table kit's, from `useDataAge`.
+// and the fact list in `ux 9` order, the tab strip with counts (sticky where the page scrolls as one), then the view.
+// The lost connection is the shell's, in the sidebar's head, so it stands in this frame's every state. The header
+// draws from the card the list already holds, so it stands before the run is read; the view's region is at its final
+// size from the first paint and holds «Загрузка…» until then. Not found and a read error are the frame's own states.
+// The frame draws no status bar: each view renders the table kit's, from `useDataAge`.
 import { useLocation, useNavigate } from "react-router-dom";
 import type { RunCard } from "../../shared/model.ts";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Clamp, CountTabs, FactList, Loading, NotRecorded, PartFailed, RunningText } from "../ui/index.ts";
 import { VIEWS, type LoadedRun, type ViewId } from "../views/index.ts";
-import { useNow } from "./clock.tsx";
 import { runFacts } from "./facts.tsx";
 import { resolverFor, routerLink } from "./links.tsx";
 import { useLiveStore, useRun, useRuns } from "./live.tsx";
-import { LostConnection } from "./lost-connection.tsx";
+import { useShellClock } from "./lost-connection.tsx";
 import { runPath, splitKey, viewOf } from "./routes.ts";
 import { useRunTitle } from "./title.ts";
-import { RUN_NOT_FOUND_NEXT, runNotFoundText, stageWord } from "./words.ts";
+import { goalLines, RUN_NOT_FOUND_NEXT, runNotFoundText, stageWord } from "./words.ts";
 
 export function RunPage({ runKey }: { runKey: string }) {
   const list = useRuns();
   const state = useRun(runKey);
   const store = useLiveStore();
-  const now = useNow();
+  const { now, lost } = useShellClock();
   const location = useLocation();
   const navigate = useNavigate();
   const card = list.status === "ready" ? (list.cards.find((c) => c.key === runKey) ?? null) : null;
@@ -47,9 +47,15 @@ export function RunPage({ runKey }: { runKey: string }) {
 
   return (
     <>
-      {card ? <RunHeader card={card} run={run} now={now} /> : <Identity project={project} id={id} />}
+      {card ? <RunHeader card={card} run={run} now={now} lost={lost} /> : <Identity project={project} id={id} />}
       <ViewTabs run={run} view={view} onView={openView} />
-      <section aria-label="Раздел прогона" data-slot="view-body" className="@container/view relative min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+      {/* The view takes what the header leaves (`1 1 0%`), or — where the shell scrolls the page as one — the page's
+          height under the tab strip (`--view-flex`, set by the shell below its breakpoint). */}
+      <section
+        aria-label="Раздел прогона"
+        data-slot="view-body"
+        className="@container/view relative min-h-0 overflow-y-auto [flex:var(--view-flex,1_1_0%)] [scrollbar-gutter:stable]"
+      >
         {state.status === "error" ? (
           <div className="px-5 py-4">
             <PartFailed what={`Прогон ${id}`} cause={state.cause} onRetry={() => store.retryRun(runKey)} />
@@ -92,12 +98,15 @@ function Title({ project, id }: { project: string; id: string }) {
   );
 }
 
-function RunHeader({ card, run, now }: { card: RunCard; run: LoadedRun | null; now: number }) {
-  const { facts, more } = runFacts(card, now);
+/** The page header: identity, the goal and the outcome-first fact list. Its rows are what the operator decides by —
+ * the outcome, what waits on him, the settings in one line — and the counts fold behind «Подробнее», so the view
+ * keeps the page (`ux 9`: state, next action and product in the first viewport). */
+function RunHeader({ card, run, now, lost }: { card: RunCard; run: LoadedRun | null; now: number; lost: boolean }) {
+  const { facts, more } = runFacts(card, now, { run, lost });
   return (
-    <header data-slot="run-header" className="@container/header max-h-[50dvh] shrink-0 overflow-y-auto border-b px-5 pt-4 pb-4 [scrollbar-gutter:stable]">
+    <header data-slot="run-header" className="@container/header shrink-0 border-b px-5 pt-4 pb-4">
       <Title project={card.project} id={card.id} />
-      <div className="mt-3 grid items-start gap-x-10 gap-y-4 @min-[60rem]/header:grid-cols-[minmax(0,var(--container-measure))_minmax(0,1fr)]">
+      <div className="mt-3 grid items-start gap-x-10 gap-y-3 @min-[60rem]/header:grid-cols-[minmax(0,var(--container-measure))_minmax(0,1fr)]">
         <Goal goal={run ? run.goal : card.goal} run={run} />
         <FactList facts={facts} more={more} foldKey="run" label="Прогон" />
       </div>
@@ -105,16 +114,16 @@ function RunHeader({ card, run, now }: { card: RunCard; run: LoadedRun | null; n
   );
 }
 
-/** The goal clamped to two lines, newlines collapsed — from the card's first lines before the run is read, the
- * same two lines after; «развернуть» once the whole goal is here and the clamp hides some of it; expanded, the
- * goal is running text with its line breaks and lists, in a capped region that scrolls inside. */
+/** The goal clamped to two lines, each of its own lines kept — from the card's first lines before the run is read,
+ * the same lines after; «развернуть» once the whole goal is here and the clamp hides some of it; expanded, the goal
+ * is running text with its line breaks and lists, in a capped region that scrolls inside. */
 function Goal({ goal, run }: { goal: string | null; run: LoadedRun | null }) {
   if (!goal) return <NotRecorded cause="цели нет в common.md" />;
   return (
     <Clamp what="цель прогона" expandable={run !== null} className="max-w-measure text-muted-foreground">
-      {/* The clamp shows the line, its open region the running text: one class each, read off the clamp's state. */}
-      <span data-slot="goal-line" className="in-[[data-slot=clamp][data-state=open]]:hidden">
-        {goal.replace(/\s+/g, " ").trim()}
+      {/* The clamp shows the lines, its open region the running text: one class each, read off the clamp's state. */}
+      <span data-slot="goal-line" className="whitespace-pre-line in-[[data-slot=clamp][data-state=open]]:hidden">
+        {goalLines(goal)}
       </span>
       {run && (
         <div data-slot="goal-text" className="hidden text-foreground in-[[data-slot=clamp][data-state=open]]:block">
@@ -127,10 +136,10 @@ function Goal({ goal, run }: { goal: string | null; run: LoadedRun | null }) {
 
 function ViewTabs({ run, view, onView }: { run: LoadedRun | null; view: ViewId; onView: (view: string) => void }) {
   const tabs = VIEWS.map((v) => ({ value: v.id, label: v.label, count: run ? v.count(run) : null }));
+  // Sticky: where the shell scrolls the page as one, the strip stays at the top once the header has scrolled away.
   return (
-    <div data-slot="view-tabs" className="@container/tabs flex h-10 shrink-0 items-end gap-4 border-b px-5">
+    <div data-slot="view-tabs" className="@container/tabs sticky top-0 z-10 flex h-10 shrink-0 items-end gap-4 border-b bg-background px-5">
       <CountTabs value={view} onValueChange={onView} tabs={tabs} label="Разделы прогона" className="shrink-0" />
-      <LostConnection className="mb-2.5 ml-auto" />
     </div>
   );
 }

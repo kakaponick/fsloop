@@ -3,7 +3,25 @@ import "../ui/test-setup.ts";
 import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { foldTitle, miniDetail, runningCount, settingsLine, stageLine, unitsLine, activityLine, waitsLine } from "./words.ts";
+import { glossaryLines } from "../ui/index.ts";
+import {
+  activityLine,
+  cardLabel,
+  foldTitle,
+  launchesLine,
+  LIVENESS_WIDEST,
+  livenessShown,
+  miniDetail,
+  runningCount,
+  RUNS_GLOSSARY,
+  settingsLine,
+  stageCompact,
+  stageLine,
+  unitsLine,
+  waitCauses,
+  WAITS_GLOSSARY,
+  waitsLine,
+} from "./words.ts";
 import { fixtureApp, json, keyOf, MIN, NOW, renderShell, type FixtureApp } from "./testing.tsx";
 
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -17,15 +35,29 @@ describe("the card's words, built once", () => {
     expect(runningCount(0)).toBe("Сейчас ни один прогон не идёт — новый появится здесь сам");
   });
 
+  test("craft-22 · a silent run is not counted as going", () => {
+    const mixed = runningCount(2, 1);
+    expect(mixed).toBe("2 прогона идут · 1 молчит");
+    expect(words(mixed)).toBe(6);
+    expect(runningCount(1, 3)).toBe("1 прогон идёт · 3 молчат");
+    expect(runningCount(0, 2)).toBe("2 прогона молчат");
+    expect(runningCount(0, 1)).toBe("1 прогон молчит");
+  });
+
   test("the settings: mode, passes, units at once, models, the mirror", () => {
     expect(settingsLine({ mode: "worktree", N: 2, K: 3, models: ["claude-opus-5-5", "claude-sonnet-5-5"], mirror: true })).toBe("worktree · до 2 проходов · до 3 юнитов сразу · claude-opus-5-5 · claude-sonnet-5-5 · зеркало .spike");
     expect(settingsLine({ mode: "inline", N: null, K: 1, models: [], mirror: false })).toBe("inline · до 1 юнита сразу");
   });
 
-  test("the stage: its word, the pass of N, the step, since when in МСК", () => {
-    const s = stageLine({ recorded: true, closed: false, stage: "p2-assess", stageLabel: "проход 2 · приёмка", N: 3, step: "u23 ждёт решения", since: "2026-11-15T18:41:00Z" }, NOW);
-    expect(s).toBe("приёмка · проход 2 из 3 · u23 ждёт решения · с 15.11 21:41 МСК");
+  test("the stage: its word, the pass of N, since when in МСК, the step last; craft-17 · the card's compact form", () => {
+    const facts = { recorded: true, closed: false, stage: "p2-assess", stageLabel: "проход 2 · приёмка", N: 3, step: "u23 ждёт решения", since: "2026-11-15T18:41:00Z" };
+    const s = stageLine(facts, NOW);
+    expect(s).toBe("приёмка · проход 2 из 3 · с 15.11 21:41 МСК · u23 ждёт решения");
     expect(words(s)).toBe(15);
+    const c = stageCompact(facts, NOW);
+    expect(c).toBe("приёмка · проход 2 из 3 · на этапе 22 ч · u23 ждёт решения");
+    expect(words(c)).toBe(15);
+    expect(stageCompact({ ...facts, step: null, since: iso(NOW - 3 * MIN) }, NOW)).toBe("приёмка · проход 2 из 3 · на этапе 3 мин");
     expect(stageLine({ recorded: true, closed: false, stage: "p1-review", stageLabel: "проход 1 · ревью", N: null, step: null, since: "2026-11-16T12:38:00Z" }, NOW)).toBe("ревью · проход 1 · с 15:38 МСК");
     expect(stageLine({ recorded: true, closed: true, stage: null, stageLabel: "прогон закрыт", N: 2, step: null, since: null }, NOW)).toBe("прогон закрыт");
   });
@@ -40,11 +72,33 @@ describe("the card's words, built once", () => {
     expect(unitsLine({}, 0)).toBe("юнитов ещё нет");
   });
 
-  test("the activity: how long it goes, agent launches, commits", () => {
-    const a = activityLine({ closed: false, startedAt: iso(NOW - 125 * MIN), launches: 34, commits: 2 }, NOW);
+  test("the activity: how long it goes, every agent launch, commits; craft-17 · the card's compact form", () => {
+    const facts = { closed: false, startedAt: iso(NOW - 125 * MIN), launches: 33, running: 1, commits: 2 };
+    const a = activityLine(facts, NOW);
     expect(a).toBe("идёт 2 ч 05 мин · 34 запуска агента · 2 коммита");
     expect(words(a)).toBe(12);
-    expect(activityLine({ closed: true, startedAt: iso(NOW - 125 * MIN), launches: 1, commits: null }, NOW)).toBe("1 запуск агента");
+    const c = activityLine(facts, NOW, { compact: true });
+    expect(c).toBe("идёт 2 ч · 34 запуска · 2 коммита");
+    expect(words(c)).toBe(9);
+    expect(activityLine({ closed: true, startedAt: iso(NOW - 125 * MIN), launches: 1, running: 0, commits: null }, NOW)).toBe("1 запуск агента");
+    expect(launchesLine(98, 1)).toBe("98 запусков агента · 1 работает");
+  });
+
+  test("craft-3 · what waits, one cause to a row; craft-4 · liveness while the connection is lost", () => {
+    const gate = { at: "2026-11-16T16:21:00Z", problems: ["p2-assess-critic-code#code-2 has no decision row", "p2-assess-critic-craft#craft-1 has no decision row"] };
+    expect(waitCauses({ redGate: gate, blocked: [{ id: "u23", why: "waits for the user" }, { id: "u7", why: null }] })).toEqual([
+      { kind: "gate", term: "красный гейт", text: "p2-assess-critic-code#code-2 has no decision row\np2-assess-critic-craft#craft-1 has no decision row" },
+      { kind: "blocked", term: "заблокирован", text: "u23 — waits for the user" },
+      { kind: "blocked", term: "заблокирован", text: "u7" },
+    ]);
+    expect(waitCauses({ redGate: null, blocked: [] })).toEqual([]);
+    expect(glossaryLines(WAITS_GLOSSARY)).toEqual(["красный гейт — проверка этапа нашла нарушения, и прогон не идёт дальше", "заблокирован — Юнит остановлен: прогон ждёт решения или другого юнита."]);
+    const card = { lastWriteAt: iso(NOW - 2 * MIN), closed: false };
+    expect(livenessShown(card, NOW, false)).toMatchObject({ state: "working", label: "работает", tone: "neutral", lost: false });
+    expect(livenessShown({ ...card, lastWriteAt: iso(NOW - 40 * MIN) }, NOW, true)).toMatchObject({ state: "silent", label: "нет связи", tone: "neutral", lost: true });
+    expect(livenessShown({ ...card, closed: true }, NOW, true)).toMatchObject({ label: "закрыт", lost: false });
+    expect(LIVENESS_WIDEST).toBe("молчит · 59 мин");
+    expect(cardLabel({ project: "admin", id: "a5b5ec85" }, "работает", true)).toBe("admin · a5b5ec85 · работает · новое");
   });
 
   test("what waits on the operator: the red gate and a blocked unit in one line", () => {
@@ -56,11 +110,17 @@ describe("the card's words, built once", () => {
     expect(waitsLine({ redGate: null, blocked: [] })).toEqual({ tone: "neutral", text: "ничего — прогон идёт сам" });
   });
 
-  test("a fold's title and a mini row's detail", () => {
+  test("a fold's title and a mini row's detail: what waits first, «нет связи» while lost", () => {
+    const calm = { redGate: null, blocked: [] };
     expect(foldTitle("Закрытые", 53)).toBe("Закрытые · 53");
-    expect(miniDetail({ recorded: true, closed: true, outcome: { pushed: true, goalMet: true, held: [] }, updatedAt: "2026-11-15T20:40:00Z", lastWriteAt: null }, NOW)).toEqual({ tone: "success", text: "цель достигнута · коммиты отправлены · 15.11 23:40 МСК" });
-    expect(miniDetail({ recorded: true, closed: false, outcome: null, updatedAt: null, lastWriteAt: "2026-11-16T09:41:00Z" }, NOW)).toEqual({ tone: "warning", text: "молчит · 7 ч · 12:41 МСК" });
-    expect(miniDetail({ recorded: false, closed: null, outcome: null, updatedAt: null, lastWriteAt: "2026-11-13T16:41:00Z" }, NOW)).toEqual({ tone: "neutral", text: "не записано: в папке нет run.json · 13.11 19:41 МСК" });
+    expect(miniDetail({ ...calm, recorded: true, closed: true, outcome: { pushed: true, goalMet: true, held: [] }, updatedAt: "2026-11-15T20:40:00Z", lastWriteAt: null }, NOW)).toEqual({ tone: "success", text: "цель достигнута · коммиты отправлены · 15.11 23:40 МСК" });
+    const silent = { ...calm, recorded: true, closed: false, outcome: null, updatedAt: null, lastWriteAt: "2026-11-16T09:41:00Z" };
+    expect(miniDetail(silent, NOW)).toEqual({ tone: "warning", text: "молчит · 7 ч · 12:41 МСК" });
+    expect(miniDetail(silent, NOW, { lost: true })).toEqual({ tone: "neutral", text: "нет связи · 12:41 МСК" });
+    const waits = miniDetail({ ...silent, lastWriteAt: iso(NOW - MIN), redGate: { at: "2026-11-16T16:21:00Z", problems: ["x"] }, blocked: [{ id: "u23", why: "y" }] }, NOW);
+    expect(waits).toEqual({ tone: "warning", text: "красный гейт · заблокирован u23 · работает · 19:40 МСК" });
+    expect(words(waits.text)).toBe(10);
+    expect(miniDetail({ ...calm, recorded: false, closed: null, outcome: null, updatedAt: null, lastWriteAt: "2026-11-13T16:41:00Z" }, NOW)).toEqual({ tone: "neutral", text: "не записано: в папке нет run.json · 13.11 19:41 МСК" });
   });
 });
 
@@ -92,36 +152,87 @@ describe("the sidebar over the fixture root of 63", () => {
     renderShell(fx.transport, { path: `/r/${keyOf(0)}` });
     await ready();
     expect(within(sidebar()).getByText("fsloopUI")).toBeInTheDocument();
-    expect(within(sidebar()).getByRole("heading", { name: "Прогоны" })).toBeInTheDocument();
+    expect(within(sidebar()).getByText("Прогоны")).toBeInTheDocument();
     expect(cards().map((c) => c.getAttribute("href"))).toEqual(["/r/fsloop/077e72d5", "/r/bots/42d34077", "/r/admin/a5b5ec85"]);
   });
 
-  test("a card: project · id · liveness, the goal clamped to two lines, «Настройки», «Состояние», what waits", async () => {
+  test("craft-21 · «Прогоны» explains the words the cards show: the liveness, «новое», what waits", async () => {
+    renderShell(fx.transport, { path: `/r/${keyOf(0)}` });
+    await ready();
+    const term = within(sidebar()).getByRole("button", { name: "Прогоны" });
+    expect(term).toHaveAttribute("data-slot", "glossary-term");
+    expect(term.closest("[data-slot=sidebar-list]")).toBeNull();
+    expect(glossaryLines(RUNS_GLOSSARY)).toEqual([
+      "работает — Прогон или его агенты писали файлы меньше 5 минут назад.",
+      "тихо — Прогон не писал файлы 5–30 минут: агент думает или ждёт долгую команду.",
+      "молчит — Нет записей больше 30 минут: прогон мог встать — проверьте его сессию.",
+      "новое — Прогон изменился с тех пор, как вы открывали его последний раз",
+      "красный гейт — проверка этапа нашла нарушения, и прогон не идёт дальше",
+      "заблокирован — Юнит остановлен: прогон ждёт решения или другого юнита.",
+    ]);
+  });
+
+  test("craft-35 · a card is named «project · id · liveness», the rest its description; the page's h1 is the first heading", async () => {
     renderShell(fx.transport, { path: `/r/${keyOf(0)}` });
     await ready();
     const card = cards()[2];
-    const slot = (name: string) => card.querySelector(`[data-slot=${name}]`) as HTMLElement;
+    expect(card).toHaveAccessibleName("admin · a5b5ec85 · работает");
+    expect(card).toHaveAccessibleDescription(/^красный гейт: p2-assess-critic-code#code-2 has no decision row .*Настройки.*Состояние/);
+    expect(within(sidebar()).queryByRole("heading")).toBeNull();
+    await screen.findByRole("heading", { level: 1 });
+    expect(screen.getAllByRole("heading")[0]).toHaveProperty("tagName", "H1");
+  });
+
+  test("a card: project · id · liveness, what waits or the goal in two reserved lines, «Настройки», «Состояние» (craft-3, craft-17, craft-18)", async () => {
+    renderShell(fx.transport, { path: `/r/${keyOf(0)}` });
+    await ready();
+    const card = cards()[2];
+    const slot = (name: string, of: HTMLElement = card) => of.querySelector(`[data-slot=${name}]`) as HTMLElement;
     expect(slot("card-project")).toHaveTextContent("admin");
     expect(slot("card-id")).toHaveTextContent("a5b5ec85");
-    expect(slot("card-liveness")).toHaveTextContent("работает");
-    const goal = slot("card-goal");
-    expect(goal.querySelector(".line-clamp-2")).not.toBeNull();
-    expect(goal.textContent).not.toContain("\n");
-    expect(goal.textContent?.startsWith("1. ")).toBe(true);
+    // craft-18 · the liveness sits in a box as wide as its widest form; «новое» has its slot whether shown or not.
+    const liveness = slot("card-liveness");
+    expect(slot("status-dot", liveness)).toHaveTextContent("работает");
+    // The sizers draw their words as generated content: they size the box and are no text a reader meets.
+    expect([...liveness.querySelectorAll("[data-slot=liveness-sizer]")].map((s) => [s.getAttribute("data-text"), s.textContent, s.classList.contains("invisible")])).toEqual([
+      ["молчит · 59 мин", "", true],
+      ["папки больше нет", "", true],
+    ]);
+    expect(within(liveness).getAllByText(/./)).toHaveLength(1);
+    expect(liveness).toHaveClass("grid", "shrink-0");
+    for (const c of cards()) expect(slot("new-mark", c)).toHaveClass("invisible");
+    // craft-3 · what waits sits under the head in two reserved lines, the goal's place; a calm card shows its goal there.
+    const waits = slot("card-waits");
+    expect(waits).toHaveClass("h-[2lh]");
+    expect(waits.querySelector(".line-clamp-2")).toHaveTextContent("красный гейт: p2-assess-critic-code#code-2 has no decision row · заблокирован u23 — waits for the user — the empty state's wording (j140)");
+    expect(waits.querySelector("[data-slot=dot]")).toHaveAttribute("data-tone", "warning");
+    expect(slot("card-goal")).toBeNull();
+    expect(waits.compareDocumentPosition(slot("card-settings")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const calm = slot("card-goal", cards()[0]);
+    expect(calm).toHaveClass("h-[2lh]");
+    expect(calm.querySelector(".line-clamp-2")?.textContent?.startsWith("Run 24: ")).toBe(true);
+    expect(slot("card-waits", cards()[0])).toBeNull();
+    // craft-17 · ordinary values in compact forms, the whole in the title; an identifier never breaks inside.
     expect(within(card).getByText("Настройки")).toBeInTheDocument();
     expect(slot("card-settings")).toHaveTextContent("worktree · до 2 проходов · до 3 юнитов сразу · claude-opus-5-5");
+    for (const part of slot("card-settings").querySelectorAll("[data-slot=setting]")) expect(part).toHaveClass("whitespace-nowrap");
     expect(within(card).getByText("Состояние")).toBeInTheDocument();
-    expect(slot("card-stage")).toHaveTextContent("приёмка · проход 2 из 2 · с 15.11 21:41 МСК");
+    expect(slot("card-stage")).toHaveTextContent("приёмка · проход 2 из 2 · на этапе 22 ч");
+    expect(slot("card-stage")).toHaveAttribute("title", "приёмка · проход 2 из 2 · с 15.11 21:41 МСК");
     expect(slot("card-units")).toHaveTextContent("30 из 42 юнитов закоммичено · 2 в работе");
-    expect(slot("card-activity")).toHaveTextContent("идёт 2 д · 97 запусков агента");
-    const waits = slot("card-waits");
-    expect(waits).toHaveTextContent("красный гейт: p2-assess-critic-code#code-2 has no decision row · заблокирован u23 — waits for the user — the empty state's wording (j140)");
-    expect(waits.querySelector("[data-slot=dot]")).toHaveAttribute("data-tone", "warning");
-    // A card no gate or block holds keeps the outcome line's box, empty: an amber line that arrives moves nothing.
-    const calm = cards()[0].querySelector("[data-slot=card-waits]") as HTMLElement;
-    expect(calm).toHaveClass("h-lh");
-    expect(calm).toHaveTextContent("");
-    expect(waits).toHaveClass("h-lh");
+    expect(slot("card-activity")).toHaveTextContent("идёт 2 д · 98 запусков");
+    expect(slot("card-activity")).toHaveAttribute("title", "идёт 2 д · 98 запусков агента");
+  });
+
+  test("craft-1 · below the shell's breakpoint the band is capped low and lists every run as a mini row", async () => {
+    renderShell(fx.transport, { path: `/r/${keyOf(0)}`, wide: false });
+    await ready();
+    expect(sidebar()).toHaveClass("max-h-60", "min-[980px]:max-h-none");
+    expect(cards()).toHaveLength(0);
+    const rows = [...sidebar().querySelectorAll<HTMLAnchorElement>("[data-slot=mini-row]")];
+    expect(rows.slice(0, 3).map((r) => r.getAttribute("href"))).toEqual(["/r/fsloop/077e72d5", "/r/bots/42d34077", "/r/admin/a5b5ec85"]);
+    expect(rows[2]).toHaveTextContent("красный гейт · заблокирован u23 · работает · 19:40 МСК");
+    for (const r of rows) expect(r).toHaveClass("h-8");
   });
 
   test("the folds: long-silent 4, closed all 53 scrolling inside, without a record 3 — open state kept in browser storage", async () => {

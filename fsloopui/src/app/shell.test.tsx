@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { rmSync } from "node:fs";
 import { afterEach, describe, expect, test } from "vitest";
 import { emptyRootText, runNotFoundText } from "./words.ts";
-import { fixtureApp, json, keyOf, renderShell, type FixtureApp } from "./testing.tsx";
+import { fixtureApp, json, keyOf, MIN, NOW, renderShell, type FixtureApp } from "./testing.tsx";
 
 let fx: FixtureApp | null = null;
 const open = (options: Parameters<typeof fixtureApp>[0] = { only: [0, 3, 7, 24] }) => (fx = fixtureApp(options));
@@ -68,15 +68,36 @@ describe("the shell's walk", () => {
     expect([...sidebar().querySelectorAll("[data-slot=run-card]")].map((c) => c.getAttribute("href"))).toContain("/r/shop/37d5a31e");
   });
 
-  test("6 · lost connection: one line above every view with the data's time; gone on reconnect", async () => {
+  test("6 · lost connection (craft-4): one line at the shell's top with the data's time; nothing ages or regroups while lost; gone on reconnect", async () => {
     const app = open();
-    renderShell(app.transport, { path: `/r/${keyOf(24)}` });
+    const { setClock } = renderShell(app.transport, { path: `/r/${keyOf(24)}` });
     await loaded();
+    const running = () => [...sidebar().querySelectorAll("[data-slot=run-card]")].map((c) => c.getAttribute("href"));
+    const before = running();
     act(() => app.drop());
     const lost = await screen.findByRole("status", { name: "Нет связи с сервером fsloopUI · данные от 19:41 МСК" });
-    expect(lost.closest("[data-slot=view-tabs]")).not.toBeNull();
+    // The shell's own line, in the sidebar's head beside the product: there in every frame of the page.
+    expect(lost.closest("[data-slot=sidebar-head]")).not.toBeNull();
+    // Forty minutes on the stream is still down: no card turns «молчит», nothing regroups, the page claims nothing
+    // past the data's time.
+    act(() => setClock(NOW + 40 * MIN));
+    const card = within(sidebar()).getByRole("link", { name: /077e72d5/ });
+    expect(card).toHaveAccessibleName("fsloop · 077e72d5 · нет связи");
+    expect(card.querySelector("[data-slot=card-liveness] [data-slot=dot]")).toHaveAttribute("data-tone", "neutral");
+    expect(running()).toEqual(before);
+    expect(fact("Активность")).toBe("данные от 19:41 МСК · последняя запись 19:38 МСК");
     act(() => app.restore());
     await waitFor(() => expect(screen.queryByRole("status", { name: /Нет связи/ })).toBeNull());
+    // Connected again, the shared clock speaks: forty minutes without a write is «молчит».
+    expect(within(sidebar()).getByRole("link", { name: /077e72d5/ })).toHaveAccessibleName(/^fsloop · 077e72d5 · молчит · 4\d мин$/);
+  });
+
+  test("6 · craft-4 · the lost line stands in the frames without a run page too: not found", async () => {
+    const app = open();
+    renderShell(app.transport, { path: "/r/fsloop/deadbeef" });
+    await screen.findByText(runNotFoundText("deadbeef", [app.root]));
+    act(() => app.drop());
+    expect(await within(sidebar()).findByRole("status", { name: /^Нет связи с сервером fsloopUI/ })).toBeInTheDocument();
   });
 
   test("5 · opening a view or another run pushes history; Back restores the run and the view", async () => {
@@ -107,7 +128,8 @@ describe("the shell's walk", () => {
     expect(await screen.findByText(runNotFoundText("077e72d5", [app.root]))).toBeInTheDocument();
     const card = within(sidebar()).getByRole("link", { name: /077e72d5/ });
     expect(within(card).getByText("папки больше нет")).toBeInTheDocument();
-    await user.click(await within(sidebar()).findByRole("button", { name: "1 прогон сместился · показать" }));
+    // craft-23 · a vanished card is no move: it is counted as leaving the list, and the strip's verb is «убрать».
+    await user.click(await within(sidebar()).findByRole("button", { name: /^1 прогон .+ · убрать$/ }));
     expect(within(sidebar()).queryByRole("link", { name: /077e72d5/ })).toBeNull();
   });
 
@@ -133,15 +155,24 @@ describe("the shell's walk", () => {
     expect(within(body()).getByText("Критики ещё не писали отчётов — находки появятся на этапе «карта»")).toBeInTheDocument();
   });
 
-  test("10 · below the shell's one breakpoint the sidebar is a band above the page with a capped height", async () => {
+  test("10 · craft-1 · below the shell's one breakpoint: a low band of mini rows above a page that scrolls as one under a sticky tab strip", async () => {
     const app = open();
-    const { container } = renderShell(app.transport, { path: `/r/${keyOf(24)}` });
+    const { container } = renderShell(app.transport, { path: `/r/${keyOf(24)}`, wide: false });
     await loaded();
     const shell = container.querySelector("[data-slot=shell]") as HTMLElement;
     // One column, the band first, below 980 px; the 316 px column beside the page above it.
     expect(shell).toHaveClass("grid", "grid-rows-[auto_minmax(0,1fr)]", "min-[980px]:grid-cols-[calc(var(--spacing)*79)_minmax(0,1fr)]", "min-[980px]:grid-rows-1");
-    expect(sidebar()).toHaveClass("max-h-80", "min-[980px]:max-h-none");
+    expect(sidebar()).toHaveClass("max-h-60", "min-[980px]:max-h-none");
+    expect(sidebar().querySelectorAll("[data-slot=run-card]")).toHaveLength(0);
+    expect(sidebar().querySelectorAll("[data-slot=mini-row]").length).toBeGreaterThan(0);
     expect(sidebar().compareDocumentPosition(screen.getByRole("main")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The page is the one scroller, its gutter kept; the view takes the page's height under the strip, the header
+    // (no cap of its own) scrolls away and the strip sticks.
+    const main = screen.getByRole("main");
+    expect(main).toHaveClass("overflow-y-auto", "max-[979px]:[scrollbar-gutter:stable]", "max-[979px]:[--view-flex:0_0_calc(100%_-_var(--spacing)*10)]");
+    expect(body()).toHaveClass("[flex:var(--view-flex,1_1_0%)]");
+    expect(header().className).not.toMatch(/max-h|overflow/);
+    expect(document.querySelector("[data-slot=view-tabs]")).toHaveClass("sticky", "top-0", "h-10", "bg-background");
   });
 
   test("11 · no runs under the root: which root, and that a new run appears by itself", async () => {
