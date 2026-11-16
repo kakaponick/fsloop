@@ -118,7 +118,7 @@ describe("the shell's walk", () => {
     expect(await screen.findByRole("tab", { name: /Юниты/ })).toHaveAttribute("aria-selected", "true");
   });
 
-  test("7 · the open run's folder vanishes: the frame turns to not-found, the card stays marked until the strip is clicked", async () => {
+  test("7 · the open run's folder vanishes: the frame turns to not-found, the card stays marked until the strip is clicked; craft-23 · «1 прогон пропал · убрать»", async () => {
     const user = userEvent.setup();
     const app = open();
     renderShell(app.transport, { path: `/r/${keyOf(24)}` });
@@ -128,8 +128,9 @@ describe("the shell's walk", () => {
     expect(await screen.findByText(runNotFoundText("077e72d5", [app.root]))).toBeInTheDocument();
     const card = within(sidebar()).getByRole("link", { name: /077e72d5/ });
     expect(within(card).getByText("папки больше нет")).toBeInTheDocument();
-    // craft-23 · a vanished card is no move: it is counted as leaving the list, and the strip's verb is «убрать».
-    await user.click(await within(sidebar()).findByRole("button", { name: /^1 прогон .+ · убрать$/ }));
+    // craft-23 · a vanished card is no move: it is counted as leaving the list in the sidebar's own word — the list
+    // has no filter — and the strip's verb is «убрать».
+    await user.click(await within(sidebar()).findByRole("button", { name: "1 прогон пропал · убрать" }));
     expect(within(sidebar()).queryByRole("link", { name: /077e72d5/ })).toBeNull();
   });
 
@@ -162,7 +163,7 @@ describe("the shell's walk", () => {
     const shell = container.querySelector("[data-slot=shell]") as HTMLElement;
     // One column, the band first, below 980 px; the 316 px column beside the page above it.
     expect(shell).toHaveClass("grid", "grid-rows-[auto_minmax(0,1fr)]", "min-[980px]:grid-cols-[calc(var(--spacing)*79)_minmax(0,1fr)]", "min-[980px]:grid-rows-1");
-    expect(sidebar()).toHaveClass("max-h-60", "min-[980px]:max-h-none");
+    expect(sidebar().querySelector("[data-slot=sidebar-list]")).toHaveClass("max-[979px]:h-32");
     expect(sidebar().querySelectorAll("[data-slot=run-card]")).toHaveLength(0);
     expect(sidebar().querySelectorAll("[data-slot=mini-row]").length).toBeGreaterThan(0);
     expect(sidebar().compareDocumentPosition(screen.getByRole("main")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

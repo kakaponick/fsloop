@@ -8,9 +8,6 @@ import type { RunCard } from "../../shared/model.ts";
 import { ApiProvider, createApi, type Transport, type Versions } from "@/api";
 import type { LoadedRun } from "../views/index.ts";
 
-// the app's entry names the browser's transport here
-export { httpTransport } from "@/api";
-
 export type ListState = { status: "loading" } | { status: "ready"; cards: RunCard[]; roots: string[] } | { status: "error"; cause: string };
 export type RunState = { status: "loading" } | { status: "ready"; run: LoadedRun } | { status: "not-found" } | { status: "error"; cause: string };
 export type Connection = "connecting" | "open" | "lost";

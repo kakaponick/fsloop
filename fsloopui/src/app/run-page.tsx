@@ -4,10 +4,11 @@
 // draws from the card the list already holds, so it stands before the run is read; the view's region is at its final
 // size from the first paint and holds «Загрузка…» until then. Not found and a read error are the frame's own states.
 // The frame draws no status bar: each view renders the table kit's, from `useDataAge`.
+import { useLayoutEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import type { RunCard } from "../../shared/model.ts";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { Clamp, CountTabs, FactList, Loading, NotRecorded, PartFailed, RunningText } from "../ui/index.ts";
+import { Clamp, CountTabs, FactList, Loading, NotRecorded, PartFailed, RunningText, usePref } from "../ui/index.ts";
 import { VIEWS, type LoadedRun, type ViewId } from "../views/index.ts";
 import { runFacts } from "./facts.tsx";
 import { resolverFor, routerLink } from "./links.tsx";
@@ -16,6 +17,9 @@ import { useShellClock } from "./lost-connection.tsx";
 import { runPath, splitKey, viewOf } from "./routes.ts";
 import { useRunTitle } from "./title.ts";
 import { goalLines, RUN_NOT_FOUND_NEXT, runNotFoundText, stageWord } from "./words.ts";
+
+/** The run page's «Подробнее»: one open state for every run (FactList keeps it under `fold:<key>`). */
+const FACTS_FOLD = "run";
 
 export function RunPage({ runKey }: { runKey: string }) {
   const list = useRuns();
@@ -103,15 +107,55 @@ function Title({ project, id }: { project: string; id: string }) {
  * keeps the page (`ux 9`: state, next action and product in the first viewport). */
 function RunHeader({ card, run, now, lost }: { card: RunCard; run: LoadedRun | null; now: number; lost: boolean }) {
   const { facts, more } = runFacts(card, now, { run, lost });
+  const ref = useHeldOnClose(card.closed === true);
   return (
-    <header data-slot="run-header" className="@container/header shrink-0 border-b px-5 pt-4 pb-4">
+    <header ref={ref} data-slot="run-header" className="@container/header shrink-0 border-b px-5 pt-4 pb-4">
       <Title project={card.project} id={card.id} />
       <div className="mt-3 grid items-start gap-x-10 gap-y-3 @min-[60rem]/header:grid-cols-[minmax(0,var(--container-measure))_minmax(0,1fr)]">
         <Goal goal={run ? run.goal : card.goal} run={run} />
-        <FactList facts={facts} more={more} foldKey="run" label="Прогон" />
+        <FactList facts={facts} more={more} foldKey={FACTS_FOLD} label="Прогон" />
       </div>
     </header>
   );
+}
+
+/** A run that closes while its page is open trades «Активность» and «Ждёт вас» for «Итог»: the header keeps the
+ * height it had while running, so the tab strip and the view stay where the operator reads (rules/ui → Strict 1;
+ * cand-3). The operator's own «Подробнее» or a new width lets it go; a run opened closed holds nothing. */
+function useHeldOnClose(closed: boolean) {
+  const ref = useRef<HTMLElement>(null);
+  const running = useRef<number | null>(null);
+  const [fold] = usePref(`fold:${FACTS_FOLD}`, false);
+  const foldSeen = useRef(fold);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (fold !== foldSeen.current) {
+      foldSeen.current = fold;
+      running.current = null;
+    }
+    if (!closed) {
+      el.style.minHeight = "";
+      running.current = el.offsetHeight;
+    } else el.style.minHeight = running.current === null ? "" : `${running.current}px`;
+  });
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let width = el.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      running.current = null;
+      el.style.minHeight = "";
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return ref;
 }
 
 /** The goal clamped to two lines, each of its own lines kept — from the card's first lines before the run is read,

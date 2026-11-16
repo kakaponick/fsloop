@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 import "../ui/test-setup.ts";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import { glossaryLines } from "../ui/index.ts";
 import { readPref } from "../ui/storage.ts";
+import { hiddenCauses } from "./facts.tsx";
 import { ObjectLink, objectHref, resolverFor } from "./links.tsx";
-import { dataAgeText, lostText, outcomeLine, runNotFoundText, emptyRootText, tabTitle } from "./words.ts";
+import { dataAgeText, lostText, outcomeLine, passesLine, PASSES_GLOSSARY, runNotFoundText, emptyRootText, settingsGlossary, spendLine, tabTitle, waitsMoreText } from "./words.ts";
 import { fixtureApp, keyOf, MIN, NOW, renderShell, type FixtureApp } from "./testing.tsx";
 
 const words = (s: string) => s.split(" ").length;
@@ -17,6 +21,55 @@ describe("the run page's words, built once", () => {
     expect(outcomeLine({ pushed: false, goalMet: false, held: [] })).toEqual({ tone: "neutral", text: "цель не достигнута · коммиты не отправлены" });
     expect(outcomeLine({ pushed: true, goalMet: null, held: [] })).toEqual({ tone: "neutral", text: "коммиты отправлены" });
     expect(outcomeLine(null)).toEqual({ tone: "neutral", text: "не записано" });
+  });
+
+  test("p1-decompose-design-check cand-1 · the passes in one line, each with its outcome, the findings it took and why in the title", () => {
+    const two = passesLine([
+      { pass: 1, taken: 60, outcome: "next", why: "60 critical and major above the bar" },
+      { pass: 2, taken: 0, outcome: "converged", why: "" },
+    ]);
+    expect(two.text).toBe("проход 1 — следующий проход · проход 2 — нечего исправлять");
+    expect(words(two.text)).toBe(11);
+    expect(two.title).toBe("Проход 1 — следующий проход: 60 находок в исправление. 60 critical and major above the bar\nПроход 2 — нечего исправлять");
+    expect(passesLine([{ pass: 1, taken: 3, outcome: "paused", why: "" }]).text).toBe("проход 1 — paused");
+    expect(passesLine([])).toEqual({ text: "ни один проход ещё не закончен", title: "ни один проход ещё не закончен" });
+    expect(glossaryLines(PASSES_GLOSSARY)).toEqual([
+      "следующий проход — Взятые в исправление находки исправит следующий проход.",
+      "нечего исправлять — Проход не взял находок в исправление: проходов больше нет.",
+      "предел проходов — Последний проход прогона: оставшиеся находки открыты.",
+    ]);
+  });
+
+  test("p1-decompose-u3-shape cand-2 · the run's tokens: agents and the orchestrator in one compact total, the split in the title", () => {
+    const spend = { launches: { input: 1000, output: 2000, cacheWrite: 0, cacheRead: 5_000_000, boot: 3, continuations: 1 }, orchestrator: { input: 500, output: 500, cacheWrite: 0, cacheRead: 1_000_000 } };
+    // num groups thousands with a no-break space
+    expect(spendLine(spend)).toEqual({ text: "6 млн токенов", title: "запуски агентов 5 млн токенов · сессии прогона 1 млн токенов\nвход 1500 · выход 2500 · запись в кэш 0 · чтение кэша 6 000 000" });
+    expect(spendLine({ ...spend, orchestrator: null })).toEqual({ text: "5 млн токенов", title: "запуски агентов 5 млн токенов · сессии прогона не записаны\nвход 1000 · выход 2000 · запись в кэш 0 · чтение кэша 5 000 000" });
+    expect(spendLine(null)).toBeNull();
+  });
+
+  test("cand-8 · the settings' glossary: the mode, «проход», the mirror — only those the row shows, each within its bound", () => {
+    const card = { mode: "worktree", N: 2, K: 3, models: ["claude-opus-5-5"], mirror: true };
+    expect(glossaryLines(settingsGlossary(card))).toEqual([
+      "worktree — прогон работает в своей копии репозитория, каждый юнит — в своей",
+      "проход — один круг этапов прогона: работа, ревью, исправление, приёмка",
+      "зеркало .spike — общая папка исследований видна в копии каждого юнита",
+    ]);
+    expect(glossaryLines(settingsGlossary({ ...card, mode: "inline", N: null, mirror: false }))).toEqual(["inline — прогон работает прямо в рабочей копии проекта, без копий для юнитов"]);
+    expect(settingsGlossary({ ...card, mode: "init", N: null, mirror: null })).toEqual([]);
+  });
+
+  test("craft-9 · «Ждёт вас» over its held box: the causes that start below the box's last line are «ещё N», the line they need kept", () => {
+    const rows = (tops: number[], h = 20) => tops.map((top) => ({ top, bottom: top + h }));
+    // Everything fits: nothing hidden.
+    expect(hiddenCauses(40, rows([0, 20]), 20)).toBe(0);
+    // Opened at «ничего» (a two-line floor), three causes arrive: the first shows, two wait behind «ещё 2».
+    expect(hiddenCauses(40, rows([0, 20, 40]), 20)).toBe(2);
+    // A cause of two lines and one more: the first starts in view, the second is «ещё 1».
+    expect(hiddenCauses(40, [{ top: 0, bottom: 40 }, { top: 40, bottom: 60 }], 20)).toBe(1);
+    const more = waitsMoreText(2);
+    expect(more).toBe("ещё 2 · показать");
+    expect(words(more)).toBe(4);
   });
 
   test("the tab title, «● » on a change the hidden tab missed", () => {
@@ -56,7 +109,7 @@ describe("the run page's frame", () => {
   const facts = () => [...factList().querySelectorAll("dt")].map((dt) => [dt.textContent, (dt.nextElementSibling as HTMLElement).textContent]);
   const loaded = () => screen.findByRole("tab", { name: /Находки/ });
 
-  test("ux 9 order (craft-2): identity, the four outcome rows, the settings in one muted row, the counts behind «Подробнее», kept", async () => {
+  test("ux 9 order (craft-2): identity, the four outcome rows, the settings in one muted row, the counts behind «Подробнее», kept; craft-11 · « ·» with the part before it; cand-2 · tokens and cand-1 · passes in «Подробнее»", async () => {
     const user = userEvent.setup();
     renderShell(fx.transport, { path: `/r/${keyOf(40)}` });
     await loaded();
@@ -68,13 +121,25 @@ describe("the run page's frame", () => {
     expect(facts()[4][1]).toBe("worktree · до 2 проходов · до 3 юнитов сразу · claude-opus-5-5");
     const settings = factList().querySelector("[data-slot=settings]") as HTMLElement;
     expect(settings).toHaveClass("text-muted-foreground");
-    for (const part of settings.querySelectorAll(":scope > span > span")) expect(part).toHaveClass("whitespace-nowrap");
+    // craft-11 · each « ·» stays with the part before it, inside its unbreakable span.
+    const parts = [...settings.querySelectorAll("[data-slot=setting]")];
+    expect(parts.map((p) => p.textContent)).toEqual(["worktree ·", "до 2 проходов ·", "до 3 юнитов сразу ·", "claude-opus-5-5"]);
+    for (const part of parts) expect(part).toHaveClass("whitespace-nowrap");
     await user.click(within(header()).getByRole("button", { name: "Подробнее" }));
-    expect(facts().slice(13).map(([label]) => label)).toEqual(["Версия run.json"]);
-    expect(facts().slice(5, 13)).toEqual([
+    expect(facts().slice(15).map(([label]) => label)).toEqual(["Версия run.json"]);
+    // p1-decompose-u3-shape cand-2 · the run's tokens; p1-decompose-design-check cand-1 · its finished passes.
+    const [tokensFact, passesFact] = facts().slice(8, 10);
+    expect(tokensFact[0]).toBe("Токены");
+    expect(tokensFact[1]).toMatch(/^\d+(,\d)? млн токенов$/);
+    expect(passesFact).toEqual(["Проходы", "проход 1 — следующий проход"]);
+    expect(within(factList()).getByText("проход 1 — следующий проход")).toHaveAttribute("title", "Проход 1 — следующий проход: 60 находок в исправление. 60 critical and major above the bar");
+    expect([...factList().querySelectorAll("dt")].find((dt) => dt.textContent === "Проходы")?.querySelector("[data-slot=glossary-term]")).not.toBeNull();
+    expect(facts().slice(5, 15)).toEqual([
       ["Начат", "14.11 19:41 МСК"],
       ["Длительность", "2 д"],
       ["Запуски агентов", "98 запусков агента · 1 работает"],
+      tokensFact,
+      passesFact,
       ["Коммиты", "не записано"],
       ["Зеркало .spike", "нет"],
       ["Рабочая копия", "—нет значения"],
@@ -88,21 +153,61 @@ describe("the run page's frame", () => {
       if (![2, 4].includes(i)) expect(dd.firstElementChild).toHaveClass("block", "truncate");
   });
 
-  test("craft-3 · «Ждёт вас»: one row per cause, each in full, its finding and unit linked; craft-21 · each cause and the liveness word explained", async () => {
+  test("craft-3 · «Ждёт вас»: one row per cause, each in full, its finding and unit linked; craft-21 · the labels «Активность» and «Ждёт вас» carry the glossaries, the values read plain; cand-8 · «Настройки» explains its words", async () => {
     renderShell(fx.transport, { path: `/r/${keyOf(40)}` });
     await loaded();
     const rows = [...header().querySelectorAll<HTMLElement>("[data-slot=wait]")];
-    expect(rows.map((r) => [r.dataset.kind, r.querySelector("[data-slot=glossary-term]")?.textContent])).toEqual([
+    expect(rows.map((r) => [r.dataset.kind, r.querySelector("[data-slot=wait-term]")?.textContent])).toEqual([
       ["gate", "красный гейт"],
       ["blocked", "заблокирован"],
     ]);
     expect(rows[0]).toHaveTextContent("красный гейтp2-assess-critic-code#code-2 has no decision row");
     expect(rows[1]).toHaveTextContent("заблокированu23 — waits for the user — the empty state's wording (j140)");
-    for (const r of rows) expect(r.querySelector(".truncate, .line-clamp-2, [title]")).toBeNull();
+    for (const r of rows) expect(r.querySelector(".truncate, .line-clamp-2, [title], [data-slot=glossary-term]")).toBeNull();
     expect(within(rows[1]).getByRole("link", { name: "u23" })).toHaveAttribute("href", "/r/admin/a5b5ec85?view=units&unit=u23");
     expect(rows[0].querySelector("[data-slot=dot]")).toHaveAttribute("data-tone", "warning");
-    const activity = [...factList().querySelectorAll("dt")].find((dt) => dt.textContent === "Активность")?.nextElementSibling as HTMLElement;
-    expect(within(activity).getByRole("button", { name: "работает" })).toHaveAttribute("data-slot", "glossary-term");
+    const dt = (label: string) => [...factList().querySelectorAll("dt")].find((el) => el.textContent === label) as HTMLElement;
+    for (const label of ["Активность", "Ждёт вас", "Настройки"]) {
+      expect(within(dt(label)).getByRole("button", { name: label })).toHaveAttribute("data-slot", "glossary-term");
+      expect((dt(label).nextElementSibling as HTMLElement).querySelector("[data-slot=glossary-term]")).toBeNull();
+    }
+    expect(dt("Этап").querySelector("[data-slot=glossary-term]")).toBeNull();
+  });
+
+  test("craft-9 · «Ждёт вас» keeps a two-line floor; the causes past its held box read «ещё N · показать», and a click shows them all", async () => {
+    const user = userEvent.setup();
+    const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    const offsetTop = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetTop");
+    // The box was held at two lines (40 px); each of the two causes now takes 30 px.
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.dataset.slot === "wait" ? 30 : this.dataset.slot === "waits-box" ? 40 : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetTop", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.dataset.slot === "wait" ? [...(this.parentElement?.children ?? [])].indexOf(this) * 30 : 0;
+      },
+    });
+    try {
+      renderShell(fx.transport, { path: `/r/${keyOf(40)}` });
+      await loaded();
+      const box = header().querySelector("[data-slot=waits-box]") as HTMLElement;
+      expect(box).toHaveClass("min-h-[2lh]", "max-h-[6lh]", "relative");
+      expect(box.style.height).toBe("40px");
+      const more = within(box).getByRole("button", { name: "ещё 1 · показать" });
+      expect(more).toHaveClass("absolute", "bottom-0", "h-lh");
+      expect(box).toHaveClass("overflow-hidden");
+      await user.click(more);
+      expect(box.style.height).toBe("");
+      expect(box).toHaveClass("overflow-y-auto");
+      expect(within(box).queryByRole("button", { name: /^ещё/ })).toBeNull();
+    } finally {
+      if (offsetHeight) Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeight);
+      if (offsetTop) Object.defineProperty(HTMLElement.prototype, "offsetTop", offsetTop);
+    }
   });
 
   test("craft-3 · Strict 1: «Ждёт вас» is held at the height it first took; a live change of its causes scrolls inside, a resize measures again", async () => {
@@ -125,7 +230,7 @@ describe("the run page's frame", () => {
       const { again } = renderShell(fx.transport, { path: `/r/${keyOf(40)}` });
       await loaded();
       const box = header().querySelector("[data-slot=waits-box]") as HTMLElement;
-      expect(box).toHaveClass("max-h-[6lh]", "overflow-y-auto", "[scrollbar-gutter:stable]");
+      expect(box).toHaveClass("max-h-[6lh]", "overflow-y-auto", "[scrollbar-gutter:stable]", "min-h-[2lh]");
       expect(box.style.height).toBe("57px");
       // More causes arrive: the content would take more, the box keeps its height.
       measured.height = 120;
@@ -269,5 +374,42 @@ describe("the run page's frame", () => {
     await waitFor(() => expect(screen.getByRole("tab", { name: /Находки/ }).querySelector("[data-slot=tab-count]")?.textContent).not.toBe(""));
     // The tab row is one fixed line; the lost connection is the shell's, so nothing arrives in it.
     expect(screen.getByRole("tablist")).toHaveClass("group-data-horizontal/tabs:h-10", "shrink-0");
+  });
+});
+
+describe("a run that closes while its page is open", () => {
+  let fx: FixtureApp;
+  beforeAll(() => {
+    fx = fixtureApp({ only: [40] });
+  });
+  afterAll(() => fx.close());
+
+  const header = () => document.querySelector("[data-slot=run-header]") as HTMLElement;
+  const labels = () => [...header().querySelectorAll("dt")].map((dt) => dt.textContent);
+
+  test("p1-verdict cand-3 · Strict 1: «Активность» and «Ждёт вас» give way to «Итог», and the header keeps the height it had while running; the operator's own «Подробнее» lets it go", async () => {
+    const user = userEvent.setup();
+    const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.dataset.slot === "run-header" ? 245 : 0;
+      },
+    });
+    try {
+      renderShell(fx.transport, { path: `/r/${keyOf(40)}` });
+      await screen.findByRole("tab", { name: /Находки/ });
+      expect(labels()).toContain("Ждёт вас");
+      expect(header().style.minHeight).toBe("");
+      const record = JSON.parse(readFileSync(join(fx.dirOf(40), "run.json"), "utf8")) as Record<string, unknown>;
+      fx.write(40, "run.json", JSON.stringify({ ...record, closed: true, outcome: { pushed: true, goalMet: true, held: [] } }));
+      await waitFor(() => expect(labels()).toContain("Итог"));
+      expect(labels()).not.toContain("Ждёт вас");
+      expect(header().style.minHeight).toBe("245px");
+      await user.click(within(header()).getByRole("button", { name: "Подробнее" }));
+      expect(header().style.minHeight).toBe("");
+    } finally {
+      if (offsetHeight) Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeight);
+    }
   });
 });

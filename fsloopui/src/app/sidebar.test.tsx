@@ -3,17 +3,21 @@ import "../ui/test-setup.ts";
 import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { glossaryLines } from "../ui/index.ts";
+import { glossaryLines, writePref } from "../ui/index.ts";
 import {
   activityLine,
   cardLabel,
+  closedLine,
   foldTitle,
   launchesLine,
   LIVENESS_WIDEST,
   livenessShown,
   miniDetail,
+  miniTitle,
+  runMatches,
   runningCount,
   RUNS_GLOSSARY,
+  SEARCH_PLACEHOLDER,
   settingsLine,
   stageCompact,
   stageLine,
@@ -111,17 +115,39 @@ describe("the card's words, built once", () => {
     expect(waitsLine({ redGate: null, blocked: [] })).toEqual({ tone: "neutral", text: "ничего — прогон идёт сам" });
   });
 
-  test("a fold's title and a mini row's detail: what waits first, «нет связи» while lost", () => {
+  test("craft-4 · a mini row's detail: what waits first, «нет связи» while lost, no clock time — an age already says when; the time in its title, «новое» too; a fold's title", () => {
     const calm = { redGate: null, blocked: [] };
     expect(foldTitle("Закрытые", 53)).toBe("Закрытые · 53");
-    expect(miniDetail({ ...calm, recorded: true, closed: true, outcome: { pushed: true, goalMet: true, held: [] }, updatedAt: "2026-11-15T20:40:00Z", lastWriteAt: null }, NOW)).toEqual({ tone: "success", text: "цель достигнута · коммиты отправлены · 15.11 23:40 МСК" });
-    const silent = { ...calm, recorded: true, closed: false, outcome: null, updatedAt: null, lastWriteAt: "2026-11-16T09:41:00Z" };
-    expect(miniDetail(silent, NOW)).toEqual({ tone: "warning", text: "молчит · 7 ч · 12:41 МСК" });
-    expect(miniDetail(silent, NOW, { lost: true })).toEqual({ tone: "neutral", text: "нет связи · 12:41 МСК" });
+    const closed = { ...calm, project: "shop", id: "1a2b3c4d", goal: "Run 0: bring the «a» and «b» pages to the law. Keep every fact.", recorded: true, closed: true, outcome: { pushed: true, goalMet: true, held: [] }, updatedAt: "2026-11-15T20:40:00Z", lastWriteAt: null };
+    expect(miniDetail(closed, NOW)).toEqual({ tone: "success", text: "цель достигнута · коммиты отправлены" });
+    const silent = { ...calm, project: "shop", id: "37d5a31e", goal: null, recorded: true, closed: false, outcome: null, updatedAt: null, lastWriteAt: "2026-11-16T09:41:00Z" };
+    expect(miniDetail(silent, NOW)).toEqual({ tone: "warning", text: "молчит · 7 ч" });
+    expect(miniDetail(silent, NOW, { lost: true })).toEqual({ tone: "neutral", text: "нет связи" });
     const waits = miniDetail({ ...silent, lastWriteAt: iso(NOW - MIN), redGate: { at: "2026-11-16T16:21:00Z", problems: ["x"] }, blocked: [{ id: "u23", why: "y" }] }, NOW);
-    expect(waits).toEqual({ tone: "warning", text: "красный гейт · заблокирован u23 · работает · 19:40 МСК" });
-    expect(words(waits.text)).toBe(10);
-    expect(miniDetail({ ...calm, recorded: false, closed: null, outcome: null, updatedAt: null, lastWriteAt: "2026-11-13T16:41:00Z" }, NOW)).toEqual({ tone: "neutral", text: "не записано: в папке нет run.json · 13.11 19:41 МСК" });
+    expect(waits).toEqual({ tone: "warning", text: "красный гейт · заблокирован u23 · работает" });
+    expect(words(waits.text)).toBe(7);
+    expect(miniDetail({ ...calm, recorded: false, closed: null, outcome: null, updatedAt: null, lastWriteAt: "2026-11-13T16:41:00Z" }, NOW)).toEqual({ tone: "neutral", text: "не записано: в папке нет run.json" });
+    // The title keeps the whole: the time the face drops, and «новое», which has no column of its own.
+    const title = miniTitle(silent, "молчит · 7 ч", NOW, true);
+    expect(title).toBe("shop · 37d5a31e · молчит · 7 ч · последняя запись 12:41 МСК · новое");
+    expect(words(title)).toBe(15);
+    expect(miniTitle(closed, "цель достигнута · коммиты отправлены", NOW, false)).toBe("shop · 1a2b3c4d · цель достигнута · коммиты отправлены · закрыт 15.11 23:40 МСК");
+    // p1-review cand-3 · a closed run's row tells itself apart by its date and its goal's first words, on its second line.
+    const line = closedLine(closed, NOW);
+    expect(line).toBe("закрыт 15.11 23:40 МСК · Run 0: bring the «a» and «b» pages to the law. Keep every fact.");
+    expect(closedLine({ ...closed, goal: null }, NOW)).toBe("закрыт 15.11 23:40 МСК");
+  });
+
+  test("p1-review cand-3 · the sidebar's search: every word in the project, the id or the goal", () => {
+    const card = { project: "admin", id: "a5b5ec85", goal: "Bring every section to the law" };
+    expect(SEARCH_PLACEHOLDER).toBe("Проект, id, цель");
+    expect(runMatches(card, "")).toBe(true);
+    expect(runMatches(card, "  ")).toBe(true);
+    expect(runMatches(card, "ADMIN")).toBe(true);
+    expect(runMatches(card, "a5b5")).toBe(true);
+    expect(runMatches(card, "admin section")).toBe(true);
+    expect(runMatches(card, "admin shop")).toBe(false);
+    expect(runMatches({ ...card, goal: null }, "section")).toBe(false);
   });
 });
 
@@ -144,6 +170,8 @@ describe("the sidebar over the fixture root of 63", () => {
     const list = sidebar().querySelector("[data-slot=sidebar-list]") as HTMLElement;
     expect(list).toHaveClass("flex-1", "min-h-0");
     expect(within(list).getByRole("status")).toHaveTextContent("Загрузка…");
+    // The search's line is there before the list: the list lands under it, nothing moves.
+    expect(within(sidebar()).getByRole("searchbox")).toBeInTheDocument();
     fx.answer(null);
     await act(async () => release());
     await ready();
@@ -178,13 +206,13 @@ describe("the sidebar over the fixture root of 63", () => {
     await ready();
     const card = cards()[2];
     expect(card).toHaveAccessibleName("admin · a5b5ec85 · работает");
-    expect(card).toHaveAccessibleDescription(/^красный гейт: p2-assess-critic-code#code-2 has no decision row .*Настройки.*Состояние/);
+    expect(card).toHaveAccessibleDescription(/^красный гейт · заблокирован u23Настройки.*Состояние/);
     expect(within(sidebar()).queryByRole("heading")).toBeNull();
     await screen.findByRole("heading", { level: 1 });
     expect(screen.getAllByRole("heading")[0]).toHaveProperty("tagName", "H1");
   });
 
-  test("a card: project · id · liveness, what waits or the goal in two reserved lines, «Настройки», «Состояние» (craft-3, craft-17, craft-18)", async () => {
+  test("a card: project · id · liveness, what waits or the goal in two reserved lines, «Настройки», «Состояние» (craft-3, craft-17, craft-18; cand-5 · what waits in a few words; craft-11 · « ·» with the part before it)", async () => {
     renderShell(fx.transport, { path: `/r/${keyOf(0)}` });
     await ready();
     const card = cards()[2];
@@ -203,9 +231,11 @@ describe("the sidebar over the fixture root of 63", () => {
     expect(liveness).toHaveClass("grid", "shrink-0");
     for (const c of cards()) expect(slot("new-mark", c)).toHaveClass("invisible");
     // craft-3 · what waits sits under the head in two reserved lines, the goal's place; a calm card shows its goal there.
+    // cand-5 · it names every cause in a few words, so none is cut; the whole of each is in the title and on the page.
     const waits = slot("card-waits");
     expect(waits).toHaveClass("h-[2lh]");
-    expect(waits.querySelector(".line-clamp-2")).toHaveTextContent("красный гейт: p2-assess-critic-code#code-2 has no decision row · заблокирован u23 — waits for the user — the empty state's wording (j140)");
+    expect(waits.querySelector(".line-clamp-2")).toHaveTextContent(/^красный гейт · заблокирован u23$/);
+    expect(waits).toHaveAttribute("title", "красный гейт: p2-assess-critic-code#code-2 has no decision row · заблокирован u23 — waits for the user — the empty state's wording (j140)");
     expect(waits.querySelector("[data-slot=dot]")).toHaveAttribute("data-tone", "warning");
     expect(slot("card-goal")).toBeNull();
     expect(waits.compareDocumentPosition(slot("card-settings")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -216,7 +246,10 @@ describe("the sidebar over the fixture root of 63", () => {
     // craft-17 · ordinary values in compact forms, the whole in the title; an identifier never breaks inside.
     expect(within(card).getByText("Настройки")).toBeInTheDocument();
     expect(slot("card-settings")).toHaveTextContent("worktree · до 2 проходов · до 3 юнитов сразу · claude-opus-5-5");
-    for (const part of slot("card-settings").querySelectorAll("[data-slot=setting]")) expect(part).toHaveClass("whitespace-nowrap");
+    // craft-11 · each « ·» stays with the part before it, inside its unbreakable span: no line opens on a separator.
+    const parts = [...slot("card-settings").querySelectorAll("[data-slot=setting]")];
+    expect(parts.map((p) => p.textContent)).toEqual(["worktree ·", "до 2 проходов ·", "до 3 юнитов сразу ·", "claude-opus-5-5"]);
+    for (const part of parts) expect(part).toHaveClass("whitespace-nowrap");
     expect(within(card).getByText("Состояние")).toBeInTheDocument();
     expect(slot("card-stage")).toHaveTextContent("приёмка · проход 2 из 2 · на этапе 22 ч");
     expect(slot("card-stage")).toHaveAttribute("title", "приёмка · проход 2 из 2 · с 15.11 21:41 МСК");
@@ -225,15 +258,58 @@ describe("the sidebar over the fixture root of 63", () => {
     expect(slot("card-activity")).toHaveAttribute("title", "идёт 2 д · 98 запусков агента");
   });
 
-  test("craft-1 · below the shell's breakpoint the band is capped low and lists every run as a mini row", async () => {
+  test("craft-1 · below the shell's breakpoint the band lists every run as a mini row; cand-10 · its list holds four whole rows, every row and fold 32 px", async () => {
     renderShell(fx.transport, { path: `/r/${keyOf(0)}`, wide: false });
     await ready();
-    expect(sidebar()).toHaveClass("max-h-60", "min-[980px]:max-h-none");
+    expect(sidebar()).not.toHaveClass("max-h-60");
+    const list = sidebar().querySelector("[data-slot=sidebar-list]") as HTMLElement;
+    expect(list).toHaveClass("max-[979px]:h-32", "overflow-y-auto");
     expect(cards()).toHaveLength(0);
     const rows = [...sidebar().querySelectorAll<HTMLAnchorElement>("[data-slot=mini-row]")];
     expect(rows.slice(0, 3).map((r) => r.getAttribute("href"))).toEqual(["/r/fsloop/077e72d5", "/r/bots/42d34077", "/r/admin/a5b5ec85"]);
-    expect(rows[2]).toHaveTextContent("красный гейт · заблокирован u23 · работает · 19:40 МСК");
-    for (const r of rows) expect(r).toHaveClass("h-8");
+    for (const r of rows.slice(0, 3)) expect(r).toHaveClass("h-8");
+    for (const fold of sidebar().querySelectorAll("[data-slot=sidebar-fold]")) {
+      expect(fold.className).not.toMatch(/\bp[ty]?-/);
+      expect(fold.querySelector("button")).toHaveClass("h-8", "border-t");
+    }
+  });
+
+  test("craft-4 · a mini row: no «новое» column and no clock time after the age — both in its name and title; the project cuts first", async () => {
+    // fsloop's run changed since the operator last had it open: it reads «новое».
+    writePref("runs:seen", { [keyOf(24)]: "2000-01-01T00:00:00.000Z" });
+    renderShell(fx.transport, { path: `/r/${keyOf(0)}`, wide: false });
+    await ready();
+    const rows = [...sidebar().querySelectorAll<HTMLAnchorElement>("[data-slot=mini-row]")];
+    expect(rows[2]).toHaveTextContent(/^admina5b5ec85красный гейт · заблокирован u23 · работает$/);
+    expect(rows[2]).toHaveAccessibleName("admin · a5b5ec85 · красный гейт · заблокирован u23 · работает");
+    expect(rows[2]).toHaveAttribute("title", "admin · a5b5ec85 · красный гейт · заблокирован u23 · работает · последняя запись 19:40 МСК");
+    expect(sidebar().querySelector("[data-slot=mini-row] [data-slot=new-mark]")).toBeNull();
+    expect(rows[2].querySelector("[data-slot=mini-project]")).toHaveClass("min-w-0", "truncate");
+    // «новое» is the inset edge mark, which moves nothing, and the row's name.
+    expect(rows[0]).toHaveAttribute("data-new");
+    expect(rows[0]).toHaveClass("shadow-edge");
+    expect(rows[0]).toHaveAccessibleName(/^fsloop · 077e72d5 · .+ · новое$/);
+    expect(rows[1]).not.toHaveAttribute("data-new");
+  });
+
+  test("p1-review cand-3 · the search narrows every group to the runs whose project, id or goal hold its words; none — the filtered empty state and its reset", async () => {
+    const user = userEvent.setup();
+    renderShell(fx.transport, { path: `/r/${keyOf(0)}` });
+    await ready();
+    const search = within(sidebar()).getByRole("searchbox", { name: "Поиск: Проект, id, цель" });
+    expect(search.closest("[data-slot=sidebar-head]")).not.toBeNull();
+    await user.type(search, "admin");
+    const shown = () => [...sidebar().querySelectorAll<HTMLAnchorElement>("[data-slot=run-card], [data-slot=mini-row]")].map((a) => a.getAttribute("href"));
+    expect(cards().map((c) => c.getAttribute("href"))).toEqual(["/r/admin/a5b5ec85"]);
+    for (const href of shown()) expect(href).toMatch(/^\/r\/admin\//);
+    await user.type(search, " zzzz");
+    expect(shown()).toEqual([]);
+    expect(within(sidebar()).getByText("Нет прогонов, подходящих под фильтры")).toBeInTheDocument();
+    expect(within(sidebar()).getByText("Фильтры: поиск «admin zzzz»")).toBeInTheDocument();
+    expect(within(sidebar()).queryByText("Сейчас ни один прогон не идёт — новый появится здесь сам")).toBeNull();
+    await user.click(within(sidebar()).getByRole("button", { name: "Сбросить фильтры" }));
+    expect(search).toHaveValue("");
+    expect(cards()).toHaveLength(3);
   });
 
   test("the folds: long-silent 4, closed all 53 scrolling inside, without a record 3 — open state kept in browser storage", async () => {
@@ -247,10 +323,17 @@ describe("the sidebar over the fixture root of 63", () => {
     const unrecorded = within(sidebar()).getByRole("button", { name: "Без записи о прогоне · 3" });
     await user.click(closed);
     expect(sidebar().querySelectorAll("[data-slot=mini-row]")).toHaveLength(4 + 53);
+    // p1-review cand-3 · a closed run's row is two reserved lines: the state, then when it closed and its goal.
     const row = sidebar().querySelector(`[data-slot=mini-row][href="/r/${keyOf(0)}"]`) as HTMLElement;
-    expect(row).toHaveTextContent("shop1a2b3c4dцель не достигнута · коммиты не отправлены · 10:41 МСК");
+    expect(row).toHaveClass("h-12");
+    expect(row.querySelector("[data-slot=status-dot]")).toHaveTextContent("цель не достигнута · коммиты не отправлены");
+    expect(row.querySelector("[data-slot=mini-goal]")?.textContent).toMatch(/^закрыт 10:41 МСК · Run 0: bring the /);
+    expect(row.querySelector("[data-slot=mini-goal]")).toHaveClass("truncate");
     await user.click(unrecorded);
-    expect(sidebar().querySelector(`[data-slot=mini-row][href="/r/${keyOf(7)}"]`)).toHaveTextContent("не записано: в папке нет run.json · 13.11 19:41 МСК");
+    const bare = sidebar().querySelector(`[data-slot=mini-row][href="/r/${keyOf(7)}"]`) as HTMLElement;
+    expect(bare).toHaveTextContent(/не записано: в папке нет run\.json$/);
+    expect(bare).toHaveAttribute("title", expect.stringContaining("последняя запись 13.11 19:41 МСК"));
+    expect(bare).toHaveClass("h-8");
     expect(sidebar().querySelector("[data-slot=sidebar-list]")).toHaveClass("overflow-y-auto", "[scrollbar-gutter:stable]");
     first.unmount();
     renderShell(fx.transport, { path: `/r/${keyOf(0)}` });

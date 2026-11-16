@@ -2,9 +2,10 @@
 // strip and frame messages, the tab title. State words and their tones come from the shared maps; numbers, times
 // and spans from shared/text.ts. Each function is tested against a literal.
 import { LIVENESS, livenessOf, type LivenessValue } from "../../shared/liveness.ts";
-import type { Outcome, RunCard } from "../../shared/model.ts";
-import { LAUNCH_STATE, NOT_RECORDED, stageOf, UNIT_STATE, type Tone } from "../../shared/states.ts";
-import { ago, count, duration, mskTime, NOUNS, num, plural, type Forms } from "../../shared/text.ts";
+import type { Outcome, Pass, RunCard, RunSpend } from "../../shared/model.ts";
+import { LAUNCH_STATE, NOT_RECORDED, PASS_OUTCOME, stageOf, UNIT_STATE, type PassOutcome, type Tone } from "../../shared/states.ts";
+import { addSpend, ago, count, duration, mskTime, NOUNS, num, plural, tokens, type Forms } from "../../shared/text.ts";
+import type { GlossaryEntry } from "../ui/tooltip.tsx";
 
 export const PRODUCT = "fsloopUI";
 
@@ -225,24 +226,95 @@ export function outcomeLine(outcome: Outcome | null): { tone: Tone; text: string
   return { tone: outcome.goalMet ? "success" : "neutral", text: parts.join(" · ") };
 }
 
-/** A mini row's last column: what waits, the outcome or the liveness, then the date in МСК. */
-export function miniDetail(
-  card: Pick<RunCard, "recorded" | "closed" | "outcome" | "updatedAt" | "lastWriteAt" | "redGate" | "blocked">,
-  now: number,
-  { lost = false } = {},
-): { tone: Tone; text: string } {
-  const at = (card.closed ? card.updatedAt : null) ?? card.lastWriteAt;
-  const when = at ? ` · ${mskTime(at, now)}` : "";
-  if (!card.recorded) return { tone: "neutral", text: `${NO_RECORD_TEXT}${when}` };
-  if (card.closed) {
-    const o = outcomeLine(card.outcome);
-    return { tone: o.tone, text: `${o.text}${when}` };
-  }
+type MiniFacts = Pick<RunCard, "recorded" | "closed" | "outcome" | "updatedAt" | "lastWriteAt" | "redGate" | "blocked">;
+
+/** A mini row's last column: what waits, the outcome or the liveness — no clock time: the liveness's age already says
+ * when, and the row's title carries the time (craft-4; rules/ui → Conventions 10). */
+export function miniDetail(card: MiniFacts, now: number, { lost = false } = {}): { tone: Tone; text: string } {
+  if (!card.recorded) return { tone: "neutral", text: NO_RECORD_TEXT };
+  if (card.closed) return outcomeLine(card.outcome);
   const live = livenessShown(card, now, lost);
   const waits = waitsShort(card);
-  if (waits) return { tone: "warning", text: `${waits} · ${live.label}${when}` };
-  return { tone: live.tone, text: `${live.label}${when}` };
+  if (waits) return { tone: "warning", text: `${waits} · ${live.label}` };
+  return { tone: live.tone, text: live.label };
 }
+
+/** The moment a mini row stands for, with what it is: «закрыт 15.11 23:40 МСК», «последняя запись 12:41 МСК». */
+function miniMoment(card: MiniFacts, now: number): string | null {
+  if (card.closed && card.updatedAt) return `закрыт ${mskTime(card.updatedAt, now)}`;
+  return card.lastWriteAt ? `последняя запись ${mskTime(card.lastWriteAt, now)}` : null;
+}
+
+/** A mini row's title, the whole of it: «shop · 37d5a31e · молчит · 7 ч · последняя запись 12:41 МСК · новое». */
+export const miniTitle = (card: MiniFacts & Pick<RunCard, "project" | "id">, detail: string, now: number, fresh: boolean): string =>
+  [card.project, card.id, detail, miniMoment(card, now), fresh ? NEW_MARK : null].filter(Boolean).join(" · ");
+
+/** A closed run's second line: when it closed and its goal's first words — what tells one closed run from the next
+ * (p1-review cand-3): «закрыт 15.11 23:40 МСК · Run 24: bring the …». */
+export const closedLine = (card: Pick<RunCard, "updatedAt" | "lastWriteAt" | "goal">, now: number): string => {
+  const at = card.updatedAt ?? card.lastWriteAt;
+  return [at ? `закрыт ${mskTime(at, now)}` : null, card.goal].filter(Boolean).join(" · ");
+};
+
+/** The sidebar's search: the fields it looks in, named in its placeholder (table #12). */
+export const SEARCH_PLACEHOLDER = "Проект, id, цель";
+
+/** Whether a run answers the sidebar's search: every word of it in the project, the id or the goal, case aside. */
+export function runMatches(card: Pick<RunCard, "project" | "id" | "goal">, query: string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = [card.project, card.id, card.goal ?? ""].join("\n").toLowerCase();
+  return words.every((w) => hay.includes(w));
+}
+
+/** What a settings row's words mean, for the words a new reader cannot read alone (cand-8; ui → Glossary). */
+const MODE_MEANING: Record<string, string> = {
+  inline: "прогон работает прямо в рабочей копии проекта, без копий для юнитов",
+  worktree: "прогон работает в своей копии репозитория, каждый юнит — в своей",
+};
+const PASS_MEANING = "один круг этапов прогона: работа, ревью, исправление, приёмка";
+const MIRROR_MEANING = "общая папка исследований видна в копии каждого юнита";
+
+/** The glossary on «Настройки»: the mode, «проход» and the mirror — only what the row shows, in its order. */
+export function settingsGlossary(card: Pick<RunCard, "mode" | "N" | "K" | "models" | "mirror">): GlossaryEntry[] {
+  const entries: GlossaryEntry[] = [];
+  if (card.mode && MODE_MEANING[card.mode]) entries.push({ value: card.mode, meaning: MODE_MEANING[card.mode] });
+  if (card.N) entries.push({ value: NOUNS.pass[0], meaning: PASS_MEANING });
+  if (card.mirror) entries.push({ value: "зеркало .spike", meaning: MIRROR_MEANING });
+  return entries;
+}
+
+/** The run's tokens for «Подробнее»: its agent launches and its own sessions (the orchestrator) in one compact total,
+ * the split in the title, in the words of the facts beside it (p1-decompose-u3-shape cand-2); null when the record
+ * holds none. */
+export function spendLine(spend: RunSpend | null): { text: string; title: string } | null {
+  if (!spend) return null;
+  const total = spend.orchestrator ? addSpend(spend.launches, spend.orchestrator) : spend.launches;
+  const all = tokens(total);
+  const own = spend.orchestrator ? `сессии прогона ${tokens(spend.orchestrator).compact}` : "сессии прогона не записаны";
+  return { text: all.compact, title: `запуски агентов ${tokens(spend.launches).compact} · ${own}\n${all.title}` };
+}
+
+/** The outcome words of a pass, explained on «Проходы» (ui → Glossary). */
+export const PASSES_GLOSSARY: readonly GlossaryEntry[] = (["next", "converged", "cap"] as const).map((k) => ({ value: PASS_OUTCOME[k].compact, meaning: PASS_OUTCOME[k].meaning }));
+
+const passWord = (outcome: string): string => (outcome in PASS_OUTCOME ? PASS_OUTCOME[outcome as PassOutcome].compact : outcome);
+
+const NO_PASS = "ни один проход ещё не закончен";
+
+/** The finished passes in one line — «проход 1 — следующий проход · проход 2 — нечего исправлять» — and in the title
+ * each with the findings it took into the next and why (p1-decompose-design-check cand-1). An outcome the map lacks
+ * reads as written. */
+export function passesLine(passes: readonly Pass[]): { text: string; title: string } {
+  if (!passes.length) return { text: NO_PASS, title: NO_PASS };
+  return {
+    text: passes.map((p) => `${NOUNS.pass[0]} ${num(p.pass)} — ${passWord(p.outcome)}`).join(" · "),
+    title: passes.map((p) => `Проход ${num(p.pass)} — ${passWord(p.outcome)}${p.taken ? `: ${count(p.taken, NOUNS.finding)} в исправление` : ""}${p.why ? `. ${p.why}` : ""}`).join("\n"),
+  };
+}
+
+/** «ещё 2 · показать»: the causes past «Ждёт вас»'s held box, and what a click does (craft-9). */
+export const waitsMoreText = (n: number): string => `ещё ${num(n)} · показать`;
 
 /** «Закрытые · 53». */
 export const foldTitle = (label: string, n: number): string => `${label} · ${num(n)}`;
