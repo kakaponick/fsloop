@@ -13,6 +13,13 @@ Governs everything under `fsloopui/`: the React client, the server's routes as f
 
 fsloopUI is local, single-user and read-mostly: no sign-in, no roles, no money, no destructive action. Its one write is the user's verdict on a finding (Conventions 6).
 
+## Strict
+
+The user's own rules, stated in his words; they outrank every other rule of this file and every default of the library. A breach is a major finding, never a candidate.
+
+1. **No layout shift** — markup that causes a layout shift is forbidden. Nothing on screen moves because something else loaded, arrived or changed state: an image, a frame thumbnail, a count, a badge, a strip, a toolbar item, a font, a scrollbar, a row's detail, a live update. Every element that appears later has its box reserved before it appears (fixed width and height or an aspect ratio; a reserved line for a strip or a status; `scrollbar-gutter: stable` on a scrolling region; tabular numerals and a fixed width for a count that changes); a loading state has the size of what replaces it; a live update changes values in place and never inserts above what the user reads (Live data 1–3). The only movement allowed is the one the user causes by their own click — expanding a row, opening a fold — and it never pushes the element they clicked.
+2. **No skeletons** — a skeleton as a loading state is an anti-pattern and is never used, for a table, a card, a text or a page. A loading state is the word «Загрузка…» with a spinner, centred in the region being loaded, the region already at its final size (Strict 1), `role="status"`. The library's `skeleton` component is not imported anywhere in the product.
+
 ## Components
 
 1. **shadcn/ui is the component library** — fsloopUI is a shadcn project: `fsloopui/components.json`, Tailwind, every component of the library added as source under `fsloopui/src/components/ui/`. Work on a component goes through the `shadcn` skill (`~/.claude/skills/shadcn/SKILL.md` with its `cli.md`, `customization.md`, `registry.md`, `rules/`) and its CLI, `npx shadcn@latest` run in `fsloopui/` — `docs`, `search`, `view`, `add`, `diff`.
@@ -66,7 +73,7 @@ fsloopUI is local, single-user and read-mostly: no sign-in, no roles, no money, 
 ## Tables
 
 1. **A run's findings are local** (*overrides* `table` → Tables are server-side, a *default*): a run holds hundreds of findings (the largest, 555), so the run's data arrives whole and sort, filters and search run in one tested client module over the full set — never over the current page, never re-derived per view.
-2. **First load is a framed spinner, not skeleton rows** (*overrides* `ui` → Loading for tables): in the table's place a bordered frame over the whole region with a spinner and a muted «Загрузка…» at its centre (`role="status"`); under it an empty status bar of the same height; the page draws no skeleton rows or columns of its own.
+2. **First load is a framed spinner** (Strict 2 for a table; *overrides* `ui` → Loading for tables): in the table's place a bordered frame over the whole region with a spinner and a muted «Загрузка…» at its centre (`role="status"`); under it an empty status bar of the same height, so the loaded table lands without a shift (Strict 1).
 3. **Rows expand in place** — a finding's row expands into its detail under it (rule, observation, fix, the run's decision with its units, the user's verdict, frames); a unit's row into its findings. Expanding is the default pinned action («Открыть», `table #13`); several rows may be open; the detail spans the table's width and is running text (Layout 5).
 4. **The pin lives in the browser** (refines `table #13`, `#7`) — a single user without an account: the pinned row action persists with the table's view state in browser storage; nothing is persisted on the server.
 5. **A cell of a variable name and a short fact** — the name truncates, the fact keeps its width; the full text is in the cell's title. An outlier cuts the name, never the fact.
