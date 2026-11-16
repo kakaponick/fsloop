@@ -3,7 +3,7 @@
 // literal; never — the run is past that stage or closed; filtered to none — the active filters and «Сбросить
 // фильтры». An empty state is never a false one: a failed load is the part-failed message, not this.
 import { STAGE_WORDS, stageOf, STEPS, type Step } from "../../shared/states.ts";
-import { count, type Forms } from "../../shared/text.ts";
+import { capital, count, type Forms } from "../../shared/text.ts";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { cn } from "@/lib/utils";
@@ -35,7 +35,6 @@ export type EmptyStateProps = (
     }
 ) & { className?: string };
 
-const capital = (s: string) => s[0].toUpperCase() + s.slice(1);
 
 /** The words of each form; the component and the tests read the same function. */
 export function emptyStateText(props: EmptyStateProps): { title: string; description?: string } {

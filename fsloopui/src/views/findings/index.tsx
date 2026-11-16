@@ -18,7 +18,7 @@ import type { Finding, Run } from "../../../shared/model.ts";
 import { stageOf, STEPS, type Step, type Verdict } from "../../../shared/states.ts";
 import { NOUNS } from "../../../shared/text.ts";
 import { emptyWhen, MissingLine, PLACE_WHAT, type HeldNoun } from "@/ui";
-import { copyAction, DataTable, revealRow, type EmptyWhen, type RowAction, type TableNotice } from "@/table";
+import { copyAction, DataTable, type EmptyWhen, type RowAction, type TableHandle, type TableNotice } from "@/table";
 // From the files, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
 import { FindingArticle } from "@/finding/article.tsx";
 import { stateUnit } from "@/finding/cells.tsx";
@@ -57,10 +57,6 @@ export function emptyFor(run: Pick<Run, "closed" | "mode" | "now">): EmptyWhen {
   const when = emptyWhen(run, nextCriticStep(run.now?.stage));
   return when.form === "never" ? when : { ...when, lead: EMPTY_LEAD, subject: "находки" };
 }
-
-/** The rows of the table's current page, first to last. */
-const pageRows = (host: HTMLElement): HTMLElement[] => [...host.querySelectorAll<HTMLElement>("tr[data-row-id]")];
-const idOf = (tr: HTMLElement): string => tr.dataset.rowId ?? "";
 
 /** A page turn the keys asked for, settled once the table shows the asked page: the rated finding and whether its
  * detail was open, the page asked, the rows of the page before it, the page the key was pressed on, and whether the
@@ -147,23 +143,29 @@ function Findings({ run }: { run: LoadedRun }) {
     const on = new Set(shown);
     return rows.filter((f) => !f.verdict && on.has(f.id)).map(rowId);
   }, [rows, shown]);
+  /** The table's current row, its Tab stop, as the kit hands it over (code-1): what a key rates from the toolbar or the
+   * status bar, marked there by the kit (craft-3). */
+  const [current, setCurrent] = useState<string | null>(null);
   const walk = useRef<Walk | null>(null);
+  /** The table kit's handle: the page's rows, the row in focus and a row's reveal, so the keys and their walk read none
+   * of the kit's markup (code-1). */
+  const table = useRef<TableHandle | null>(null);
+  const pageRows = (): readonly string[] => table.current?.pageRows() ?? [];
   /** Focus on the next finding through the kit's row reveal; its detail opened in place of the rated one's when that
    * was open. */
-  const moveTo = (tr: HTMLElement, from: string, wasOpen: boolean) => {
-    const nextId = idOf(tr);
+  const moveTo = (nextId: string, from: string, wasOpen: boolean) => {
     if (wasOpen) onOpenChange([...open.filter((x) => x !== from && x !== nextId), nextId]);
-    revealRow(tr);
+    table.current?.reveal(nextId);
   };
   useVerdictKeys((verdict: Verdict) => {
     const host = root.current;
     const at = document.activeElement;
     if (!host || !(at instanceof HTMLElement) || !host.contains(at)) return;
     // the finding in focus — its row, or anything in its detail; with focus elsewhere in the view (the toolbar, the
-    // status bar) the table's current row, its Tab stop, which the key rates and leaves as the row's own key would (craft-6)
-    const own = at.closest<HTMLElement>("tr[data-row-id], tr[data-detail-for]");
-    const tr = own ?? host.querySelector<HTMLElement>('tr[data-row-id][tabindex="0"]');
-    const id = tr?.dataset.rowId ?? tr?.dataset.detailFor;
+    // status bar) the table's current row, its Tab stop as the kit hands it over (code-1) and marks it, which the key
+    // rates and leaves as the row's own key would (craft-6)
+    const own = table.current?.focused() ?? null;
+    const id = own ?? current;
     const finding = id ? rows.find((f) => f.id === id) : undefined;
     if (!id || !finding) return;
     // the note goes with it, as a choice in the detail takes it: the draft, else the saved one
@@ -176,31 +178,29 @@ function Findings({ run }: { run: LoadedRun }) {
       // none left in the list: the keys stop here and its detail says why
       setListRated(id);
       if (!wasOpen) onOpenChange([...open, id]);
-      if (!own && tr) revealRow(tr);
+      if (!own) table.current?.reveal(id);
       return;
     }
-    const shown = pageRows(host);
-    const next = shown.slice(shown.findIndex((el) => idOf(el) === id) + 1).find((el) => rest.has(idOf(el)));
+    const shown = pageRows();
+    const next = shown.slice(shown.indexOf(id) + 1).find((x) => rest.has(x));
     if (next) return moveTo(next, id, wasOpen);
     // none after it on this page: the page turns, through the URL's page as any page turn does
-    walk.current = { from: id, open: wasOpen, page: page + 1, seen: shown.map(idOf), start: page, wrapped: false };
+    walk.current = { from: id, open: wasOpen, page: page + 1, seen: shown, start: page, wrapped: false };
     onPageChange(page + 1);
   });
   // a page the keys turned to, once the table shows it: its first finding without a verdict, else the page after it;
   // past the last page (the table kept its rows) the walk goes on from the first, and stops at the page it started on
   useEffect(() => {
     const w = walk.current;
-    const host = root.current;
-    if (!w || !host || page !== w.page) return;
-    const shown = pageRows(host);
-    const ids = shown.map(idOf);
+    if (!w || page !== w.page) return;
+    const ids = pageRows();
     if (!w.wrapped && ids.join("\n") === w.seen.join("\n")) {
       walk.current = { ...w, page: 1, seen: ids, wrapped: true };
       onPageChange(1);
       return;
     }
     const rest = new Set(left.filter((x) => x !== w.from));
-    const next = shown.find((el) => rest.has(idOf(el)));
+    const next = ids.find((x) => rest.has(x));
     if (next || (w.wrapped && w.page >= w.start)) {
       walk.current = null;
       if (next) moveTo(next, w.from, w.open);
@@ -303,6 +303,8 @@ function Findings({ run }: { run: LoadedRun }) {
         onOpenChange={onOpenChange}
         target={link.target}
         onShownChange={setShown}
+        onCurrentChange={setCurrent}
+        handle={table}
         marks={(f) => ({ edge: edge(f.id) })}
         updatedAt={updated === null ? null : new Date(updated).toISOString()}
         now={now}

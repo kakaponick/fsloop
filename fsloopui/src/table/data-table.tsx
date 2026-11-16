@@ -7,12 +7,13 @@
 // sorting, filtering, searching and paging stay in query.ts, never in the table model.
 import { getCoreRowModel, useReactTable, type ColumnDef, type VisibilityState } from "@tanstack/react-table";
 import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, ChevronRightIcon } from "lucide-react";
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent as ReactWheelEvent } from "react";
+import { Fragment, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent, type Ref, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent as ReactWheelEvent } from "react";
+import { capital } from "../../shared/text.ts";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { CLOSE, EmptyState, GlossaryTooltip, HeldStrip, Loading, markProps, OPEN_FRAME, OutOfFilter, OverflowCue, PartFailed, useOverflowCue, revealIn, WHEEL_GESTURE_GAP, type EmptyWhen, type Gender, type GlossaryEntry, type HeldNoun, type MarkState } from "@/ui";
+import { CLOSE, EmptyState, GlossaryTooltip, HeldStrip, isTextField, Loading, markProps, OPEN_FRAME, OutOfFilter, OverflowCue, PartFailed, TARGET_MARK, useOverflowCue, revealIn, WHEEL_GESTURE_GAP, type EmptyWhen, type Gender, type GlossaryEntry, type HeldNoun, type MarkState } from "@/ui";
 import { clampWidth, mergeWidths, placeColumns, RESIZE_STEP, SELECT_WIDTH, sameColumns, sameWidths, tableMinWidth, type ColumnLayout } from "./columns.ts";
 import { ColumnsMenu } from "./columns-menu.tsx";
 import { CollapseAll } from "./collapse-all.tsx";
@@ -108,9 +109,29 @@ export interface DataTableProps<R> {
   /** The ids the table shows, on every page, in its held order — a live row waiting in the strip is not one of them —
    * reported whenever they change: what a view counts as the list the user reads (code-1). */
   onShownChange?: (ids: readonly string[]) => void;
+  /** The table's current row — its Tab stop: the row focus was last on, else the page's first — reported whenever it
+   * changes, for a view whose keys act on that row from anywhere in the view (the verdict keys of «Находки»), so the
+   * view reads it from the kit, never from the kit's markup (code-1). A table that hands it out marks that row as the
+   * current item while focus is in its part outside the rows — the toolbar, the notice, the status bar — so the row
+   * those keys act on always shows (craft-3). */
+  onCurrentChange?: (id: string | null) => void;
+  /** The kit's handle for a view that walks the table's rows itself (the verdict keys of «Находки»): the page's rows
+   * and a row's reveal by id, so the view reads none of the kit's markup (code-1). */
+  handle?: Ref<TableHandle>;
   /** Binds `/` to this table's search (one per view). */
   searchShortcut?: boolean;
   className?: string;
+}
+
+/** What a view asks of the table's rows without its markup (code-1). */
+export interface TableHandle {
+  /** The ids of the rows the page shows, first to last, as the table last rendered them. */
+  pageRows: () => readonly string[];
+  /** Focus on the row with this id, brought into the table's own box by the kit's one row reveal (`revealRow`); false
+   * when the page does not show it. */
+  reveal: (id: string) => boolean;
+  /** The row whose own line or open detail holds focus now; null — focus is on no row. */
+  focused: () => string | null;
 }
 
 /** The notice slot's line: the address its list lacks — a link's `finding=`, `unit=` — and the line itself. */
@@ -129,7 +150,7 @@ const ARRIVED: Record<HeldNoun["gender"], string> ={ m: "появился", f: "
 
 /** The notice slot's line once the row its address named arrives with a live change (craft-2): «Юнит u33 появился.»,
  * «Находка … появилась.» — the noun and its agreement the table's own. */
-const arrivedWords = (noun: HeldNoun) => ({ word: `${noun.forms[0][0].toUpperCase()}${noun.forms[0].slice(1)}`, verb: ARRIVED[noun.gender] });
+const arrivedWords = (noun: HeldNoun) => ({ word: capital(noun.forms[0]), verb: ARRIVED[noun.gender] });
 export const arrivedText = (noun: HeldNoun, id: string): string => `${arrivedWords(noun).word} ${id} ${arrivedWords(noun).verb}.`;
 export const SELECT_ALL = "Выбрать все строки по фильтрам";
 export const SELECT_ROW = "Выбрать строку";
@@ -142,6 +163,10 @@ const FILL_FALLBACK = 50;
 // An open row and its detail read as one block (p1 cand-11) inside `@/ui`'s one `OPEN_FRAME`, the frame
 // `ExpandingFindings` draws too (design-4): the row its top and sides, the detail its sides and bottom; a link's
 // target keeps its ink mark on the row, and the ink frames its detail too.
+
+/** The current item of a list (the design check of pass 3): the muted ground plus 1 px of ink — on a table row the
+ * inset `shadow-target`, the target mark's own form; it wins over an edge mark, as on the rail. */
+const CURRENT_MARK = TARGET_MARK;
 
 /** The events that end a drag over the selection column. */
 const ENDS = ["pointerup", "pointercancel", "blur"] as const;
@@ -350,10 +375,26 @@ export function DataTable<R>(props: DataTableProps<R>) {
   }, [fillMode, tableShown]);
   const pageIds = pg.rows;
   const tabRow = focusId && pageIds.includes(focusId) ? focusId : (pageIds[0] ?? null);
-  /** Focus moved to a row by the keyboard: the kit's one row reveal (`revealRow`). */
-  const revealRowId = (rid: string) => {
+  // the current row handed to the view on every change (code-1)
+  const onCurrentChange = props.onCurrentChange;
+  const currentReported = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!onCurrentChange || !result || currentReported.current === tabRow) return;
+    currentReported.current = tabRow;
+    onCurrentChange(tabRow);
+  });
+  /** Focus in the table's part outside its rows and its text fields — where a digit is no text and the view's keys act
+   * on the current row, which then wears the current item's mark (craft-3). */
+  const [aside, setAside] = useState(false);
+  const onFocusIn = (event: ReactFocusEvent<HTMLDivElement>) => setAside(!isTextField(event.target) && !(event.target as Element).closest("tr[data-row-id], tr[data-detail-for]"));
+  const onFocusOut = (event: ReactFocusEvent<HTMLDivElement>) => {
+    if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) setAside(false);
+  };
+  /** Focus moved to a row by the keyboard or by a view: the kit's one row reveal (`revealRow`). */
+  const revealRowId = (rid: string): boolean => {
     const el = rowEls.current.get(rid);
     if (el) revealRow(el);
+    return Boolean(el);
   };
   useEffect(() => {
     if (!pendingFocus.current) return;
@@ -377,6 +418,21 @@ export function DataTable<R>(props: DataTableProps<R>) {
   // ── the cue of rows or a detail past the box's bottom edge (improve-3; the design check's convention): `@/ui`'s
   // one cue, shown while they run past it and hidden at the scroll's end (code-29) ──────────────────────
   const { past, measure: measurePast } = useOverflowCue(scroller, "bottom", tableShown);
+  // ── a table wider than its box (its columns' floor past a narrow region, craft-1): the cue at the box's right edge
+  // while the table runs past it, and an open detail's content held to the width the box shows, at its left edge, so
+  // what a detail says never runs past the box — measured before paint and on every resize of the box ───────────
+  const { past: pastEnd, measure: measureEnd } = useOverflowCue(scroller, "end", tableShown);
+  const [boxWidth, setBoxWidth] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!tableShown || !el) return;
+    // not laid out (a test without layout): the detail spans the table, as before any measure
+    const measure = () => setBoxWidth(el.clientWidth > 0 ? el.clientWidth : null);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [tableShown]);
 
   // ── selection (table #5; the design check: a checkbox column, Shift range, drag, Space; never a plain click) ─
   const toggleSelect = (rid: string) => {
@@ -469,6 +525,16 @@ export function DataTable<R>(props: DataTableProps<R>) {
   const columnVisibility: VisibilityState = Object.fromEntries(placed.map((p) => [p.column.id, p.visible]));
   const columnDefs = useMemo<ColumnDef<R>[]>(() => columns.map((c) => ({ id: c.id, header: c.label, accessorFn: (row: R) => c.text?.(row) ?? "" })), [columns]);
   const pageRowsData = useMemo(() => pageIds.map((x) => byId.get(x)).filter((r): r is R => r !== undefined), [pageIds, byId]);
+  // the view's handle (code-1): the rows this render draws, set in the commit's layout phase, so a view's effect after a
+  // page turn reads the page it asked for
+  const drawn = tableShown ? pageRowsData.map(rowId) : [];
+  const focusedRow = (): string | null => {
+    const at = document.activeElement;
+    const tr = at instanceof Element ? at.closest<HTMLElement>("tr[data-row-id], tr[data-detail-for]") : null;
+    if (!tr || !scroller.current?.contains(tr)) return null;
+    return tr.dataset.rowId ?? tr.dataset.detailFor ?? null;
+  };
+  useImperativeHandle(props.handle, () => ({ pageRows: () => drawn, reveal: revealRowId, focused: focusedRow }));
   // eslint-disable-next-line react-hooks/incompatible-library
   const model = useReactTable({
     data: pageRowsData,
@@ -700,7 +766,10 @@ export function DataTable<R>(props: DataTableProps<R>) {
         ref={scroller}
         data-slot="table-scroll"
         onWheel={onWheel}
-        onScroll={measurePast}
+        onScroll={() => {
+          measurePast();
+          measureEnd();
+        }}
         className="size-full scroll-pt-8 overflow-auto rounded-lg border [scrollbar-gutter:stable] [&>[data-slot=table-container]]:overflow-visible"
       >
         <Table aria-label={label} className="table-fixed border-separate border-spacing-0" style={{ minWidth }}>
@@ -742,6 +811,7 @@ export function DataTable<R>(props: DataTableProps<R>) {
                 const isSelected = selected.has(rid);
                 const mark = { ...(marks?.(row) ?? {}), target: rid === target || undefined };
                 const mp = markProps(mark);
+                const current = Boolean(onCurrentChange) && aside && rid === tabRow;
                 return (
                   <Fragment key={rid}>
                     <TableRow
@@ -755,12 +825,13 @@ export function DataTable<R>(props: DataTableProps<R>) {
                       data-outside={outside ? "" : undefined}
                       data-edge={mp["data-edge"]}
                       data-target={mp["data-target"]}
+                      data-current={current ? "" : undefined}
                       aria-expanded={detail ? isOpen : undefined}
                       tabIndex={rid === tabRow ? 0 : -1}
                       onClick={(e) => onRowClick(e, row)}
                       onFocus={(e) => e.target === e.currentTarget && setFocusId(rid)}
                       onContextMenu={() => onContextMenu(rid)}
-                      className={cn("h-8 outline-none focus:ring-2 focus:ring-ring focus:ring-inset data-[menu]:bg-muted", pin ? "cursor-pointer" : "cursor-default", isOpen && [OPEN_FRAME.muted, OPEN_FRAME.row], mp.className)}
+                      className={cn("h-8 outline-none focus:ring-2 focus:ring-ring focus:ring-inset data-[menu]:bg-muted", pin ? "cursor-pointer" : "cursor-default", isOpen && [OPEN_FRAME.muted, OPEN_FRAME.row], mp.className, current && CURRENT_MARK)}
                     >
                       <TableCell
                         className="border-b px-2 py-0"
@@ -814,7 +885,9 @@ export function DataTable<R>(props: DataTableProps<R>) {
                     {isOpen && detail && (
                       <TableRow data-detail-for={rid} className="hover:bg-transparent">
                         <TableCell colSpan={ordered.length + (slack ? 1 : 2)} className={cn("border-b bg-muted p-0 whitespace-normal", rid === target ? OPEN_FRAME.target : OPEN_FRAME.muted, OPEN_FRAME.detail)}>
-                          <div className="px-4 py-3">{detail(row)}</div>
+                          <div data-slot="row-detail" className="sticky left-0 px-4 py-3" style={boxWidth === null ? undefined : { width: boxWidth }}>
+                            {detail(row)}
+                          </div>
                         </TableCell>
                       </TableRow>
                     )}
@@ -828,7 +901,7 @@ export function DataTable<R>(props: DataTableProps<R>) {
     );
 
   return (
-    <div data-slot="data-table" className={cn("@container flex size-full min-h-0 flex-col gap-2", className)}>
+    <div data-slot="data-table" onFocus={onFocusIn} onBlur={onFocusOut} className={cn("@container flex size-full min-h-0 flex-col gap-2", className)}>
       <AdaptiveToolbar items={items} label={`Фильтры: ${label}`} />
       {(notice || arrived !== null) && (
         <div data-slot="table-notice" className="flex h-7 shrink-0 items-center overflow-hidden text-sm whitespace-nowrap">
@@ -838,6 +911,7 @@ export function DataTable<R>(props: DataTableProps<R>) {
       <div ref={region} data-slot="table-region" className="relative min-h-0 flex-1">
         {body}
         {tableShown && <OverflowCue edge="bottom" shown={past} className="rounded-lg" />}
+        {tableShown && <OverflowCue edge="end" shown={pastEnd} className="rounded-lg" />}
       </div>
       <HeldStrip counts={held.counts} noun={noun} onApply={() => setFrozen({ key: queryKey, ids: resultIds })} className="-mt-2 border-t-0" />
       <StatusBar
@@ -916,7 +990,9 @@ function HeaderCell<R>({ column, sort, onSort, width, onResizeStart, onResizeKey
       <div className={cn("flex min-w-0 items-center gap-1", column.numeric && "justify-end")}>
         {column.glossary ? (
           <>
-            <GlossaryTooltip term={column.label} entries={column.glossary} className="truncate" />
+            {/* the box that truncates the term clips at its padding edge: 4 px above and below hold the dotted
+                underline's 4 px offset inside it, so the term keeps its mark (craft-4), centred in the 32 px header */}
+            <GlossaryTooltip term={column.label} entries={column.glossary} className="truncate py-1" />
             {sortable && (
               <button type="button" aria-label={sortLabel} onClick={onSort} className="flex size-4 shrink-0 items-center justify-center rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 [&_svg]:size-3.5">
                 {sortIcon(dir)}

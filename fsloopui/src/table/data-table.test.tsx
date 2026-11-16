@@ -4,14 +4,14 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Profiler, useState, type ReactElement } from "react";
+import { createRef, Profiler, useState, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { NOUNS } from "../../shared/text.ts";
 import { applyStylesheet, usedBlockSize } from "../app/layout-testing.ts";
 import { OPEN_FRAME } from "../ui/marks.tsx";
 import { UiProvider } from "../ui/provider.tsx";
 import { COLLAPSE_BLOCKED, collapseAllLabel } from "./collapse-all.tsx";
-import { arrivedText, DataTable, revealRow, type DataTableProps, type TableColumn } from "./data-table.tsx";
+import { arrivedText, DataTable, revealRow, type DataTableProps, type TableColumn, type TableHandle } from "./data-table.tsx";
 import { filterSummary, presetFills } from "./filters.tsx";
 import type { FilterDef, Preset, SearchDef } from "./query.ts";
 import { copyAction, type RowAction } from "./row-menu.tsx";
@@ -56,7 +56,10 @@ const COLUMNS: TableColumn<F>[] = [
   { id: "location", label: "Место", width: 200, hidden: true, cell: () => "src/x.tsx" },
 ];
 
-const UNIT_OPTIONS = Array.from({ length: 8 }, (_, i) => ({ value: `u${i + 1}`, label: `u${i + 1}` }));
+/** The same columns, «Серьёзность» with its glossary on the header's dotted term (ui → Glossary). */
+const GLOSSED: TableColumn<F>[] = [{ ...COLUMNS[0], glossary: [{ value: "critical", meaning: "ломает работу или данные: читать первой" }] }, ...COLUMNS.slice(1)];
+
+const UNIT_OPTIONS =Array.from({ length: 8 }, (_, i) => ({ value: `u${i + 1}`, label: `u${i + 1}` }));
 const FILTERS: FilterDef<F>[] = [
   { id: "severity", label: "Серьёзность", values: (r) => [r.severity], options: (["critical", "major", "minor"] as const).map((v) => ({ value: v, label: v })) },
   { id: "status", label: "Состояние", values: (r) => [r.status], options: (["candidate", "in-progress", "fixed"] as const).map((v) => ({ value: v, label: v })) },
@@ -1143,6 +1146,59 @@ describe("p2-assess-critic-improve#improve-3: the table kit, read at a glance", 
     expect(getComputedStyle(cue()).visibility).toBe("hidden");
   });
 
+  test("p3-verdict-critic-craft-verdict#craft-1: a table wider than its box (at 900: the 886 px floor in an 830 px box) — an open detail's content stands inside the box, held to its visible width at its left edge while the table scrolls sideways, and the box's right edge carries the cue while the table runs past it", async () => {
+    const callbacks: (() => void)[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(cb: () => void) {
+          callbacks.push(cb);
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    let inside = 830;
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.slot === "table-scroll" ? inside : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.slot === "table-scroll" ? 886 : 0;
+    });
+    const user = userEvent.setup();
+    const { container } = renderUi(view());
+    await user.click(within(row("f-002")).getByText("f-002"));
+    const content = (document.querySelector("tr[data-detail-for]") as HTMLElement).querySelector("[data-slot=row-detail]") as HTMLElement;
+    expect(content).toHaveTextContent(/^Деталь f-002$/);
+    await applyStylesheet();
+    const s = getComputedStyle(content);
+    // pinned to the box's left edge, as wide as the box shows: «Решение прогона» and the verdict's toggles stand in it
+    expect([s.position, s.left, s.width, s.boxSizing]).toEqual(["sticky", "0px", "830px", "border-box"]);
+    // the box's right edge: one inset hairline of muted ink over the box (light #6d6d69), taking no room
+    const end = container.querySelector("[data-slot=overflow-cue][data-cue-edge=end]") as HTMLElement;
+    const c = getComputedStyle(end);
+    expect(c.visibility).toBe("visible");
+    expect([c.position, c.top, c.right, c.bottom, c.left, c.pointerEvents]).toEqual(["absolute", "0px", "0px", "0px", "0px", "none"]);
+    expect(c.boxShadow.replace(/rgba\(0, 0, 0, 0\) 0px 0px, /g, "")).toBe("rgb(109, 109, 105) -1px 0px inset");
+    expect(end.parentElement).toHaveAttribute("data-slot", "table-region");
+    // scrolled to the table's end: nothing runs past the right edge — the cue hides; back, it shows again
+    const box = container.querySelector("[data-slot=table-scroll]") as HTMLElement;
+    box.scrollLeft = 56;
+    fireEvent.scroll(box);
+    await applyStylesheet();
+    expect(getComputedStyle(end).visibility).toBe("hidden");
+    box.scrollLeft = 0;
+    fireEvent.scroll(box);
+    await applyStylesheet();
+    expect(getComputedStyle(end).visibility).toBe("visible");
+    // the box resized (a narrower window): the detail keeps to its new width
+    inside = 760;
+    act(() => callbacks.forEach((cb) => cb()));
+    await applyStylesheet();
+    expect(getComputedStyle(content).width).toBe("760px");
+  });
+
   test("p3-review-critic-code#code-28: the cue's look is the theme's — `--shadow-overflow` and `--shadow-overflow-end` in the theme, and no product part writes an arbitrary shadow", () => {
     const src = join(__dirname, "..");
     const css = readFileSync(join(src, "styles", "index.css"), "utf8").replace(/\r\n/g, "\n");
@@ -1212,6 +1268,131 @@ describe("p2-assess-critic-improve#improve-3: the table kit, read at a glance", 
     } finally {
       proto.scrollIntoView = before;
     }
+  });
+
+  test("p3-verdict-critic-craft-verdict#craft-4: a header's glossary term shows its dotted underline — the box that truncates it holds the underline's offset inside, above and below alike, within the header's 32 px", async () => {
+    renderUi(view({ columns: GLOSSED }));
+    const term = within(header("Серьёзность")).getByRole("button", { name: "Серьёзность" });
+    await applyStylesheet();
+    const s = getComputedStyle(term);
+    const px = (v: string) => Number.parseFloat(v) || 0;
+    // the term's mark: a dotted underline 4 px under the text
+    expect([s.getPropertyValue("text-decoration-line"), s.getPropertyValue("text-decoration-style"), s.getPropertyValue("text-underline-offset")]).toEqual(["underline", "dotted", "4px"]);
+    // still one line, truncated against its column (table #10)
+    expect([s.overflowX, s.textOverflow, s.whiteSpace]).toEqual(["hidden", "ellipsis", "nowrap"]);
+    // the clip box reaches past the underline: its padding under the line holds the offset, and the same above keeps
+    // the term on the header's centre line beside the plain headers
+    expect(px(s.paddingBottom)).toBeGreaterThanOrEqual(px(s.getPropertyValue("text-underline-offset")));
+    expect(px(s.paddingTop)).toBe(px(s.paddingBottom));
+    // the box fits the header's 32 px, which stays 32 px: nothing in the row moves (Strict 1)
+    expect(px(s.lineHeight) + px(s.paddingTop) + px(s.paddingBottom)).toBeLessThanOrEqual(32);
+    expect(usedBlockSize(header("Серьёзность"))).toBe(32);
+  });
+
+  test("p3-verdict-critic-code-verdict#code-1: the kit hands its view the table's current row — its Tab stop — whenever it changes: the page's first row, the row focus was last on, the first row of a page turned to", async () => {
+    const onCurrentChange = vi.fn();
+    const user = userEvent.setup();
+    renderUi(view({ onCurrentChange }));
+    expect(onCurrentChange).toHaveBeenLastCalledWith("f-001");
+    act(() => row("f-005").focus());
+    expect(onCurrentChange).toHaveBeenLastCalledWith("f-005");
+    expect(row("f-005")).toHaveAttribute("tabindex", "0");
+    await user.keyboard("{ArrowDown}");
+    expect(onCurrentChange).toHaveBeenLastCalledWith("f-006");
+    // page 2: its first row is the stop
+    await user.keyboard("{ArrowRight}");
+    expect(pageIds()[0]).toBe("f-051");
+    expect(onCurrentChange).toHaveBeenLastCalledWith("f-051");
+    // reported on a change only
+    const calls = onCurrentChange.mock.calls.length;
+    act(() => row("f-051").focus());
+    expect(onCurrentChange).toHaveBeenCalledTimes(calls);
+  });
+
+  test("p3-verdict-critic-code-verdict#code-1 (follow-up): the kit's handle gives its view the rows of the page it shows, in order, and reveals one by id through the kit's one row reveal — so a view walks the rows without the kit's markup", async () => {
+    const into = vi.fn();
+    const proto = HTMLElement.prototype as unknown as { scrollIntoView: unknown };
+    const before = proto.scrollIntoView;
+    proto.scrollIntoView = into;
+    try {
+      const handle = createRef<TableHandle>();
+      const user = userEvent.setup();
+      renderUi(view({ handle, rows: FEW, defaultSort: { id: "severity", desc: false } }));
+      const t = handle.current as TableHandle;
+      // the page as the table shows it: sorted, its rows in their order
+      expect(t.pageRows()).toEqual(pageIds());
+      expect(t.pageRows().slice(0, 3)).toEqual(["f-001", "f-011", "f-004"]);
+      // a row on the page: focused and brought into the box, never by scrollIntoView
+      let done = false;
+      act(() => {
+        done = t.reveal("f-004");
+      });
+      expect(done).toBe(true);
+      expect(row("f-004")).toHaveFocus();
+      expect(into).not.toHaveBeenCalled();
+      // an id the page does not show: nothing moves, and the caller hears so
+      act(() => {
+        done = t.reveal("f-999");
+      });
+      expect(done).toBe(false);
+      expect(row("f-004")).toHaveFocus();
+      // the row focus is in: its own line, or anything in its open detail; none off the rows
+      expect(t.focused()).toBe("f-004");
+      await user.click(within(row("f-011")).getByText("f-011"));
+      const inDetail = document.createElement("button");
+      act(() => {
+        (document.querySelector("tr[data-detail-for] [data-slot=row-detail]") as HTMLElement).append(inDetail);
+        inDetail.focus();
+      });
+      expect(t.focused()).toBe("f-011");
+      act(() => screen.getByRole("button", { name: "Столбцы" }).focus());
+      expect(t.focused()).toBeNull();
+      // the handle follows the table: a search narrows the page, and the handle reads the new one
+      await user.type(screen.getByRole("searchbox"), "f-011 f-004");
+      expect((handle.current as TableHandle).pageRows()).toEqual(["f-011", "f-004"]);
+    } finally {
+      proto.scrollIntoView = before;
+    }
+  });
+
+  test("p3-verdict-critic-craft-verdict#craft-3: a view that takes the current row marks it while focus is in the table's part outside its rows — the muted ground and 1 px of ink, inside the row's box; on a row, in a text field or outside the table, no mark", async () => {
+    renderUi(view({ onCurrentChange: () => {} }));
+    const columns = screen.getByRole("button", { name: "Столбцы" });
+    act(() => row("f-005").focus());
+    // on the row itself: its own focus ring, no second mark
+    expect(document.querySelector("tr[data-current]")).toBeNull();
+    // on the toolbar: the row the view's keys act on is marked, alone
+    act(() => columns.focus());
+    expect([...document.querySelectorAll<HTMLElement>("tr[data-current]")].map((tr) => tr.dataset.rowId)).toEqual(["f-005"]);
+    await applyStylesheet();
+    const s = getComputedStyle(row("f-005"));
+    // the current item's form (the design check of pass 3): the muted ground (light #f0f0ed) and an inset 1 px of
+    // ink (light #1b1b1a) — drawn inside, so the row keeps its 32 px and nothing moves (Strict 1)
+    expect(s.backgroundColor).toBe("rgb(240, 240, 237)");
+    expect(s.boxShadow.replace(/rgba\(0, 0, 0, 0\) 0px 0px, /g, "")).toBe("rgb(27, 27, 26) 0px 0px 0px 1px inset");
+    expect(usedBlockSize(row("f-005"))).toBe(32);
+    // the status bar is the table's part too
+    act(() => within(screen.getByRole("navigation", { name: "Страницы" })).getAllByRole("button")[0].focus());
+    expect(row("f-005")).toHaveAttribute("data-current");
+    // in the search a digit is text, so no row is the keys' target
+    act(() => screen.getByRole("searchbox").focus());
+    expect(document.querySelector("tr[data-current]")).toBeNull();
+    act(() => columns.focus());
+    expect(row("f-005")).toHaveAttribute("data-current");
+    // back on a row: the ring, not the mark
+    act(() => row("f-007").focus());
+    expect(document.querySelector("tr[data-current]")).toBeNull();
+    // focus out of the table: no mark
+    act(() => columns.focus());
+    act(() => columns.blur());
+    expect(document.querySelector("tr[data-current]")).toBeNull();
+  });
+
+  test("p3-verdict-critic-craft-verdict#craft-3: a table whose view takes no current row («Юниты») marks none, wherever focus is", () => {
+    renderUi(view());
+    act(() => row("f-005").focus());
+    act(() => screen.getByRole("button", { name: "Столбцы" }).focus());
+    expect(document.querySelector("tr[data-current]")).toBeNull();
   });
 
   test("design-22: the columns menu's list, drawn `list-none`, keeps its list role", async () => {

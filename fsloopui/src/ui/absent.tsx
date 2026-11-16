@@ -5,7 +5,7 @@
 // (`highlight`, table #12).
 import type { ReactNode } from "react";
 import { NOT_RECORDED } from "../../shared/states.ts";
-import { count, NOUNS } from "../../shared/text.ts";
+import { capital, count, NOUNS } from "../../shared/text.ts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Gender } from "./part-failed.tsx";
@@ -56,7 +56,6 @@ export const numberText = (kind: ObjectKind, id: string): string => (isNumbered(
 /** The numbers a list holds, first to last: «#1–#43», «#5», «1–26». */
 export const numberRange = (kind: NumberedKind, first: string, last: string): string => (first === last ? numberText(kind, first) : `${numberText(kind, first)}–${numberText(kind, last)}`);
 
-const capital = (word: string) => word[0].toUpperCase() + word.slice(1);
 
 /** «юнит u7 не найден», «находка p1-review-craft#craft-3 не найдена», «решение #12 не найдено»; `start` capitalises a
  * sentence's start. */

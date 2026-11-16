@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { addSpend, ago, count, duration, mskDateTime, mskTime, NOUNS, plural, spendBy, tokens } from "./text.ts";
+import { addSpend, ago, capital, count, duration, mskDateTime, mskTime, NOUNS, plural, spendBy, tokens } from "./text.ts";
 
 // Words as a reader counts them: a no-break space binds a grouped number into one.
 const words = (s: string) => s.split(/[ \t\n]+/).filter(Boolean).length;
@@ -47,6 +47,19 @@ describe("duration (rules/ui → Conventions 10)", () => {
   test("a negative or missing span reads as no duration", () => {
     expect(duration(null)).toBe("—");
     expect(duration(-5)).toBe("меньше минуты");
+  });
+});
+
+describe("p3-verdict-critic-code-verdict-2#code-3: one capitalisation (code → No duplication)", () => {
+  test("the first letter up, the rest as written — the one rule a sentence's first word takes", () => {
+    expect(capital("юнит")).toBe("Юнит");
+    expect(capital("находка")).toBe("Находка");
+    expect(capital("решение")).toBe("Решение");
+    expect(capital("соглашение")).toBe("Соглашение");
+    // the rest of the word is kept as written, an id inside it too
+    expect(capital("отчёт p1-map-craft")).toBe("Отчёт p1-map-craft");
+    expect(capital("Юниты")).toBe("Юниты");
+    expect(capital("")).toBe("");
   });
 });
 

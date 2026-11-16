@@ -3,6 +3,7 @@
 // number is a link to its address, opened in place — the view replaces the key — and a right click on the object
 // opens its menu, «Скопировать адрес <чего>», which copies the whole address to paste elsewhere.
 import type { MouseEvent, ReactElement, ReactNode } from "react";
+import { capital } from "../../shared/text.ts";
 import { cn } from "@/lib/utils";
 import { NUMBERED, numberText, OBJECT_WORDS, type NumberedKind } from "./absent.tsx";
 import { LINK_LOOK } from "./link-button.tsx";
@@ -19,7 +20,7 @@ export const addressLabel = (kind: NumberedKind, id: string): string => `Ссы�
  * «Решение #40: <вопрос>», «Соглашение 12: <образец>» — so ↑/↓ announce which item and what it holds (craft-5). */
 export const itemName = (kind: NumberedKind, id: string, lead: string): string => {
   const { word } = OBJECT_WORDS[kind];
-  return `${word[0].toUpperCase()}${word.slice(1)} ${numberText(kind, id)}: ${lead}`;
+  return `${capital(word)} ${numberText(kind, id)}: ${lead}`;
 };
 
 export interface AddressLinkProps {

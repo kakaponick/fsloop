@@ -139,6 +139,43 @@ describe("p3-review-critic-craft#craft-6: keys 1–4 with focus in the view on n
   });
 });
 
+describe("p3-verdict-critic-craft-verdict#craft-3, p3-verdict-critic-code-verdict#code-1: the row keys 1–4 will rate from outside the rows", () => {
+  test("wears the current mark while focus is on the toolbar or the status bar, and is the row the kit hands the view: the key rates it and goes on", async () => {
+    const user = userEvent.setup({ delay: null });
+    const view = renderFindings(app, KEY, runPath(KEY, { view: "findings" }));
+    await loaded();
+    // two findings no other case of this file rates: the last two of the run's single page
+    const [x, y] = ["p1-map-craft-schedules#craft-11", "p1-map-craft-dialogs#cand-1"];
+    expect([x, y].every(unrated)).toBe(true);
+    const marked = () => [...document.querySelectorAll<HTMLElement>("tr[data-current]")].map((tr) => tr.dataset.rowId);
+    // on the row: its own ring, no second mark
+    row(x).focus();
+    expect(marked()).toEqual([]);
+    // on the toolbar: the row the key will rate is marked, alone
+    view.getByRole("button", { name: "Свернуть все находки" }).focus();
+    await waitFor(() => expect(marked()).toEqual([x]));
+    // on the status bar too
+    within(pager()).getAllByRole("button")[0].focus();
+    expect(marked()).toEqual([x]);
+    // in the search a digit is text: no row is marked, nothing is rated
+    const sent = app.sent.length;
+    await user.click(screen.getByRole("searchbox"));
+    expect(marked()).toEqual([]);
+    await user.keyboard("1");
+    expect(app.sent).toHaveLength(sent);
+    await user.clear(screen.getByRole("searchbox"));
+    // back on the toolbar: «3» rates the marked row, and focus goes on to the next one without a verdict
+    view.getByRole("button", { name: "Свернуть все находки" }).focus();
+    await waitFor(() => expect(marked()).toEqual([x]));
+    await user.keyboard("3");
+    expect(verdictCell(x)).toHaveTextContent("не та серьёзность");
+    expect(document.activeElement).toBe(row(y));
+    expect(marked()).toEqual([]);
+    await waitFor(() => expect(sentFor(x)).toEqual([{ run: KEY, findings: [x], verdict: "wrong-severity", note: null }]));
+    view.unmount();
+  });
+});
+
 describe("p2-assess-critic-improve#improve-14: rating keeps its pace", () => {
   afterEach(() => {
     writePref(tableKey(FINDINGS_TABLE), null);

@@ -1,6 +1,10 @@
 // Every built word of fsloopUI that carries a number or a time: the plural, Moscow time, durations, tokens.
 // The server and the client read these; no surface formats a number, a time or a span on its own.
 
+/** A word that opens a sentence: its first letter up, the rest as written («юнит» → «Юнит»). The one capitalisation
+ * of fsloopUI (code-3): the not-found line, the empty state, a numbered item's name, the arrived line. */
+export const capital = (word: string): string => word.charAt(0).toUpperCase() + word.slice(1);
+
 /** The three Russian forms of a noun: for 1, for 2–4, for 5–20 and 0. */
 export type Forms = readonly [one: string, few: string, many: string];
 
