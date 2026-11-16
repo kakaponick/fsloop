@@ -265,11 +265,13 @@ describe("menu", () => {
       for (const name of readdirSync(dir)) {
         const p = join(dir, name);
         if (statSync(p).isDirectory()) walk(p);
-        else if (/\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) && /=\s*"место"/.test(readFileSync(p, "utf8"))) written.push(relative(src, p).replace(/\\/g, "/"));
+        // any string literal of the word — an assignment, a call's argument, a template — in any quotes
+        else if (/\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) && /(["'`])место\1/.test(readFileSync(p, "utf8"))) written.push(relative(src, p).replace(/\\/g, "/"));
       }
     };
     walk(src);
-    expect(written).toEqual(["ui/menu.tsx"]);
+    // the one exception by name: the fact label «место» of a finding's facts is a label, not the copy word
+    expect(written.sort()).toEqual(["finding/words.ts", "ui/menu.tsx"]);
   });
 
   test("a context menu with a header, an item's id, shortcut and blocked reason, and a choice in a submenu", async () => {

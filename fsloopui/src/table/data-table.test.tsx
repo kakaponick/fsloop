@@ -40,6 +40,8 @@ const make = (n: number, from = 0): F[] =>
     };
   });
 const ROWS = make(60);
+/** The first 20: a walk that needs no second page renders 20 rows, not 50, on each of its re-renders (p1 code-1). */
+const FEW = ROWS.slice(0, 20);
 
 const COLUMNS: TableColumn<F>[] = [
   { id: "severity", label: "Серьёзность", width: 112, rank: (r) => SEV[r.severity], cell: (r) => r.severity, text: (r) => r.severity },
@@ -332,7 +334,8 @@ describe("selection (table #5; the design check)", () => {
     fireEvent.contextMenu(row("f-002"));
     expect(within(await screen.findByRole("menu")).getByText("60 находок")).toBeInTheDocument();
     await user.keyboard("{Escape}");
-    await user.type(screen.getByRole("searchbox"), "f-00");
+    await user.click(screen.getByRole("searchbox"));
+    await user.paste("f-00");
     expect(screen.getByRole("checkbox", { name: "Выбрать все строки по фильтрам" })).toHaveAttribute("aria-checked", "false");
   });
 });
@@ -366,7 +369,7 @@ describe("the row menu and the pin (table #4, #13; rules/ui → Tables 4)", () =
 
   test("a selection: the count in the header, the multi items, every selected row the table knows", async () => {
     const user = userEvent.setup();
-    const { rerender } = renderUi(view());
+    const { rerender } = renderUi(view({ rows: FEW }));
     for (const id of ["f-001", "f-002", "f-003"]) await user.click(within(row(id)).getByRole("checkbox"));
     fireEvent.contextMenu(row("f-002"));
     let menu = await screen.findByRole("menu");
@@ -375,7 +378,7 @@ describe("the row menu and the pin (table #4, #13; rules/ui → Tables 4)", () =
     await user.click(within(menu).getByRole("menuitem", { name: "Оценить 3 находки…" }));
     expect(rate).toHaveBeenCalledWith(["f-001", "f-002", "f-003"]);
     // a selected row the data no longer holds degrades the header
-    rerender(view({ rows: ROWS.filter((r) => r.id !== "f-001") }));
+    rerender(view({ rows: FEW.filter((r) => r.id !== "f-001") }));
     fireEvent.contextMenu(row("f-002"));
     menu = await screen.findByRole("menu");
     expect(within(menu).getByText("2 из 3 находок")).toBeInTheDocument();
@@ -567,6 +570,61 @@ describe("a row brought into view (craft-1; rules/ui → Conventions 12)", () =>
       expect(detailRow.getBoundingClientRect().bottom).toBeLessThanOrEqual(100 + 480);
     });
 
+  test("p2-verdict-critic-code-verdict-2#verdict-2: a link's row is scrolled to once, on its measured page — a later change of the measured page size leaves the user's scroll where it is", () => {
+    let scrolled = 0;
+    const scrollBy = vi.fn(({ top }: { top: number }) => {
+      scrolled += top;
+    });
+    (HTMLElement.prototype as unknown as { scrollBy: unknown }).scrollBy = scrollBy;
+    const callbacks: (() => void)[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(cb: () => void) {
+          callbacks.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    // the box 480 px inside → 14 rows; a window resize later makes it 640 → 19
+    let inner = 480;
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.slot === "table-scroll" ? inner : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const rect = (top: number, height: number) => ({ top, bottom: top + height, height, width: 0, x: 0, y: top, left: 0, right: 0, toJSON: () => ({}) }) as DOMRect;
+      if (this.dataset.slot === "table-scroll") return rect(100, inner);
+      if (this.tagName === "THEAD") return rect(100, 32);
+      if (this.tagName === "TR" && this.parentElement?.tagName === "TBODY") {
+        let top = 132 - scrolled;
+        for (const tr of this.parentElement.children) {
+          if (tr === this) break;
+          top += (tr as HTMLElement).dataset.detailFor ? 240 : 32;
+        }
+        return rect(top, this.dataset.detailFor ? 240 : 32);
+      }
+      return rect(0, 0);
+    });
+    try {
+      renderUi(view({ rows: make(200), target: "f-151", open: ["f-151"] }));
+      expect(pageIds()).toHaveLength(14);
+      expect(row("f-151").getBoundingClientRect().top).toBe(132);
+      // the user scrolls the box back up by 100 px, then resizes the window
+      scrolled -= 100;
+      scrollBy.mockClear();
+      inner = 640;
+      act(() => callbacks.forEach((cb) => cb()));
+      expect(pageIds()).toHaveLength(19);
+      expect(pageIds()).toContain("f-151");
+      // the box keeps the user's scroll: 320 down to the link's row, 100 back up
+      expect(scrollBy).not.toHaveBeenCalled();
+      expect(scrolled).toBe(220);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   test("gap 5 (f12): a row the caller opens — a verdict key moving on to the next row — is brought into view as one the user expands", () => {
     const scrollBy = layout();
     const { rerender } = renderUi(view({ open: [] }));
@@ -661,13 +719,16 @@ describe("the adaptive toolbar (table #11, #12, #14; rules/ui → Conventions 16
 
   test("search with history: a committed term is kept per table and chosen again", async () => {
     const user = userEvent.setup();
-    const { unmount } = renderUi(view());
-    await user.type(screen.getByRole("searchbox"), "f-01{Enter}");
+    const { unmount } = renderUi(view({ rows: FEW }));
+    // the term as one paste, then Enter: the history is under test, not the keystrokes (each would re-render the page)
+    await user.click(screen.getByRole("searchbox"));
+    await user.paste("f-01");
+    await user.keyboard("{Enter}");
     expect(pageIds()).toEqual(["f-010", "f-011", "f-012", "f-013", "f-014", "f-015", "f-016", "f-017", "f-018", "f-019"]);
     expect(within(row("f-010")).getByText("f-01", { selector: "mark" })).toBeInTheDocument();
     expect(stored("table:findings").history).toEqual(["f-01"]);
     unmount();
-    renderUi(view({ runKey: "tga/other" }));
+    renderUi(view({ rows: FEW, runKey: "tga/other" }));
     expect(screen.getByRole("searchbox")).toHaveValue("");
     await user.click(screen.getByRole("button", { name: "Недавние запросы" }));
     await user.click(await screen.findByRole("menuitem", { name: "f-01" }));
@@ -909,8 +970,9 @@ describe("view state (table #7; rules/ui → Tables 4, Conventions 12)", () => {
   test("filters and search per table and run, sort and page size per table; restored on return; never in the URL", async () => {
     const user = userEvent.setup();
     const url = window.location.href;
-    const { unmount } = renderUi(view());
-    await user.type(screen.getByRole("searchbox"), "row");
+    const { unmount } = renderUi(view({ rows: FEW }));
+    await user.click(screen.getByRole("searchbox"));
+    await user.paste("row");
     await user.click(screen.getByRole("button", { name: "Сортировать: Отчёт" }));
     screen.getByRole("combobox", { name: "Состояние" }).focus();
     await user.keyboard("{Enter}");
@@ -920,12 +982,12 @@ describe("view state (table #7; rules/ui → Tables 4, Conventions 12)", () => {
     expect(stored("table:findings:run:tga/a098a7d4")).toEqual({ filters: { status: ["candidate"] }, search: "row" });
     expect(window.location.href).toBe(url);
     unmount();
-    const again = renderUi(view());
+    const again = renderUi(view({ rows: FEW }));
     expect(screen.getByRole("searchbox")).toHaveValue("row");
     expect(screen.getByRole("combobox", { name: "Состояние" })).toHaveTextContent("candidate");
     expect(header("Отчёт")).toHaveAttribute("aria-sort", "descending");
     again.unmount();
-    renderUi(view({ runKey: "tga/other" }));
+    renderUi(view({ rows: FEW, runKey: "tga/other" }));
     expect(screen.getByRole("searchbox")).toHaveValue("");
     expect(header("Отчёт")).toHaveAttribute("aria-sort", "descending");
   });

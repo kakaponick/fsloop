@@ -9,11 +9,12 @@ import { afterAll, describe, expect, test } from "vitest";
 import type { Finding } from "../../../shared/model.ts";
 import { FINDING_STATUS, SEVERITY, VERDICT, type Verdict } from "../../../shared/states.ts";
 import { readRun } from "../../../server/run.ts";
-import { emptyStateText, glossaryLines, UiProvider } from "@/ui";
+import { emptyStateText, glossaryLines, UiProvider, writePref } from "@/ui";
+import { tableKey } from "@/table/view-state.ts";
 import { ANY_LABEL, assertLayout, CUSTOM_LABEL, fitsRegion, FRAME, headerWidth, isSelectFilter, mergeWidths, pack, PRESET_LABEL, runQuery, SELECT_WIDTH, type FilterDef, type PackItem } from "@/table";
 import { FLEX_FLOOR, GAP, OVERFLOW_WIDTH } from "@/table/toolbar.tsx";
 import { CAUSE, CONFIDENCE, countFindings, enumFact, FACT, FindingArticle, findingNotFound, openFindings, reportWord, SECTION, stateText, textSections } from "@/finding";
-import { OBJECTED } from "@/finding/facets.ts";
+import { FINDINGS_TABLE, OBJECTED } from "@/finding/facets.ts";
 import { textWidth as measure } from "../../app/layout-testing.ts";
 import { renderShell } from "../../app/testing.tsx";
 import { runPath } from "../../app/routes.ts";
@@ -288,7 +289,8 @@ describe("the task walk over u1's handler (surfaces/findings.md → WALK)", () =
     await user.paste("p1-review-critic-parity");
     await waitFor(() => expect(bodyRows()).toHaveLength(10));
     expect(bar).toHaveTextContent("10 из 723 находок");
-    await user.clear(search);
+    // the term replaced whole, as a select-all and a paste do: no page of 50 rendered between the two searches
+    await user.tripleClick(search);
     await user.paste("ни-одной-такой-находки");
     expect(await screen.findByText("Нет находок, подходящих под фильтры")).toBeInTheDocument();
     expect(screen.getByText("Фильтры: Поиск: «ни-одной-такой-находки»")).toBeInTheDocument();
@@ -298,8 +300,10 @@ describe("the task walk over u1's handler (surfaces/findings.md → WALK)", () =
 
   test("4–6: rows expand in place, several at once; the detail's sections; the decision's units; frames; the row menu", async () => {
     const user = userEvent.setup({ delay: null });
+    // a page of 10: the walk needs two rows, and every expand, menu and selection re-renders the page (p1 code-1)
+    writePref(tableKey(FINDINGS_TABLE), { pageSize: 10 });
     renderFindings(app, KEY, runPath(KEY, { view: "findings" }));
-    await loaded();
+    await waitFor(() => expect(bodyRows()).toHaveLength(10), { timeout: 4000 });
     const [a, b] = [bodyRows()[0].dataset.rowId as string, bodyRows()[1].dataset.rowId as string];
     await user.click(row(a).querySelector("td[data-col=summary]") as HTMLElement);
     await user.click(row(b).querySelector("td[data-col=summary]") as HTMLElement);

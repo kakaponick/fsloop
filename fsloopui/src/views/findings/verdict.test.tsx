@@ -10,7 +10,11 @@ import { afterAll, describe, expect, test } from "vitest";
 import { criticReport, lines } from "../../../fixtures/make.ts";
 import { readRun } from "../../../server/run.ts";
 import { runPath } from "../../app/routes.ts";
-import { DIALOG_PROMPT, failedCause, NOTE_SAVE, NOTE_UNSAVED, NOTE_UNSAVED_FIRST, SAVE_FAILED, SECTION, verdictLine, verdictTitle, verdictValue, VERDICT_PROMPT } from "@/finding";import { findingsApp, keyOf, MIN, NOW, renderFindings } from "./testing.tsx";
+import { DIALOG_PROMPT, failedCause, NOTE_SAVE, NOTE_UNSAVED, NOTE_UNSAVED_FIRST, SAVE_FAILED, SECTION, verdictLine, verdictTitle, verdictValue, VERDICT_PROMPT } from "@/finding";
+import { FINDINGS_TABLE } from "@/finding/facets.ts";
+import { tableKey } from "@/table/view-state.ts";
+import { writePref } from "@/ui";
+import { findingsApp, keyOf, MIN, NOW, renderFindings } from "./testing.tsx";
 
 // A live fixture run whose second critic of the map reported 14 findings: one page holds every row, and a
 // selection of 12 fits it (the 723-finding run is view.test.tsx's).
@@ -25,7 +29,9 @@ const AT = new Date(NOW).toISOString();
 const bodyRows = () => [...document.querySelectorAll<HTMLTableRowElement>("tr[data-row-id]")];
 const row = (id: string) => bodyRows().find((r) => r.dataset.rowId === id) as HTMLTableRowElement;
 const detail = (id: string) => [...document.querySelectorAll<HTMLElement>("tr[data-detail-for]")].find((r) => r.dataset.detailFor === id) as HTMLElement;
-const loaded = () => waitFor(() => expect(bodyRows()).toHaveLength(TOTAL), { timeout: 4000 });
+const loaded = (count = TOTAL) => waitFor(() => expect(bodyRows()).toHaveLength(count), { timeout: 4000 });
+/** A page of `size` rows: a walk that needs only the first rows renders only them on each of its re-renders (p1 code-1). */
+const pageOf = (size: number) => writePref(tableKey(FINDINGS_TABLE), { pageSize: size });
 /** Writes a note as one paste: the field, not the keystrokes, is under test. */
 const writeNote = async (user: ReturnType<typeof userEvent.setup>, scope: HTMLElement, text: string) => {
   await user.click(within(scope).getByLabelText("Заметка к оценке"));
@@ -66,8 +72,9 @@ describe("the verdict's words", () => {
 describe("setting a verdict over u1's handler", () => {
   test("from the detail: shown at once, one line in human.jsonl, kept on a re-read; its line's box is reserved", async () => {
     const user = userEvent.setup({ delay: null });
+    pageOf(10);
     const view = renderFindings(app, KEY, runPath(KEY, { view: "findings" }));
-    await loaded();
+    await loaded(10);
     const id = bodyRows()[0].dataset.rowId as string;
     await user.click(row(id).querySelector("td[data-col=summary]") as HTMLElement);
     const line = detail(id).querySelector("[data-slot=verdict-line]") as HTMLElement;
@@ -85,7 +92,7 @@ describe("setting a verdict over u1's handler", () => {
 
     // a re-read: the run comes from the server again, the link opens the finding with its verdict and note
     renderFindings(app, KEY, runPath(KEY, { view: "findings", finding: id }));
-    await loaded();
+    await loaded(10);
     await waitFor(() => expect(detail(id)).toBeTruthy());
     expect(detail(id).querySelector("[data-slot=verdict-line]")).toHaveTextContent(/^согласен · 19:41 МСК$/);
     expect(within(detail(id)).getByLabelText("Заметка к оценке")).toHaveValue("верно, проверил");
@@ -94,8 +101,9 @@ describe("setting a verdict over u1's handler", () => {
 
   test("«Оценить…» on a selection of 12 with one note: 12 rows at once, 12 lines, kept on a re-read", async () => {
     const user = userEvent.setup({ delay: null });
+    pageOf(14);
     const view = renderFindings(app, KEY, runPath(KEY, { view: "findings" }));
-    await loaded();
+    await loaded(14);
     const twelve = bodyRows()
       .slice(2, 14)
       .map((r) => r.dataset.rowId as string);

@@ -52,11 +52,11 @@ export function useReveal(target: string | null, find: (scroller: HTMLElement, i
     held.current = id;
   }, []);
   useLayoutEffect(() => {
-    if (!target) return;
-    if (held.current === target) {
-      held.current = null;
-      return;
-    }
+    // taken and cleared on every new address: a hold on the object that already was the address left the URL as it
+    // was, so it never ran this effect, and must not skip that object's next address
+    const own = held.current === target;
+    held.current = null;
+    if (!target || own) return;
     reveal(target);
     // the address alone decides: a `find` the caller rebuilds is the same lookup
     // eslint-disable-next-line react-hooks/exhaustive-deps

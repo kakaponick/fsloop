@@ -160,7 +160,8 @@ describe("search, «Этап», and a link to an entry", () => {
     await user.paste("#12");
     await loaded(11);
     expect(bar()).toHaveTextContent("11 из 143 решений");
-    await user.clear(search);
+    // the term replaced whole, as a select-all and a paste do: no list of 143 rendered between the two searches
+    await user.tripleClick(search);
     await user.paste("ни-одного-такого");
     expect(await screen.findByText("Нет решений, подходящих под фильтры")).toBeInTheDocument();
     expect(screen.getByText("Фильтры: Поиск: «ни-одного-такого»")).toBeInTheDocument();

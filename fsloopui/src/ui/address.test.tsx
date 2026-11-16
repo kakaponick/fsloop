@@ -132,6 +132,55 @@ describe("p2-verdict-critic-craft-verdict-3#craft-1: the shared reveal moves the
     expect(scroller.scrollTop).toBe(100);
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "1" }));
   });
+
+  test("p2-verdict-critic-code-verdict-2#verdict-1: an entry held by a click on its own number while it is already the address is revealed and focused when addressed again later", async () => {
+    placeBoxes();
+    const user = userEvent.setup();
+    function List() {
+      const [target, setTarget] = useState<string | null>(null);
+      const { scroller, hold } = useReveal(target, (box, id) => box.querySelector<HTMLElement>(`[data-id="${id}"]`));
+      return (
+        <>
+          <button type="button" onClick={() => setTarget("1")}>
+            открыть 1
+          </button>
+          <button type="button" onClick={() => setTarget("2")}>
+            открыть 2
+          </button>
+          <div ref={scroller} data-testid="scroller" data-top="100" className={SCROLLER}>
+            <article data-id="1" data-in="scroller" data-top="300" tabIndex={-1}>
+              <button
+                type="button"
+                onClick={() => {
+                  hold("1");
+                  setTarget("1");
+                }}
+              >
+                1
+              </button>
+            </article>
+            <article data-id="2" data-in="scroller" data-top="900" tabIndex={-1}>
+              2
+            </article>
+          </div>
+        </>
+      );
+    }
+    render(<List />);
+    const scroller = screen.getByTestId("scroller");
+    const first = document.querySelector<HTMLElement>('[data-id="1"]');
+    // the rail's link to 1: 300 − 100 − 8
+    await user.click(screen.getByRole("button", { name: "открыть 1" }));
+    expect(scroller.scrollTop).toBe(192);
+    // 1 is already the address: a click on its own number leaves the URL as it is
+    await user.click(screen.getByRole("button", { name: "1" }));
+    await user.click(screen.getByRole("button", { name: "открыть 2" }));
+    expect(scroller.scrollTop).toBe(792);
+    // «Перейти к #» 1, later: 1 comes back 8 px under the scroller's top, focused
+    await user.click(screen.getByRole("button", { name: "открыть 1" }));
+    expect(scroller.scrollTop).toBe(192);
+    expect(document.activeElement).toBe(first);
+  });
 });
 
 describe("p2-verdict-critic-craft-verdict-3#craft-4: an object's own address, one form on both views", () => {

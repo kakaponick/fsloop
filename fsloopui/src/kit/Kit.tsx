@@ -39,6 +39,7 @@ import {
   NotRecorded,
   OutOfFilter,
   PartFailed,
+  PLACE_WHAT,
   RunningText,
   SCROLLER,
   StatusDot,
@@ -253,7 +254,7 @@ function TextSection() {
           text={"Пример: `src/web/shared/part-2.tsx:4` и `ux 1`."}
           renderCode={(body, code) =>
             body.startsWith("src/") ? (
-              <Button variant="ghost" size="xs" aria-label={`${copyLabel("место")} ${body}`} className="h-auto min-h-5 gap-1 px-0.5 align-baseline font-mono text-xs font-normal" onClick={() => void copyText(body, body)}>
+              <Button variant="ghost" size="xs" aria-label={`${copyLabel(PLACE_WHAT)} ${body}`} className="h-auto min-h-5 gap-1 px-0.5 align-baseline font-mono text-xs font-normal" onClick={() => void copyText(body, body)}>
                 {code}
                 <CopyIcon aria-hidden="true" data-icon="inline-end" className="text-muted-foreground" />
               </Button>
@@ -445,7 +446,7 @@ function OverlaysSection() {
         <Menu
           label="Действия с находкой"
           header={{ text: "p1-review-critic-craft#craft-3", title: "p1-review-critic-craft#craft-3 — The trigger repeats the count" }}
-          groups={[[{ label: "Открыть отчёт", onSelect: () => notify.success("Открыт отчёт"), shortcut: "Enter" }], [copyItem("id", "p1-review-critic-craft#craft-3"), { label: copyLabel("место"), onSelect: () => {}, blocked: "Файл ещё пишется: место появится, когда критик закончит" }]]}
+          groups={[[{ label: "Открыть отчёт", onSelect: () => notify.success("Открыт отчёт"), shortcut: "Enter" }], [copyItem("id", "p1-review-critic-craft#craft-3"), { label: copyLabel(PLACE_WHAT), onSelect: () => {}, blocked: "Файл ещё пишется: место появится, когда критик закончит" }]]}
         >
           <Button variant="outline" size="icon-sm" aria-label="Действия с находкой">
             <EllipsisIcon />

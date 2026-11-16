@@ -539,12 +539,22 @@ export function DataTable<R>(props: DataTableProps<R>) {
     if (by) box.scrollBy?.({ top: by });
   };
   const targetOnPage = target !== null && pageIds.includes(target);
+  /** The link the scroll was taken for, and whether on its final layout: «по экрану» before its first measure is not. */
+  const linkScrolled = useRef<{ target: string | null; final: boolean } | null>(null);
+  const layoutFinal = !fillMode || fill !== null;
   useLayoutEffect(() => {
-    // once per link and page size: the row it names, on its page — again when «по экрану» measures the box and the
-    // page re-forms around it, so the scroll is taken on the final layout, not the 50-row one (p1 craft-1)
-    if (targetOnPage && target) scrollToTop(target);
+    // once per link: the row it names, on its page — and once more when «по экрану» first measures the box and the
+    // page re-forms around it, so the scroll is taken on the final layout, not the 50-row one (p1 craft-1). A later
+    // measure (a window resized) or page size the user picks leaves the box's scroll to the user (Strict 1).
+    // a new link — or none, so the same link followed again later counts again — starts over
+    if (linkScrolled.current?.target !== target) linkScrolled.current = null;
+    if (!targetOnPage || !target) return;
+    const taken = linkScrolled.current;
+    if (taken && (taken.final || !layoutFinal)) return;
+    linkScrolled.current = { target, final: layoutFinal };
+    scrollToTop(target);
     // `size`: the measured page size is the layout's change; the scroll reads the DOM it produced
-  }, [targetOnPage, target, size]);
+  }, [targetOnPage, target, size, layoutFinal]);
   const handledOpen = useRef<{ id: string } | null>(null);
   useLayoutEffect(() => {
     let rid = expanded.current;

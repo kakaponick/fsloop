@@ -19,7 +19,7 @@ import { stageOf, STEPS, type Step, type Verdict } from "../../../shared/states.
 import { NOUNS } from "../../../shared/text.ts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { emptyWhen, Hint, NotFound, type HeldNoun } from "@/ui";
+import { emptyWhen, Hint, NotFound, PLACE_WHAT, type HeldNoun } from "@/ui";
 import { copyAction, DataTable, type EmptyWhen, type RowAction } from "@/table";
 // From the files, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
 import { FindingArticle } from "@/finding/article.tsx";
@@ -151,7 +151,7 @@ function Findings({ run }: { run: LoadedRun }) {
       copyAction<Finding>("copy-link", "ссылку", (f) => `${window.location.origin}${runPath(run.key, { view: "findings", finding: f.id })}`, "single", 2),
       copyAction<Finding>("copy-id", "id", (f) => f.id, "both", 2),
       // an item whose object the rows can never have is not listed (table #4; rules/ui → Scope: no disabled action)
-      { ...copyAction<Finding>("copy-location", "место", (f) => f.location, "both", 2), hidden: (rs) => rs.every((f) => !f.location) },
+      { ...copyAction<Finding>("copy-location", PLACE_WHAT, (f) => f.location, "both", 2), hidden: (rs) => rs.every((f) => !f.location) },
       {
         id: "open-report",
         label: "Открыть отчёт",
