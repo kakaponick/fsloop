@@ -9,9 +9,11 @@ paths:
 
 ## Scope
 
-Governs everything under `fsloopui/`: the React client, the server's routes as far as they shape what the page shows, and the shared state maps and text functions both read. The base is the fsloop law — `skills/fsloop/law/ui.md`, `ux.md`, `table.md`; precedence — `law/ui.md` → Precedence. This file states only the decisions of this product: where the law is silent, or where it says otherwise and this file overrides it (marked *overrides*). Users, voice and the word list — `PRODUCT.md`; tokens and the look of components — `DESIGN.md`. Cite a rule as `rules/ui` → <section> <number>: `rules/ui` → Live data 3.
+Governs everything under `fsloopui/`: the React client, the server's routes as far as they shape what the page shows, and the shared state maps and text functions both read. The base is the fsloop law — `skills/fsloop/law/ui.md`, `ux.md`, `table.md`; precedence — `law/ui.md` → Precedence. This file states only the decisions of this product: where the law is silent, or where it says otherwise and this file overrides it (marked *overrides*). Users, voice and the glossary — `PRODUCT.md`; tokens and the look of components — `DESIGN.md`. Cite a rule as `rules/ui` → <section> <number>: `rules/ui` → Live data 3.
 
 fsloopUI is local, single-user and read-mostly: no sign-in, no roles, no money, no destructive action. Its one write is the user's verdict on a finding (Conventions 6).
+
+Law rules with no object here, so a critic raises no finding from them: `code` → i18n (one language, no message catalogs); the «…ing» pending label of `ui` → Every async action surfaces its full lifecycle (the one write is optimistic); in `ux 1`, a setting's name and a disabled action's reason (the product has no settings and no disabled action).
 
 ## Strict
 
@@ -81,7 +83,7 @@ The user's own rules, stated in his words; they outrank every other rule of this
 ## Copy
 
 1. **Russian, plain** — the interface is Russian, business register. What fsloop or a critic wrote — a finding's text, a rule, a file path, a command, a unit's title — is shown as written (English included), identifiers in mono: never translated, paraphrased or spliced into a sentence of the interface.
-2. **One concept — one word**, the same on every surface: прогон, проход, этап, юнит, находка, отчёт критика, кадр, запуск агента, соглашение прогона, журнал решений; the run's decision on a finding — «в исправление» or «кандидат»; the user's verdict — «оценка». Severities keep fsloop's words — critical, major, minor — defined by their glossary. `PRODUCT.md` → Glossary holds each word's meaning.
+2. **Where the words live** — a word's label is in `fsloopui/shared/states.ts` (Conventions 1), its meaning in `PRODUCT.md` → Glossary; a surface takes both from there. Words the map does not hold yet: этап, юнит, находка, кадр, запуск агента, соглашение прогона, журнал решений; the user's verdict — «оценка».
 3. **A number goes with its noun** — number first, agreed in number by one plural function («1 находка», «3 находки», «12 находок»; «2 юнита пишутся»); one noun per fact; a compact face may shorten, its full form from the same function goes to the title. Never «находок: 3».
 4. **A string built by code is tested** — a test calls the function that builds it with the widest real input and compares with a literal written in the test, plus its word count; an exported constant is never compared with itself.
 
