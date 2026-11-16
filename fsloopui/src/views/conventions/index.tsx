@@ -1,18 +1,25 @@
 // «Соглашения» (surfaces/reading.md → BLOCKS «Соглашения»): which shared design solutions this run agreed for its
-// interface. One reading column: what a convention is, then a heading per design-check launch — a link to its
-// report — with its conventions in order. Each convention reads as the design check split it (shared/model.ts →
-// Convention): the pattern leads, the solution is the sentence under it, then the example — the places in mono, each
-// copied by a click — and the rule, as labelled rows; a line the parser could not split keeps its text whole.
-// A report or a run folder that cannot be read fails in its own place (rules/ui → Conventions 14). Read-only.
+// interface. One reading column: a one-line caption on what a convention is, the search, then a heading per
+// design-check launch — a link to its report — with its conventions in order. Each convention reads as the design
+// check split it (shared/model.ts → Convention): its ordinal — a link to its own address — and the pattern lead, in a
+// hanging column on a wide view; the solution is the sentence beside it, then «Пример» — running text as written, each
+// place a copy button in place — and «Правило» as labelled rows, «не записано» where the check wrote none; a line the
+// parser could not split keeps its text whole. A report or a run folder that cannot be read fails in its own place
+// (rules/ui → Conventions 14). Read-only.
+//
+// A convention's address is `?view=conventions&convention=<n>` (the design check: an object's address is a query
+// key): the view scrolls to it, marks it with the target mark and moves focus to it; hidden by the search it shows
+// anyway, «вне фильтра».
 import { CopyIcon } from "lucide-react";
-import { useMemo } from "react";
-import { Link } from "react-router-dom";
+import { useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import type { Convention, Launch } from "../../../shared/model.ts";
 import { STAGE_WORDS, stageOf } from "../../../shared/states.ts";
 import { count, NOUNS, type Forms } from "../../../shared/text.ts";
 import { Button } from "@/components/ui/button";
-import { copyLabel, copyText, EmptyState, emptyWhen, FactList, Hint, PartFailed, RunningText, type Fact, type Resolve } from "@/ui";
-import { StatusBar } from "@/table";
+import { cn } from "@/lib/utils";
+import { copyLabel, copyText, EmptyState, emptyWhen, FactList, Hint, markProps, NotRecorded, OutOfFilter, PartFailed, RunningText, TOAST_MAX_TITLE, type Fact, type Resolve } from "@/ui";
+import { AdaptiveToolbar, filterSummary, Highlight, pushHistory, runQuery, SearchBox, StatusBar, tokens, useRunView, useTableView, type SearchDef, type ToolbarItem } from "@/table";
 import { useNow } from "../../app/clock.tsx";
 import { LINK_CLASS, resolverFor, routerLink } from "../../app/links.tsx";
 import { useUpdatedAt } from "../../app/live.tsx";
@@ -20,7 +27,7 @@ import { runPath } from "../../app/routes.ts";
 import type { LoadedRun, ViewProps } from "../index.ts";
 import { baseName, fileFailure, folderFailure } from "../journal/failure.ts";
 
-export const INTRO = "Соглашение — одно решение на задачу, которую юниты прогона решали бы по-разному. В конце прогона соглашения попадают в правила проекта, `.claude/rules/ui.md`.";
+export const INTRO = "Соглашение — одно решение на задачу, которую юниты решали бы по-разному; в конце прогона соглашения попадают в `.claude/rules/ui.md`.";
 export const DESIGN_CHECK = "Проверка дизайна";
 export const NONE_WRITTEN = "Эта проверка дизайна соглашений не записала: юниты не решали одну задачу по-разному.";
 /** The never form's noun: the run had no design check, so it has no conventions. */
@@ -28,23 +35,56 @@ export const DESIGN_CHECK_NOUN: Forms = ["проверка дизайна", "п�
 export const NEVER_DESCRIPTION = `Проверку дизайна прогон запускает на этапе «${STAGE_WORDS.decompose}», когда интерфейс в этом проходе делают два юнита или больше.`;
 /** A convention's labelled rows. */
 export const LABELS = { example: "Пример", rule: "Правило" } as const;
-/** What the example's button copies: «Скопировать пример», «Скопировано: пример». */
-export const EXAMPLE_WHAT = "пример";
+/** What a place's button copies: «Скопировать место», as a finding's place (finding/article.tsx). */
+export const PLACE_WHAT = "место";
 /** The whole list, when the run folder could not be read. */
 export const CONVENTIONS_PART = "Список соглашений";
+/** The view's id for its persisted search (view state, never the URL: rules/ui → Conventions 12). */
+export const CONVENTIONS_VIEW = "conventions";
+/** A `convention=` the run does not hold. */
+export const conventionMissing = (n: string): string => `Соглашения ${n} в этом прогоне нет — проверьте ссылку`;
 
-/** The places an example names: each `quoted` path, or the example whole when it quotes none. */
-export function examplesOf(example: string | null): string[] {
+/** The search looks in every part of a convention; the places and the launch match as identifiers (table #12). */
+export const SEARCH: SearchDef<Convention> = {
+  identifiers: (c) => [...placesOf(c.example), c.launch],
+  text: (c) => (c.pattern ? [c.pattern, c.solution, c.example, c.rule] : [c.text]),
+  placeholder: "Задача, решение, пример, правило",
+};
+
+/** A bare example that is one token is one place; anything with a space is prose. */
+const BARE_PLACE = /^\S+$/;
+
+/** The places an example names: each `quoted` span, or the example whole when it is one bare token. */
+export function placesOf(example: string | null): string[] {
   const text = example?.trim();
   if (!text) return [];
   const quoted = [...text.matchAll(/`([^`]+)`/g)].map((m) => m[1].trim()).filter(Boolean);
-  return quoted.length ? quoted : [text];
+  if (quoted.length) return quoted;
+  return BARE_PLACE.test(text) ? [text] : [];
 }
+
+/** The room a place has in the toast's title after «Скопировано: » (13 characters; ui/toast.tsx → copyText). */
+const COPIED_ROOM = TOAST_MAX_TITLE - "Скопировано: ".length;
+
+/** The place as the copy's toast names it: whole when it fits the title, else its end — the file name with as many
+ * folders before it as fit, «…/reader-panel.tsx:120-145» — so the toast never cuts the file name off. */
+export function copiedWhat(place: string): string {
+  if (place.length <= COPIED_ROOM) return place;
+  const folders = place.split("/");
+  let tail = folders.pop() ?? place;
+  if (tail.length + 2 > COPIED_ROOM) return `…${place.slice(-(COPIED_ROOM - 1))}`;
+  while (folders.length && folders[folders.length - 1].length + tail.length + 3 <= COPIED_ROOM) tail = `${folders.pop()}/${tail}`;
+  return `…/${tail}`;
+}
+
+/** The address of a convention: `?view=conventions&convention=<n>`. */
+export const conventionPath = (key: string, n: number): string => `${runPath(key, { view: CONVENTIONS_VIEW })}&convention=${n}`;
 
 export interface ConventionParts {
   pattern: string;
   solution: string;
-  examples: string[];
+  /** The example as the design check wrote it; null — it wrote none. */
+  example: string | null;
   rule: string | null;
 }
 
@@ -53,7 +93,7 @@ export function partsOf(c: Pick<Convention, "pattern" | "solution" | "example" |
   const pattern = c.pattern?.trim();
   const solution = c.solution?.trim();
   if (!pattern || !solution) return null;
-  return { pattern, solution, examples: examplesOf(c.example), rule: c.rule?.trim() || null };
+  return { pattern, solution, example: c.example?.trim() || null, rule: c.rule?.trim() || null };
 }
 
 /** A design-check launch: its description or its lens says so. */
@@ -92,13 +132,46 @@ function reportFailure(run: LoadedRun, launch: string): { file: string; cause: s
 export function ConventionsView({ run }: ViewProps) {
   const now = useNow();
   const updated = useUpdatedAt();
+  const [params] = useSearchParams();
   const groups = useMemo(() => groupsOf(run), [run]);
   const resolve = useMemo(() => resolverFor(run), [run]);
   const total = run.conventions.length;
   const failed = groups.length === 0 ? folderFailure(run) : null;
+
+  const [prefs, setPrefs] = useRunView(CONVENTIONS_VIEW, run.key);
+  const [table, setTable] = useTableView(CONVENTIONS_VIEW);
+  const wanted = params.get("convention");
+  const target = wanted !== null && run.conventions.some((c) => String(c.n) === wanted) ? wanted : null;
+  const q = runQuery({ rows: run.conventions, rowId: (c) => String(c.n), columns: [], filters: [], search: SEARCH, state: { sort: null, filters: prefs.filters, search: prefs.search }, include: target ? new Set([target]) : undefined });
+  const kept = new Set(q.rows.map((c) => c.n));
+  const toks = useMemo(() => tokens(prefs.search), [prefs.search]);
+  const searching = toks.length > 0;
+  const shownGroups = searching ? groups.filter((g) => g.conventions.some((c) => kept.has(c.n))) : groups;
+
+  // The convention a link names is scrolled to and takes focus, once per link; the ordinal the user clicked stays
+  // where it is (Strict 1: a click never pushes what was clicked).
+  const scroller = useRef<HTMLDivElement>(null);
+  const clicked = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (!target) return;
+    if (clicked.current === target) {
+      clicked.current = null;
+      return;
+    }
+    const el = scroller.current?.querySelector<HTMLElement>(`li[data-convention="${target}"] > article`);
+    el?.scrollIntoView({ block: "start" });
+    el?.focus({ preventScroll: true });
+  }, [target]);
+
+  const toolbar: ToolbarItem[] = [
+    { id: "search", kind: "pinned", flex: true, node: <SearchBox value={prefs.search} onChange={(v) => setPrefs({ search: v })} placeholder={SEARCH.placeholder} history={table.history} onCommit={(term) => setTable({ history: pushHistory(table.history, term) })} /> },
+  ];
+  const hl = (text: string) => <Highlight text={text} tokens={toks} />;
+
   return (
     <div data-slot="conventions-view" className="absolute inset-0 flex flex-col gap-2 px-5 pt-3 pb-1">
-      <div data-slot="conventions-scroll" className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+      {total > 0 && !failed && <AdaptiveToolbar items={toolbar} label="Поиск по соглашениям" />}
+      <div ref={scroller} data-slot="conventions-scroll" className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         {failed ? (
           <PartFailed what={CONVENTIONS_PART} cause={failed.cause} className="mt-4" />
         ) : groups.length === 0 ? (
@@ -108,91 +181,170 @@ export function ConventionsView({ run }: ViewProps) {
             <EmptyState form="never" noun={DESIGN_CHECK_NOUN} description={NEVER_DESCRIPTION} className="py-16" />
           )
         ) : (
-          <div className="flex max-w-[calc(var(--container-measure)+6.5rem)] flex-col gap-8 py-2">
-            <RunningText text={INTRO} className="max-w-measure text-muted-foreground" measure={false} />
-            {groups.map((g) => {
-              const s = stageOf(g.stage);
-              const href = run.launches.some((l) => l.id === g.launch) ? runPath(run.key, { view: "reports", report: g.launch }) : null;
-              const title = `${DESIGN_CHECK}${s.pass !== null ? `, проход ${s.pass}` : ""}`;
-              const failure = reportFailure(run, g.launch);
-              return (
-                <section key={g.launch} data-launch={g.launch} aria-labelledby={`conv-${g.launch}`} className="flex flex-col gap-3">
-                  <header className="flex flex-col gap-0.5">
-                    <h2 id={`conv-${g.launch}`} className="m-0 text-base font-semibold">
-                      {href ? (
-                        <Link to={href} className={LINK_CLASS}>
-                          {title}
-                        </Link>
-                      ) : (
-                        title
-                      )}
-                    </h2>
-                    <p className="m-0 flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground tabular-nums">
-                      <span className="font-mono">{g.launch}</span>
-                      {!failure && (
-                        <>
-                          <span aria-hidden="true">·</span>
-                          <span>{count(g.conventions.length, NOUNS.convention)}</span>
-                        </>
-                      )}
-                    </p>
-                  </header>
-                  {failure ? (
-                    <PartFailed what={`Отчёт ${failure.file}`} cause={failure.cause} />
-                  ) : g.conventions.length ? (
-                    <ol data-slot="convention-list" className="m-0 flex list-none flex-col divide-y p-0">
-                      {g.conventions.map((c) => (
-                        <li key={c.n} data-convention={c.n} className="py-3 first:pt-0 last:pb-0">
-                          <ConventionItem convention={c} resolve={resolve} />
-                        </li>
-                      ))}
-                    </ol>
-                  ) : (
-                    <p className="m-0 text-muted-foreground">{NONE_WRITTEN}</p>
-                  )}
-                </section>
-              );
-            })}
+          <div className="flex max-w-[calc(var(--container-measure)+26.5rem)] flex-col gap-6 py-2">
+            <div data-slot="conventions-intro" className="flex flex-col gap-1">
+              <RunningText text={INTRO} measure={false} className="text-xs text-muted-foreground" />
+              {wanted !== null && !target && (
+                <p role="status" data-slot="convention-missing" className="m-0">
+                  {conventionMissing(wanted)}
+                </p>
+              )}
+            </div>
+            {searching && q.rows.length === 0 ? (
+              <EmptyState form="filtered" noun={NOUNS.convention} filters={filterSummary([], prefs.filters, prefs.search)} onReset={() => setPrefs({ filters: {}, search: "" })} className="py-16" />
+            ) : (
+              shownGroups.map((g) => {
+                const s = stageOf(g.stage);
+                const href = run.launches.some((l) => l.id === g.launch) ? runPath(run.key, { view: "reports", report: g.launch }) : null;
+                const title = `${DESIGN_CHECK}${s.pass !== null ? `, проход ${s.pass}` : ""}`;
+                const failure = reportFailure(run, g.launch);
+                const rows = g.conventions.filter((c) => kept.has(c.n));
+                return (
+                  <section key={g.launch} data-launch={g.launch} aria-labelledby={`conv-${g.launch}`} className="flex flex-col gap-2">
+                    <header className="flex flex-col gap-0.5">
+                      <h2 id={`conv-${g.launch}`} className="m-0 text-base font-semibold">
+                        {href ? (
+                          <Link to={href} className={LINK_CLASS}>
+                            {title}
+                          </Link>
+                        ) : (
+                          title
+                        )}
+                      </h2>
+                      <p className="m-0 flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground tabular-nums">
+                        <span className="font-mono">{hl(g.launch)}</span>
+                        {!failure && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span>{count(g.conventions.length, NOUNS.convention)}</span>
+                          </>
+                        )}
+                      </p>
+                    </header>
+                    {failure ? (
+                      <PartFailed what={`Отчёт ${failure.file}`} cause={failure.cause} />
+                    ) : rows.length ? (
+                      <ol data-slot="convention-list" role="list" aria-label={title} className="-mx-3 flex list-none flex-col divide-y p-0">
+                        {rows.map((c) => (
+                          <li key={c.n} id={`convention-${c.n}`} data-convention={c.n}>
+                            <ConventionItem
+                              convention={c}
+                              runKey={run.key}
+                              resolve={resolve}
+                              toks={toks}
+                              target={String(c.n) === target}
+                              outside={q.outside.has(String(c.n))}
+                              onOrdinal={() => {
+                                clicked.current = String(c.n);
+                              }}
+                            />
+                          </li>
+                        ))}
+                      </ol>
+                    ) : (
+                      <p className="m-0 text-muted-foreground">{NONE_WRITTEN}</p>
+                    )}
+                  </section>
+                );
+              })
+            )}
           </div>
         )}
       </div>
-      <StatusBar shown={total} total={total} noun={NOUNS.convention} updatedAt={updated === null ? null : new Date(updated).toISOString()} now={now} />
+      <StatusBar shown={q.matched} total={total} noun={NOUNS.convention} updatedAt={updated === null ? null : new Date(updated).toISOString()} now={now} />
     </div>
   );
 }
 
-/** One convention: the pattern, the solution, then «Пример» and «Правило» in a hanging label column from 40 rem. */
-function ConventionItem({ convention, resolve }: { convention: Convention; resolve: Resolve }) {
-  const parts = partsOf(convention);
-  if (!parts) return <RunningText text={convention.text} resolve={resolve} renderLink={routerLink} measure={false} className="max-w-measure" />;
-  const facts: Fact[] = [];
-  if (parts.examples.length) facts.push({ label: LABELS.example, value: <Examples places={parts.examples} /> });
-  if (parts.rule) facts.push({ label: LABELS.rule, value: <RunningText text={parts.rule} resolve={resolve} renderLink={routerLink} measure={false} /> });
+interface ItemProps {
+  convention: Convention;
+  runKey: string;
+  resolve: Resolve;
+  toks: readonly string[];
+  target: boolean;
+  outside: boolean;
+  onOrdinal: () => void;
+}
+
+/** One convention: the ordinal and the pattern, then the solution, «Пример» and «Правило» — beside them from 56 rem of
+ * the view (the pattern in a hanging 17 rem column), under them, aligned past the ordinal, below it. The search's hits
+ * wear the table's one mark in all the text the search looks in (table #12). */
+function ConventionItem({ convention: c, runKey, resolve, toks, target, outside, onOrdinal }: ItemProps) {
+  const parts = partsOf(c);
+  const marks = markProps({ target });
+  const hl = (text: string) => <Highlight text={text} tokens={toks} />;
+  const text = (value: string) => <RunningText text={value} resolve={resolve} renderLink={routerLink} measure={false} highlight={hl} />;
+  const facts: Fact[] = parts
+    ? [
+        { label: LABELS.example, value: parts.example ? <Example text={parts.example} resolve={resolve} highlight={hl} /> : <NotRecorded /> },
+        { label: LABELS.rule, value: parts.rule ? text(parts.rule) : <NotRecorded /> },
+      ]
+    : [];
   return (
-    <div className="flex flex-col gap-1">
-      <p data-slot="convention-pattern" className="m-0 max-w-measure font-semibold text-pretty">
-        {parts.pattern}
-      </p>
-      <div data-slot="convention-solution" className="max-w-measure">
-        <RunningText text={parts.solution} resolve={resolve} renderLink={routerLink} measure={false} />
+    <article
+      tabIndex={-1}
+      aria-label={`Соглашение ${c.n}`}
+      data-target={marks["data-target"]}
+      className={cn("grid scroll-mt-2 gap-x-6 gap-y-1 rounded-md px-3 py-2.5 outline-none @min-[56rem]/view:grid-cols-[17rem_minmax(0,1fr)]", marks.className)}
+    >
+      <div className={cn("flex min-w-0 items-baseline gap-2", !parts && "@min-[56rem]/view:col-span-2")}>
+        <span className="w-[3ch] shrink-0 text-right text-muted-foreground tabular-nums">
+          <Link to={conventionPath(runKey, c.n)} replace aria-label={`Ссылка на соглашение ${c.n}`} className={LINK_CLASS} onClick={onOrdinal}>
+            {c.n}
+          </Link>
+        </span>
+        {parts ? (
+          <p data-slot="convention-pattern" className="m-0 min-w-0 font-semibold text-pretty break-words">
+            {hl(parts.pattern)}
+          </p>
+        ) : (
+          <div data-slot="convention-text" className="min-w-0 max-w-measure">
+            {text(c.text)}
+          </div>
+        )}
+        {outside && <OutOfFilter className="ml-auto shrink-0" />}
       </div>
-      {facts.length > 0 && <FactList facts={facts} className="mt-1 grid-cols-1 gap-y-0.5 text-xs @min-[40rem]/view:grid-cols-[5.5rem_minmax(0,1fr)]" />}
-    </div>
+      {parts && (
+        <div className="flex min-w-0 flex-col gap-1 pl-[calc(3ch+0.5rem)] @min-[56rem]/view:pl-0">
+          <div data-slot="convention-solution" className="max-w-measure">
+            {text(parts.solution)}
+          </div>
+          <FactList facts={facts} className="grid-cols-1 gap-y-0.5 text-xs @min-[40rem]/view:grid-cols-[5.5rem_minmax(0,1fr)]" />
+        </div>
+      )}
+    </article>
   );
 }
 
-/** Each place of an example in mono, as a button that copies it («Скопировано: пример»); its box is fixed at 20 px. */
-function Examples({ places }: { places: string[] }) {
+/** Marks a place in the resolver's answer, so the renderer hands it to the copy button instead of a link. */
+const COPY = "copy:";
+
+/** The example as the design check wrote it — running text, the words between its places kept — each place a copy
+ * button where it stands; a bare one-token example is that one place. A place wraps inside its button, so its file
+ * name is always on screen (craft-4). */
+function Example({ text, resolve, highlight }: { text: string; resolve: Resolve; highlight: (text: string) => ReactNode }) {
+  const places = new Set(placesOf(text));
+  const source = /`/.test(text) || places.size === 0 ? text : `\`${text}\``;
+  const own: Resolve = (token) => (places.has(token.trim()) ? `${COPY}${token.trim()}` : resolve(token));
+  const render = (href: string, children: ReactNode) => (href.startsWith(COPY) ? <PlaceButton place={href.slice(COPY.length)}>{children}</PlaceButton> : routerLink(href, children));
+  return <RunningText text={source} resolve={own} renderLink={render} measure={false} highlight={highlight} />;
+}
+
+/** One place of an example: the inline code itself is the button; a click copies it, «Скопировано: <место>». */
+function PlaceButton({ place, children }: { place: string; children: ReactNode }) {
   return (
-    <span className="-ml-1 flex min-w-0 flex-wrap gap-x-1">
-      {places.map((p) => (
-        <Hint key={p} label={copyLabel(EXAMPLE_WHAT)}>
-          <Button variant="ghost" size="sm" aria-label={`${copyLabel(EXAMPLE_WHAT)} ${p}`} className="h-5 max-w-full gap-1 px-1 font-mono text-xs font-normal" onClick={() => void copyText(p, EXAMPLE_WHAT)}>
-            <span className="truncate">{p}</span>
-            <CopyIcon aria-hidden="true" className="size-3 text-muted-foreground" />
-          </Button>
-        </Hint>
-      ))}
-    </span>
+    <Hint label={copyLabel(PLACE_WHAT)}>
+      <Button
+        variant="ghost"
+        size="xs"
+        data-slot="example-place"
+        aria-label={`${copyLabel(PLACE_WHAT)} ${place}`}
+        className="h-auto min-h-5 max-w-full gap-1 px-0.5 text-left align-baseline font-mono text-xs font-normal whitespace-normal [overflow-wrap:anywhere]"
+        onClick={() => void copyText(place, copiedWhat(place))}
+      >
+        {children}
+        <CopyIcon aria-hidden="true" data-icon="inline-end" className="text-muted-foreground" />
+      </Button>
+    </Hint>
   );
 }
