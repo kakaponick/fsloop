@@ -14,9 +14,9 @@ import { UnitsView } from "./index.tsx";
 
 export { keyOf, MIN, NOW } from "../../app/testing.tsx";
 
-/** Run folder n as the server serves it, read once. */
+/** Run folder n as the server serves it, read once — without git, as the fixture app's server reads it. */
 export function loadedRun(fx: FixtureApp, n: number): LoadedRun {
-  return { ...readRun(fx.dirOf(n)), key: keyOf(n), project: projectOf(n), version: 1 };
+  return { ...readRun(fx.dirOf(n), { git: () => null }), key: keyOf(n), project: projectOf(n), version: 1 };
 }
 
 function Host({ runKey }: { runKey: string }) {

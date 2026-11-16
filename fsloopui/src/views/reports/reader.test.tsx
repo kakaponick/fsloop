@@ -501,7 +501,7 @@ describe("other kinds", () => {
     expect(within(reader()).queryByRole("tablist")).toBeNull();
     expect(tabNames()).toEqual([]);
     const file = await loadedFile();
-    expect(within(file).getByRole("heading", { name: "Map of the project" })).toBeInTheDocument();
+    expect(within(file).getByRole("heading", { name: "1. Functions" })).toBeInTheDocument();
     const tables = within(file).getAllByRole("region", { name: "Таблица" });
     expect(tables).toHaveLength(8);
     for (const t of tables) expect(t).toHaveClass("overflow-x-auto", "max-w-full", "border", "[scrollbar-gutter:stable]");
@@ -552,8 +552,8 @@ describe("cand-6 (p1 review): moving between reports, the file's outline, a retr
       await loadedFile();
       const outline = within(reader()).getByRole("navigation", { name: "Содержание отчёта" });
       const items = within(outline).getAllByRole("button");
-      expect(items.map((b) => b.textContent)).toEqual(["Map of the project", "1. Functions", "2. Server", "3. Parser gaps", "4. fsl.mjs computes", "5. Production shape", "6. Building blocks", "7. Tokens", "8. Components"]);
-      await user.click(items[3]);
+      expect(items.map((b) => b.textContent)).toEqual(["1. Functions", "2. Server", "3. Parser gaps", "4. fsl.mjs computes", "5. Production shape", "6. Building blocks", "7. Tokens", "8. Components"]);
+      await user.click(items[2]);
       // 48 px under the reader's top — the 40 px sticky strip and 8 px: 1 300 − 100 − 48
       expect(box().scrollTop).toBe(1152);
       expect((document.querySelector("[data-slot=view-body]") as HTMLElement).scrollTop).toBe(0);

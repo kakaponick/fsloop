@@ -81,11 +81,61 @@ describe("makeFixtureRoot", () => {
     expect(max.conventions).toHaveLength(26);
   });
 
-  test("the maximum run's goal is 8 000 characters over 50 lines; its frames span both passes", () => {
+  test("improve-16: the maximum run's goal has the longest real goal's shape, 8 617 characters over 50 lines; its frames span both passes", () => {
     const max = maximum();
-    expect(max.goal).toHaveLength(8000);
+    expect(max.goal).toHaveLength(8617);
     expect(max.goal?.split("\n")).toHaveLength(50);
     expect(new Set(max.frames.map((f) => f.slice(0, 3)))).toEqual(new Set(["p1-", "p2-"]));
+  });
+
+  test("improve-16: no goal line of any run ends inside a word — each ends a clause, as written goals do", () => {
+    const cut = models.flatMap((run) => (run.goal ?? "").split("\n").filter((line) => line.trim() && !/[.;:!?»)]$/.test(line.trimEnd())).map((line) => `${run.id}: …${line.slice(-30)}`));
+    expect(cut).toEqual([]);
+  });
+
+  test("improve-16: one open silent run also waits for the user", () => {
+    const waiting = runs.flatMap((r, i) => {
+      const run = models[i];
+      const silent = livenessOf(lastWriteOf(run), NOW, { closed: run.closed === true }).state === "silent";
+      const card = cardOf({ key: r.key, project: r.project, run, lastWriteAt: null });
+      return silent && (card.blocked.length > 0 || card.redGate) ? [{ key: r.key, blocked: card.blocked }] : [];
+    });
+    expect(waiting).toHaveLength(1);
+    expect(waiting[0].blocked[0].why).toMatch(/^waits for the user — /);
+  });
+
+  test("improve-16: a report of admin/a5b5ec85 other than p1-review-critic-craft carries three top-level headings, so the reader draws an outline", () => {
+    const max = maximum();
+    const outlined = max.launches.flatMap((l) => {
+      const text = l.report ? readFileSync(join(max.dir, l.report), "utf8") : "";
+      const levels = [...text.matchAll(/^(#{1,6}) \S/gm)].map((m) => m[1].length);
+      const top = Math.min(...levels);
+      return levels.filter((n) => n === top).length >= 3 ? [l.id] : [];
+    });
+    expect(outlined.filter((id) => id !== "p1-review-critic-craft")).not.toEqual([]);
+  });
+
+  test("improve-16: every committed unit carries its commit in the record the server reads", () => {
+    // as the server reads it: run.json for a closed run, a live parse with git for an open one
+    const read = runs.map((r) => readRun(r.dir));
+    const committed = read.flatMap((run) => run.units.filter((u) => u.state === "committed").map((u) => ({ run: run.id, unit: u.id, commits: u.commits.length, ofRun: run.commits })));
+    expect(committed.length).toBeGreaterThan(80);
+    expect(committed.filter((c) => c.commits === 0 || !c.ofRun)).toEqual([]);
+    const max = read.find((run) => run.id === "a5b5ec85");
+    expect(max?.commits).toBe(30);
+  });
+
+  test("kept for the frames and the end-to-end check: admin/a5b5ec85 with u22 committed, u23 blocked and p1-review-critic-craft; shop/37d5a31e and shop/a49bc6c7 open and silent", () => {
+    const at = (key: string) => models[runs.findIndex((r) => r.key === key)];
+    const max = at("admin/a5b5ec85");
+    expect([max.findings.length, max.units.length, max.journal.length]).toEqual([723, 42, 143]);
+    expect(max.units.find((u) => u.id === "u22")?.state).toBe("committed");
+    expect(max.units.find((u) => u.id === "u23")?.state).toBe("blocked");
+    expect(max.launches.map((l) => l.id)).toContain("p1-review-critic-craft");
+    for (const key of ["shop/37d5a31e", "shop/a49bc6c7"]) {
+      const run = at(key);
+      expect(livenessOf(lastWriteOf(run), NOW, { closed: run.closed === true }).state).toBe("silent");
+    }
   });
 
   test("the maximum run waits on a red gate and a blocked unit", () => {

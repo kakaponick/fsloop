@@ -1,6 +1,7 @@
 // Run folders for fsloopUI's tests and frames, written the way an fsloop run writes them; run.json and
 // summary.json come from fsl.mjs's own collect and build, so the record is the skill's, not ours.
 //   node fixtures/make.ts [<dir>] [--now=<ISO time>]   — the fixture root (default fixtures/root), mtimes from now
+import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -72,6 +73,9 @@ export interface RunSpec {
   dirs?: string[];
   /** Write run.json and summary.json through fsl.mjs's collect and build. */
   record?: boolean;
+  /** Its committed units' commits, one each, as fsloop lands them: "record" — the record reads them as git answers;
+   * "repo" — a git repository at `start` also holds them on the run's branch, for a live read. Neither: git is absent. */
+  commits?: "record" | "repo";
   /** The time every file of the folder is dated to. */
   mtime: number;
   /** The `now` fsl.mjs's timeline reads, for a reproducible record. */
@@ -156,17 +160,22 @@ export function writeRun(dir: string, spec: RunSpec): string {
   for (const [rel, text] of Object.entries(spec.files ?? {})) w(rel, text);
   for (const d of spec.dirs ?? []) mkdirSync(join(dir, d), { recursive: true });
   dateTree(dir, spec.mtime);
-  if (spec.record) writeRecord(dir, spec.now, spec.projectsRoot ?? join(dir, ".no-config"), spec.mtime);
+  const commits = spec.commits ? unitCommits(spec) : [];
+  if (spec.commits === "repo" && spec.start) writeRepo(spec.start, `fsl/${spec.id}`, commits, spec.mtime);
+  if (spec.record) writeRecord(dir, spec.now, spec.projectsRoot ?? join(dir, ".no-config"), spec.mtime, spec.commits ? gitHolding(commits) : undefined);
   return dir;
 }
 
-/** run.json and summary.json as `fsl.mjs build` writes them, with git absent and the timeline read at `now`;
- * `mtime` dates the two files and the folder. */
-export function writeRecord(dir: string, now: number, projectsRoot: string, mtime?: number) {
+/** git as fsl.mjs calls it: null when git cannot answer. */
+export type Git = (start: string, args: string[]) => string | null;
+
+/** run.json and summary.json as `fsl.mjs build` writes them, the timeline read at `now` and git absent unless `git`
+ * answers; `mtime` dates the two files and the folder. */
+export function writeRecord(dir: string, now: number, projectsRoot: string, mtime?: number, git: Git = () => null) {
   const before = process.env.FSL_PROJECTS_ROOT;
   process.env.FSL_PROJECTS_ROOT = projectsRoot;
   try {
-    const run = collect(dir, { git: () => null });
+    const run = collect(dir, { git });
     const json = build(run);
     json.timeline = timelineOf(run, new Date(now).toISOString());
     writeFileSync(join(dir, "run.json"), JSON.stringify(json) + "\n");
@@ -176,6 +185,68 @@ export function writeRecord(dir: string, now: number, projectsRoot: string, mtim
     if (before === undefined) delete process.env.FSL_PROJECTS_ROOT;
     else process.env.FSL_PROJECTS_ROOT = before;
   }
+}
+
+// ── commits ──────────────────────────────────────────────────────────────────────────────────
+
+export interface FixtureCommit {
+  sha: string;
+  /** Committed at, ms, whole seconds. */
+  at: number;
+  message: string;
+  /** The object as git stores it, before deflate. */
+  data: Buffer;
+}
+
+const SIGNATURE = "fsloop <fsloop@fixture.invalid>";
+const gitObject = (type: string, body: string) => {
+  const data = Buffer.concat([Buffer.from(`${type} ${Buffer.byteLength(body)}\0`), Buffer.from(body)]);
+  return { sha: createHash("sha1").update(data).digest("hex"), data };
+};
+const EMPTY_TREE = gitObject("tree", "");
+const closesOf = (brief: string | undefined) => (brief?.split("## Closes")[1] ?? "").split("\n").flatMap((l) => /^- (\S+#\S+)$/.exec(l.trim())?.[1] ?? []);
+
+/** One commit per committed unit, oldest first, chained on the run's branch, with the trailers fsloop writes; dated
+ * evenly between the run's start and its last write. */
+export function unitCommits(spec: RunSpec): FixtureCommit[] {
+  const done = (spec.units ?? []).filter((u) => /^committed\b/.test(u.state));
+  const from = spec.started ? Date.parse(spec.started) : spec.mtime - DAY;
+  let parent: string | null = null;
+  return done.map((u, k) => {
+    const at = Math.floor((from + ((k + 1) * (spec.mtime - from)) / (done.length + 1)) / 1000);
+    const closes = closesOf(u.brief);
+    const title = u.title ?? u.id;
+    const message = [`feat(${u.id}): ${title}`, "", `The ${title} part of the goal, as its brief asks.`, "", `Fsloop-Run: ${spec.id}`, `Fsloop-Step: ${u.id} ${k + 1}/${done.length}`, `Fsloop-Pass: ${u.pass ?? 1}`, ...(closes.length ? [`Fsloop-Closes: ${closes.join(" ")}`] : []), ""].join("\n");
+    const o = gitObject("commit", `tree ${EMPTY_TREE.sha}\n${parent ? `parent ${parent}\n` : ""}author ${SIGNATURE} ${at} +0000\ncommitter ${SIGNATURE} ${at} +0000\n\n${message}`);
+    parent = o.sha;
+    return { sha: o.sha, at: at * 1000, message, data: o.data };
+  });
+}
+
+/** git as it answers fsl.mjs's two reads of a run whose branch holds `commits`: the branch, then its log. */
+export function gitHolding(commits: FixtureCommit[]): Git {
+  const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "+00:00");
+  return (_start, args) => {
+    if (args[0] === "rev-parse") return commits.length ? `${commits[commits.length - 1].sha}\n` : null;
+    if (args[0] === "log") return commits.map((c) => [c.sha, iso(c.at), c.message.split("\n")[0], c.message].join("\x1f") + "\0").join("");
+    return null;
+  };
+}
+
+/** A git repository at `dir` with `commits` on `branch`, its HEAD there, every file dated to `at` — what the server's
+ * live read of an open run asks git for. */
+export function writeRepo(dir: string, branch: string, commits: FixtureCommit[], at: number) {
+  const git = join(dir, ".git");
+  const put = (rel: string, data: string | Buffer) => {
+    mkdirSync(dirname(join(git, rel)), { recursive: true });
+    writeFileSync(join(git, rel), data);
+  };
+  put("HEAD", `ref: refs/heads/${branch}\n`);
+  put("config", "[core]\n\trepositoryformatversion = 0\n\tfilemode = false\n\tbare = false\n");
+  for (const o of [EMPTY_TREE, ...commits]) put(`objects/${o.sha.slice(0, 2)}/${o.sha.slice(2)}`, deflateSync(o.data));
+  mkdirSync(join(git, "refs", "heads"), { recursive: true });
+  if (commits.length) put(`refs/heads/${branch}`, `${commits[commits.length - 1].sha}\n`);
+  dateTree(git, at);
 }
 
 /** A small valid PNG of one colour — a frame stands in for a screenshot. */
@@ -237,10 +308,11 @@ export function criticReport(parts: { lens: string; audit?: string; findings?: s
   return out.join("\n") + "\n";
 }
 
-/** The map's free-text report: a heading and a table per part, eight tables as the real map writes them. */
+/** The map's free-text report: a top-level heading and a table per part, eight of them and no title over them, as
+ * the real maps write them — so the reader draws its outline. */
 export function mapReport(): string {
   const parts = ["Functions", "Server", "Parser gaps", "fsl.mjs computes", "Production shape", "Building blocks", "Tokens", "Components"];
-  const out = ["# Map of the project", "", "What the prototype does, function by function, and what the rebuild reuses.", ""];
+  const out = ["What the prototype does, function by function, and what the rebuild reuses.", ""];
   parts.forEach((title, t) => {
     out.push(`## ${t + 1}. ${title}`, "", "| # | what | where | note |", "|---|---|---|---|");
     for (let k = 1; k <= 9; k++) out.push(`| ${k} | ${title.toLowerCase()} item ${k} with a name long enough to need room | template.html:${t * 100 + k * 7} | kept as is, read by \`fsl.mjs\` |`);
@@ -314,16 +386,18 @@ export const PROJECTS = [
 
 export const runId = (i: number) => ((0x1a2b3c4d + i * 0x9e3779b) >>> 0).toString(16).padStart(8, "0").slice(-8);
 
-/** The fixture root: 63 run folders — 3 live, 4 open and long silent (one an empty init), 53 closed, 3 without
- * run.json — and one run at the production maximum. Every mtime is set from `now`, so liveness is reproducible.
- * `only` writes just the folders of those indices (of 0–62), each as the whole root would hold it. */
+/** The fixture root: 63 run folders — 3 live, 4 open and long silent (one an empty init, one waiting for the user
+ * on a blocked unit), 53 closed, 3 without run.json — and one run at the production maximum, whose project is a git
+ * repository holding its commits. Every recorded run's committed units carry their commits. Every mtime is set from
+ * `now`, so liveness is reproducible. `only` writes just the folders of those indices (of 0–62), each as the whole
+ * root would hold it. */
 export function makeFixtureRoot(dir: string, { now, only }: { now: number; only?: number[] }) {
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   const projectsRoot = join(dir, ".claude-config", "projects");
   // Which of the 63 folders is which: by its index over the projects in order.
-  const plan: { project: string; kind: "max" | "live" | "live-transcript" | "silent" | "init" | "closed" | "unrecorded-common" | "unrecorded-empty" | "unrecorded-logs"; age: number }[] = [];
-  const special: Record<number, (typeof plan)[number]["kind"]> = { 24: "live", 30: "live-transcript", 40: "max", 3: "silent", 14: "silent", 50: "silent", 60: "init", 7: "unrecorded-common", 33: "unrecorded-empty", 55: "unrecorded-logs" };
+  const plan: { project: string; kind: "max" | "live" | "live-transcript" | "silent" | "silent-waits" | "init" | "closed" | "unrecorded-common" | "unrecorded-empty" | "unrecorded-logs"; age: number }[] = [];
+  const special: Record<number, (typeof plan)[number]["kind"]> = { 24: "live", 30: "live-transcript", 40: "max", 3: "silent", 14: "silent", 50: "silent-waits", 60: "init", 7: "unrecorded-common", 33: "unrecorded-empty", 55: "unrecorded-logs" };
   const silentAges: Record<number, number> = { 3: 7 * HOUR, 14: 2 * DAY, 50: 14 * DAY, 60: 25 * DAY };
   let i = 0;
   for (const p of PROJECTS)
@@ -343,27 +417,29 @@ export function makeFixtureRoot(dir: string, { now, only }: { now: number; only?
     if (r.kind === "unrecorded-common") return writeRun(runDir, { ...base, goal: "Review the sign-in page.", files: { "logs/bootstrap.log": "started\n" } });
     if (r.kind === "unrecorded-empty") return writeRun(runDir, { ...base, common: false, dirs: ["logs", "reports"] });
     if (r.kind === "unrecorded-logs") return writeRun(runDir, { ...base, common: false, files: { "logs/review.log": "review\n" } });
-    if (r.kind === "init") return writeRun(runDir, { ...base, mode: "init", started: iso(mtime - HOUR), goal: "Set up fsloop for this project.", record: true });
+    if (r.kind === "init") return writeRun(runDir, { ...base, mode: "init", started: iso(mtime - HOUR), goal: "Set up fsloop for this project.", record: true, commits: "record" });
     if (r.kind === "max") {
       const session = `5e55${id}-0000-4000-8000-000000000001`;
       writeTranscript(projectsRoot, r.project, session, now - MIN);
-      writeRun(runDir, { ...maxRun(now), ...base, sessions: [session] });
+      const spec: RunSpec = { ...maxRun(now), ...base, sessions: [session], commits: "repo" };
+      writeRun(runDir, spec);
       writeRunningLaunch(projectsRoot, r.project, session, runDir, { agentId: `a${id}u30`, description: "u30 implement", agent: "fsloop-implement", startedAt: now - 12 * MIN, lastAt: now - MIN });
       // The record again, now that the launch runs: it names the launch in running[].
-      writeRecord(runDir, now, projectsRoot, mtime);
+      writeRecord(runDir, now, projectsRoot, mtime, gitHolding(unitCommits(spec)));
       return;
     }
     const live = r.kind === "live" || r.kind === "live-transcript";
-    const open = live || r.kind === "silent";
+    const open = live || r.kind === "silent" || r.kind === "silent-waits";
     const session = `5e55${id}-0000-4000-8000-000000000002`;
     if (r.kind === "live-transcript") writeTranscript(projectsRoot, r.project, session, now - MIN);
-    return writeRun(runDir, { ...smallRun(n, mtime, open), ...base, sessions: live ? [session] : [], record: true });
+    return writeRun(runDir, { ...smallRun(n, mtime, open, r.kind === "silent-waits"), ...base, sessions: live ? [session] : [], record: true, commits: "record" });
   });
   return { dir, projectsRoot, runs: plan.length };
 }
 
-/** A run of an ordinary size: a map, two craft critics, a review critic under a v3 name, one or two units. */
-function smallRun(n: number, at: number, open: boolean): Omit<RunSpec, "id" | "mtime" | "now"> {
+/** A run of an ordinary size: a map, two craft critics, a review critic under a v3 name, one or two units; `waits`
+ * blocks its first unit on the user. */
+function smallRun(n: number, at: number, open: boolean, waits = false): Omit<RunSpec, "id" | "mtime" | "now"> {
   const started = at - 6 * HOUR;
   const s1 = SURFACES[n % SURFACES.length];
   const s2 = SURFACES[(n + 7) % SURFACES.length];
@@ -395,7 +471,7 @@ function smallRun(n: number, at: number, open: boolean): Omit<RunSpec, "id" | "m
     started: iso(started),
     launches,
     findings: { "p1-map": decisionTable(fixed.map((f) => ({ finding: f, decision: "fix", ref: "u1", why: "major local — above the bar" }))), ...(open ? {} : { "p1-review": decisionTable([{ finding: "p1-review-critic-code#code-1", decision: "candidate", why: "a smell, not a defect" }]) }) },
-    units: [{ id: "u1", state: open ? "implement" : "committed 1a2b3c4d", title: `${s1} page`, brief: briefText("u1", `${s1} page`, fixed) }, ...(n % 2 ? [{ id: "u2", state: open ? "ready" : "committed 5e6f7a8b", title: `${s2} page`, brief: briefText("u2", `${s2} page`, [], "u1") }] : [])],
+    units: [{ id: "u1", state: waits ? `blocked: waits for the user — which words the empty «${s1}» list keeps (j1)` : open ? "implement" : "committed 1a2b3c4d", title: `${s1} page`, brief: briefText("u1", `${s1} page`, fixed) }, ...(n % 2 ? [{ id: "u2", state: open ? "ready" : "committed 5e6f7a8b", title: `${s2} page`, brief: briefText("u2", `${s2} page`, [], "u1") }] : [])],
     journal: [{ n: 1, stage: "p1-map", question: "Route: inline or worktree?", decision: "worktree, K=3", why: "two pages and their shared parts" }],
     gates,
     shots: [`p1-baseline-${s1}-1440-light.png`, `p1-baseline-${s1}-1440-dark.png`],
@@ -403,8 +479,28 @@ function smallRun(n: number, at: number, open: boolean): Omit<RunSpec, "id" | "m
   };
 }
 
+/** The longest goal of the real runs, in shape: 8 617 characters over 50 numbered lines of uneven length, each a
+ * clause that ends on a whole word. */
+function longGoal(): string {
+  const words = "bring every section to the law and keep every fact the operator reads while the frames stay dark the tables hold their columns and nothing moves when a row opens or a list grows".split(" ");
+  // the last word of a line, by its length: the line ends at its width exactly
+  const last = ["", "a", "it", "now", "kept", "first", "always", "exactly", "together", "carefully", "throughout", "predictably", "consistently", "unambiguously", "systematically", "comprehensively"];
+  const widths = Array.from({ length: 50 }, (_, k) => 140 + ((k * 37) % 61));
+  widths[49] += 8617 - 49 - widths.reduce((a, b) => a + b, 0);
+  let w = 0;
+  const next = () => words[w++ % words.length];
+  return widths
+    .map((width, k) => {
+      const first = next();
+      let line = `${k + 1}. ${first[0].toUpperCase()}${first.slice(1)}`;
+      while (width - line.length - 2 > 15) line += ` ${next()}`;
+      return `${line} ${last[width - line.length - 2]}.`;
+    })
+    .join("\n");
+}
+
 /** The production maximum: 723 findings of every source, 42 units over 2 passes, 97 launches, 143 journal rows,
- * 26 conventions, frames of both passes, a goal of 8 000 characters over 50 lines. Live, with a red gate. */
+ * 26 conventions, frames of both passes, the longest real goal's shape. Live, with a red gate. */
 function maxRun(now: number): Omit<RunSpec, "id" | "mtime" | "now"> {
   const t0 = now - 2 * DAY;
   let clock = t0;
@@ -515,13 +611,12 @@ function maxRun(now: number): Omit<RunSpec, "id" | "mtime" | "now"> {
   });
   const gates: NonNullable<RunSpec["gates"]> = ["p1-map", "p1-spike", "p1-decompose", "p1-units", "p1-review", "p1-fix", "p1-verdict", "p1-assess", "p2-decompose", "p2-units", "p2-review", "p2-fix", "p2-verdict"].map((stage, k) => ({ stage, green: true, at: iso(t0 + (k + 1) * 2 * HOUR) }));
   gates.push({ stage: "p2-assess", green: false, at: iso(now - 20 * MIN), problems: ["p2-assess-critic-code#code-2 has no decision row"] });
-  const goal = Array.from({ length: 50 }, (_, k) => `${k + 1}. ${"Bring every section to the law and keep every fact the operator reads; ".repeat(3)}`.slice(0, 159)).join("\n") + ".";
   const shots = [...SURFACES.flatMap((s) => [`p1-baseline-${s}-1440-light.png`, `p1-baseline-${s}-1440-dark.png`]), ...SURFACES.slice(0, 10).map((s) => `p2-final-${s}.png`)];
   return {
     mode: "worktree",
     N: 2,
     K: 3,
-    goal,
+    goal: longGoal(),
     started: iso(t0),
     launches,
     findings,
