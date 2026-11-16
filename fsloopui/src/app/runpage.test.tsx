@@ -11,10 +11,12 @@ import { PASS_OUTCOME } from "../../shared/states.ts";
 import { readPref } from "../ui/storage.ts";
 import { hiddenCauses } from "./facts.tsx";
 import { ObjectLink, objectHref, resolverFor } from "./links.tsx";
-import { dataAgeText, lostText, outcomeLine, passesLine, PASSES_GLOSSARY, runNotFoundText, emptyRootText, settingsGlossary, spendLine, tabTitle, waitsMoreText } from "./words.ts";
+import { commitsLine, dataAgeText, lostText, outcomeLine, passesLine, PASSES_GLOSSARY, runNotFoundText, emptyRootText, settingsGlossary, spendLine, tabTitle, waitsMoreText } from "./words.ts";
 import { fixtureApp, keyOf, MIN, NOW, renderShell, type FixtureApp } from "./testing.tsx";
+import { applyStylesheet, contentWidth, innerWidth, textWidth } from "./layout-testing.ts";
 
 const words = (s: string) => s.split(" ").length;
+const px = (value: string) => Number.parseFloat(value) || 0;
 
 describe("the run page's words, built once", () => {
   test("the verdict of a closed run", () => {
@@ -34,11 +36,27 @@ describe("the run page's words, built once", () => {
     expect(two.title).toBe("Проход 1 — следующий проход: 60 находок в исправление. 60 critical and major above the bar\nПроход 2 — нечего исправлять");
     expect(passesLine([{ pass: 1, taken: 3, outcome: "paused", why: "" }]).text).toBe("проход 1 — paused");
     expect(passesLine([])).toEqual({ text: "ни один проход ещё не закончен", title: "ни один проход ещё не закончен" });
+    // improve-11 (3) · a stalled pass reads in Russian, never the raw word (the real runs tga/96a6e2db, max-auto/1e23e0da)
+    const stalled = passesLine([{ pass: 2, taken: 26, outcome: "stalled", why: "the count of critical+major above the bar rose from 22 to 26" }]);
+    expect(stalled.text).toBe("проход 2 — без продвижения");
+    expect(words(stalled.text)).toBe(5);
+    expect(stalled.title).toBe("Проход 2 — без продвижения: 26 находок в исправление. the count of critical+major above the bar rose from 22 to 26");
     expect(glossaryLines(PASSES_GLOSSARY)).toEqual([
       "следующий проход — Взятые в исправление находки исправит следующий проход.",
       "нечего исправлять — Проход не взял находок в исправление: проходов больше нет.",
       "предел проходов — Последний проход прогона: оставшиеся находки открыты.",
+      "без продвижения — Серьёзных находок не стало меньше: новых проходов нет.",
     ]);
+  });
+
+  test("improve-11 (1), design-7 · «Коммиты» never reads «0 коммитов» beside committed units: a record without them is «не записано» with its cause", () => {
+    const missing = commitsLine({ commits: 0, units: { committed: 30, implement: 2 } });
+    expect(missing).toEqual({ recorded: false, text: "не записано: в записи прогона нет коммитов" });
+    expect(words(missing.text)).toBe(7);
+    expect(commitsLine({ commits: null, units: { committed: 30 } })).toEqual({ recorded: false, text: "не записано: в записи прогона нет коммитов" });
+    expect(commitsLine({ commits: null, units: { implement: 1 } })).toEqual({ recorded: false, text: "не записано" });
+    expect(commitsLine({ commits: 0, units: { implement: 1 } })).toEqual({ recorded: true, text: "0 коммитов" });
+    expect(commitsLine({ commits: 31, units: { committed: 30 } })).toEqual({ recorded: true, text: "31 коммит" });
   });
 
   test("p2-verdict craft-5 · PRODUCT.md → Glossary holds every pass outcome word, with its meaning, and «с возражением» under «оценка»", () => {
@@ -46,7 +64,7 @@ describe("the run page's words, built once", () => {
     const product = readFileSync(join(process.cwd(), "..", "PRODUCT.md"), "utf8").replace(/\r\n/g, "\n");
     const passLine = product.split("\n").find((l) => l.startsWith("- **Проход** — "));
     expect(passLine).toBe(
-      "- **Проход** — следующий проход (the findings it took to fix go to the next pass) · нечего исправлять (it took no finding to fix: the run makes no more passes) · предел проходов (the run's last pass: the findings left stay open).",
+      "- **Проход** — следующий проход (the findings it took to fix go to the next pass) · нечего исправлять (it took no finding to fix: the run makes no more passes) · предел проходов (the run's last pass: the findings left stay open) · без продвижения (the critical and major findings did not fall since the pass before: the run makes no more passes).",
     );
     for (const k of Object.keys(PASS_OUTCOME) as (keyof typeof PASS_OUTCOME)[]) expect(passLine).toContain(`${PASS_OUTCOME[k].compact} (`);
     const verdictRow = product.split("\n").find((l) => l.startsWith("| оценка |"));
@@ -122,23 +140,27 @@ describe("the run page's frame", () => {
   const facts = () => [...factList().querySelectorAll("dt")].map((dt) => [dt.textContent, (dt.nextElementSibling as HTMLElement).textContent]);
   const loaded = () => screen.findByRole("tab", { name: /Находки/ });
 
-  test("ux 9 order (craft-2): identity, the four outcome rows, the settings in one muted row, the counts behind «Подробнее», kept; craft-11 · « ·» with the part before it; cand-2 · tokens and cand-1 · passes in «Подробнее»", async () => {
+  test("ux 9 order (craft-2): identity, the four outcome rows, the counts behind «Подробнее», kept; improve-15 (1) · «Настройки» first behind «Подробнее», its label's room held, its words in one muted row; craft-11 · « ·» with the part before it; cand-2 · tokens and cand-1 · passes in «Подробнее»", async () => {
     const user = userEvent.setup();
     renderShell(fx.transport, { path: `/r/${keyOf(40)}` });
     await loaded();
     expect(within(header()).getByRole("heading", { level: 1 })).toHaveTextContent("admin·a5b5ec85");
-    expect(facts().map(([label]) => label)).toEqual(["Этап", "Активность", "Ждёт вас", "Юниты", "Настройки"]);
+    expect(facts().map(([label]) => label)).toEqual(["Этап", "Активность", "Ждёт вас", "Юниты"]);
     expect(facts()[0][1]).toBe("приёмка · проход 2 из 2 · с 15.11 21:41 МСК");
     expect(facts()[1][1]).toBe("работает · последняя запись 19:40 МСК");
     expect(facts()[3][1]).toBe("30 из 42 юнитов закоммичено · 2 в работе");
-    expect(facts()[4][1]).toBe("worktree · до 2 проходов · до 3 юнитов сразу · claude-opus-5-5");
+    // improve-15 (1) · the card beside the header shows the settings; here they fold, their label's room held in the
+    // label column, so opening «Подробнее» moves no value (Strict 1).
+    expect(factList().querySelector("[data-slot=settings]")).toBeNull();
+    expect([...factList().querySelectorAll("[data-slot=label-sizer]")].map((s) => s.getAttribute("data-text"))).toContain("Настройки");
+    await user.click(within(header()).getByRole("button", { name: "Подробнее" }));
+    expect(facts()[4]).toEqual(["Настройки", "worktree · до 2 проходов · до 3 юнитов сразу · claude-opus-5-5"]);
     const settings = factList().querySelector("[data-slot=settings]") as HTMLElement;
     expect(settings).toHaveClass("text-muted-foreground");
     // craft-11 · each « ·» stays with the part before it, inside its unbreakable span.
     const parts = [...settings.querySelectorAll("[data-slot=setting]")];
     expect(parts.map((p) => p.textContent)).toEqual(["worktree ·", "до 2 проходов ·", "до 3 юнитов сразу ·", "claude-opus-5-5"]);
     for (const part of parts) expect(part).toHaveClass("whitespace-nowrap");
-    await user.click(within(header()).getByRole("button", { name: "Подробнее" }));
     expect(facts().slice(15).map(([label]) => label)).toEqual(["Версия run.json"]);
     // p1-decompose-u3-shape cand-2 · the run's tokens; p1-decompose-design-check cand-1 · its finished passes.
     const [tokensFact, passesFact] = facts().slice(8, 10);
@@ -153,7 +175,8 @@ describe("the run page's frame", () => {
       ["Запуски агентов", "98 запусков агента · 1 работает"],
       tokensFact,
       passesFact,
-      ["Коммиты", "не записано"],
+      // design-7 · 30 units committed, the record holds no commits: never «0 коммитов», and no claim about git
+      ["Коммиты", "не записано: в записи прогона нет коммитов"],
       ["Зеркало .spike", "нет"],
       ["Рабочая копия", "—нет значения"],
       ["Сессии", "5e55a5b5ec85-0000-4000-8000-000000000001"],
@@ -184,7 +207,7 @@ describe("the run page's frame", () => {
     expect(facts().find(([label]) => label === "Проходы")).toEqual(["Проходы", "проход 1 — следующий проход"]);
   });
 
-  test("craft-3 · «Ждёт вас»: one row per cause, each in full, its finding and unit linked; craft-21 · the labels «Активность» and «Ждёт вас» carry the glossaries, the values read plain; cand-8 · «Настройки» explains its words", async () => {
+  test("craft-3 · «Ждёт вас»: one row per cause, each in full, its finding and unit linked; design-21 · its list keeps role=list; craft-21 · the labels «Активность» and «Ждёт вас» carry the glossaries, the values read plain; cand-8 · «Настройки» explains its words", async () => {
     renderShell(fx.transport, { path: `/r/${keyOf(40)}` });
     await loaded();
     const rows = [...header().querySelectorAll<HTMLElement>("[data-slot=wait]")];
@@ -196,8 +219,12 @@ describe("the run page's frame", () => {
     expect(rows[1]).toHaveTextContent("заблокированu23 — waits for the user — the empty state's wording (j140)");
     for (const r of rows) expect(r.querySelector(".truncate, .line-clamp-2, [title], [data-slot=glossary-term]")).toBeNull();
     expect(within(rows[1]).getByRole("link", { name: "u23" })).toHaveAttribute("href", "/r/admin/a5b5ec85?view=units&unit=u23");
+    // design-21 · a list drawn `list-none` keeps its list role
+    expect(header().querySelector("[data-slot=waits]")).toHaveAttribute("role", "list");
     expect(rows[0].querySelector("[data-slot=dot]")).toHaveAttribute("data-tone", "warning");
     const dt = (label: string) => [...factList().querySelectorAll("dt")].find((el) => el.textContent === label) as HTMLElement;
+    // «Настройки» stands behind «Подробнее» (improve-15 (1))
+    await userEvent.setup().click(within(header()).getByRole("button", { name: "Подробнее" }));
     for (const label of ["Активность", "Ждёт вас", "Настройки"]) {
       expect(within(dt(label)).getByRole("button", { name: label })).toHaveAttribute("data-slot", "glossary-term");
       expect((dt(label).nextElementSibling as HTMLElement).querySelector("[data-slot=glossary-term]")).toBeNull();
@@ -205,7 +232,7 @@ describe("the run page's frame", () => {
     expect(dt("Этап").querySelector("[data-slot=glossary-term]")).toBeNull();
   });
 
-  test("craft-9 · «Ждёт вас» keeps a two-line floor; the causes past its held box read «ещё N · показать», and a click shows them all", async () => {
+  test("craft-9 · «Ждёт вас» keeps a two-line floor; the causes past its held box read «ещё N · показать», and a click shows them all; improve-11 (2) · «свернуть» folds it back to its held height", async () => {
     const user = userEvent.setup();
     const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
     const offsetTop = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetTop");
@@ -238,10 +265,71 @@ describe("the run page's frame", () => {
       // gap 2 (f11): the button goes with the click; focus lands on the box it opened, never the page's body
       expect(box).toHaveFocus();
       expect(box).toHaveAttribute("tabindex", "-1");
+      // improve-11 (2) · the released box folds back: «свернуть» under it returns it to its held height, the causes
+      // past it counted on its last line again, focus on that count.
+      const fold = within(header()).getByRole("button", { name: "Свернуть «Ждёт вас»" });
+      expect(fold).toHaveTextContent(/^свернуть$/);
+      expect(fold).toHaveAttribute("aria-expanded", "true");
+      await user.click(fold);
+      expect(box.style.height).toBe("40px");
+      expect(box).toHaveClass("overflow-hidden");
+      const again = within(box).getByRole("button", { name: "ещё 1 · показать" });
+      expect(again).toHaveFocus();
+      expect(again).toHaveAttribute("aria-expanded", "false");
+      expect(within(header()).queryByRole("button", { name: "Свернуть «Ждёт вас»" })).toBeNull();
     } finally {
       if (offsetHeight) Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeight);
       if (offsetTop) Object.defineProperty(HTMLElement.prototype, "offsetTop", offsetTop);
     }
+  });
+
+  test("improve-15 (2) · at 1440 the value column holds each «Ждёт вас» cause whole on one line; the header's height at 1440 and at 900, before and after", async () => {
+    renderShell(fx.transport, { path: `/r/${keyOf(40)}` });
+    await loaded();
+    await applyStylesheet();
+    const h = header();
+    const hs = getComputedStyle(h);
+    // The page beside the 316 px sidebar at 1440, less the header's padding: goal and facts side by side from 64 rem.
+    const content = 1440 - 316 - px(hs.paddingLeft) - px(hs.paddingRight);
+    expect(content).toBeGreaterThanOrEqual(64 * 16);
+    // The facts' column, as the header's stylesheet sets it (rem at the root's 16 px).
+    const factsColumn = px(hs.getPropertyValue("--facts-w")) * 16;
+    expect(factsColumn).toBeGreaterThan(0);
+    const list = factList();
+    const ls = getComputedStyle(list);
+    const size = px(ls.fontSize);
+    // The label column is as wide as every label, the folded ones too (their sizers).
+    const labels = [...list.querySelectorAll("dt")].map((dt) => dt.textContent ?? "");
+    const sizers = [...list.querySelectorAll("[data-slot=label-sizer]")].map((s) => s.getAttribute("data-text") ?? "");
+    const labelColumn = Math.max(...[...labels, ...sizers].map((t) => textWidth(t, { size })));
+    const value = factsColumn - labelColumn - px(ls.columnGap);
+    const box = h.querySelector("[data-slot=waits-box]") as HTMLElement;
+    const room = innerWidth(box, box, value);
+    const rows = [...box.querySelectorAll<HTMLElement>("[data-slot=wait]")];
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      const [dot, term, text] = [...row.children] as HTMLElement[];
+      const gap = px(getComputedStyle(row).columnGap);
+      const width = contentWidth(dot) + gap + textWidth(term.textContent ?? "", { size }) + gap + px(getComputedStyle(text).paddingLeft) + textWidth(text.textContent ?? "", { size });
+      expect(width, `${row.textContent}: ${width} px in ${room} px`).toBeLessThanOrEqual(room);
+    }
+    // The header's height, from its rows: one line each at the body's 13 px × 1.45, «Ждёт вас» its causes one line
+    // each (at 900 the facts take the page's width, wider still), then «Подробнее»; the title at 17 px × 1.35.
+    const LINE = 13 * 1.45;
+    const TITLE = 17 * 1.35;
+    const grid = list.parentElement as HTMLElement;
+    const gs = getComputedStyle(grid);
+    const causes = rows.length * LINE + (rows.length - 1) * px(getComputedStyle(box.querySelector("[data-slot=waits]") as HTMLElement).rowGap);
+    const rowHeights = [...list.querySelectorAll("dt")].map((dt) => ((dt.nextElementSibling as HTMLElement).querySelector("[data-slot=waits-box]") ? Math.max(2 * LINE, causes) : LINE));
+    const facts = [...rowHeights, LINE].reduce((a, b) => a + b, 0) + px(ls.rowGap) * rowHeights.length;
+    const frame = px(hs.paddingTop) + px(hs.paddingBottom) + TITLE + px(gs.marginTop);
+    const at1440 = Math.round(frame + Math.max(2 * LINE, facts));
+    const at900 = Math.round(frame + 2 * LINE + px(gs.rowGap) + facts);
+    // Before: the pass-2 frames — 245 px at 1440 (p2-final-shell.png), 276 px at 900 (p2-final-findings-narrow.png,
+    // the header from y≈254 to the tab strip at y≈530).
+    console.log(`improve-15 · the run header's height: at 1440 245 → ${at1440} px; at 900 276 → ${at900} px`);
+    expect(at1440).toBeLessThanOrEqual(245 - 40);
+    expect(at900).toBeLessThan(276);
   });
 
   test("craft-3 · Strict 1: «Ждёт вас» is held at the height it first took; a live change of its causes scrolls inside, a resize measures again", async () => {
@@ -408,6 +496,39 @@ describe("the run page's frame", () => {
     await waitFor(() => expect(screen.getByRole("tab", { name: /Находки/ }).querySelector("[data-slot=tab-count]")?.textContent).not.toBe(""));
     // The tab row is one fixed line; the lost connection is the shell's, so nothing arrives in it.
     expect(screen.getByRole("tablist")).toHaveClass("group-data-horizontal/tabs:h-10", "shrink-0");
+  });
+});
+
+describe("improve-5 (3) · the page's outline on every view: h1 the run, a visually hidden h2 the view, then the view's own", () => {
+  let fx: FixtureApp;
+  beforeAll(() => {
+    fx = fixtureApp({ only: [40] });
+  });
+  afterAll(() => fx.close());
+
+  const level = (h: HTMLElement) => Number(h.getAttribute("aria-level") ?? h.tagName.slice(1));
+  const cases: [string, string, string, () => Promise<unknown>][] = [
+    ["Находки", "findings", "", () => screen.findByRole("table")],
+    ["Находки", "findings", "&finding=p1-map-craft-accounts%23craft-1", () => screen.findAllByRole("heading", { level: 3 })],
+    ["Юниты", "units", "&unit=u22", () => screen.findAllByRole("heading", { level: 3 })],
+    ["Отчёты", "reports", "", () => screen.findAllByRole("heading", { level: 3 })],
+    ["Отчёты", "reports", "&report=p1-map-map", () => screen.findAllByRole("heading", { level: 3 })],
+    ["Соглашения", "conventions", "", () => waitFor(() => expect(screen.getAllByRole("heading", { level: 2 }).length).toBeGreaterThan(1))],
+    ["Журнал", "journal", "", () => screen.findAllByRole("heading", { level: 3 })],
+  ];
+
+  test.each(cases)("%s ?view=%s%s: no heading level skipped", async (name, view, extra, ready) => {
+    renderShell(fx.transport, { path: `/r/${keyOf(40)}?view=${view}${extra}` });
+    await screen.findByRole("tab", { name: /Находки/ });
+    await ready();
+    const body = screen.getByRole("region", { name: "Раздел прогона" });
+    const own = within(body).getAllByRole("heading")[0];
+    expect(own).toHaveTextContent(name);
+    expect(level(own)).toBe(2);
+    expect(own).toHaveClass("sr-only");
+    const levels = screen.getAllByRole("heading").map(level);
+    expect(levels[0]).toBe(1);
+    for (let i = 1; i < levels.length; i++) expect(levels[i], `heading ${i + 1} of ${levels.join(" ")}`).toBeLessThanOrEqual(levels[i - 1] + 1);
   });
 });
 

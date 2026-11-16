@@ -6,7 +6,7 @@ import { useState } from "react";
 import { describe, expect, test, vi } from "vitest";
 import { NOUNS } from "../../shared/text.ts";
 import { CountLink } from "./count-link.tsx";
-import { CountTabs } from "./count-tabs.tsx";
+import { CountTabs, moreTabsName } from "./count-tabs.tsx";
 import { applyStylesheet, usedBlockSize } from "../app/layout-testing.ts";
 import { FactList, Fold } from "./fact-list.tsx";
 import { flatItem, FlatList } from "./flat-list.tsx";
@@ -306,15 +306,24 @@ describe("tabs with counts", () => {
     { value: "journal", label: "Журнал", count: null },
   ];
 
-  test("each tab carries its count in a reserved box; a zero is muted", () => {
-    render(<CountTabs value="findings" onValueChange={() => {}} tabs={tabs} label="Разделы прогона" />);
+  test("each tab carries its count in a reserved box; improve-5 (1) · a tab with a count of zero is muted whole — its label with its «0», quieter than a tab that holds something; chosen, it takes the chosen tab's ink", async () => {
+    const { rerender } = render(<CountTabs value="findings" onValueChange={() => {}} tabs={tabs} label="Разделы прогона" />);
     const list = screen.getByRole("tablist", { name: "Разделы прогона" });
     const triggers = within(list).getAllByRole("tab");
     expect(triggers.map((t) => t.textContent)).toEqual(["Находки723", "Юниты42", "Отчёты97", "Соглашения0", "Журнал"]);
     for (const t of triggers) expect(t.querySelector('[data-slot="tab-count"]')).toHaveClass("min-w-count", "tabular-nums");
-    expect(triggers[3].querySelector('[data-slot="tab-count"]')).toHaveClass("text-muted-foreground");
-    expect(triggers[0].querySelector('[data-slot="tab-count"]')).not.toHaveClass("text-muted-foreground");
     expect(triggers[0]).toHaveAttribute("aria-selected", "true");
+    await applyStylesheet();
+    const ink = (el: Element) => getComputedStyle(el).color;
+    const countOf = (t: Element) => t.querySelector('[data-slot="tab-count"]') as HTMLElement;
+    expect(ink(countOf(triggers[3]))).toBe(ink(triggers[3]));
+    expect(ink(triggers[3])).not.toBe(ink(triggers[1]));
+    expect(ink(countOf(triggers[1]))).toBe(ink(triggers[1]));
+    // the weight stays: a count that turns from zero live changes no tab's width (Strict 1)
+    expect(getComputedStyle(triggers[3]).fontWeight).toBe(getComputedStyle(triggers[1]).fontWeight);
+    const chosen = ink(triggers[0]);
+    rerender(<CountTabs value="conventions" onValueChange={() => {}} tabs={tabs} label="Разделы прогона" />);
+    expect(ink(within(list).getAllByRole("tab")[3])).toBe(chosen);
   });
 
   test("←/→ move between tabs and choose them", async () => {
@@ -380,7 +389,8 @@ describe("tabs with counts", () => {
         render(<Strip />);
         expect(shown()[0]).toBe("Находки");
         expect(shown().at(-1)).toBe("Файл отчёта");
-        const more = screen.getByRole("button", { name: /^Ещё \d+$/ });
+        const more = screen.getByRole("button", { name: /^Ещё \d+ / });
+        expect(more).toHaveTextContent(/^Ещё \d+$/);
         expect(more.parentElement).toHaveAttribute("data-slot", "tabs-more");
         expect(more.parentElement).toHaveClass("w-16", "shrink-0", "sticky", "top-0", "h-10", "border-b", "bg-background");
         expect(shown().reduce((s, t) => s + tabWidth(t) + 4, 6) + 64).toBeLessThanOrEqual(790);
@@ -388,7 +398,10 @@ describe("tabs with counts", () => {
         const menu = await screen.findByRole("menu");
         expect(menu).toHaveAttribute("aria-label", "Другие части отчёта");
         const folded = within(menu).getAllByRole("menuitem").map((m) => m.textContent ?? "");
-        expect(more).toHaveAccessibleName(`Ещё ${folded.length}`);
+        // improve-5 (2) · the trigger names what it folds: «Ещё 9 частей отчёта» (5 to 20 take «частей»)
+        expect(folded.length).toBeGreaterThanOrEqual(5);
+        expect(folded.length).toBeLessThanOrEqual(20);
+        expect(more).toHaveAccessibleName(`Ещё ${folded.length} частей отчёта`);
         // in order, each with its count; together with the strip, every part once
         expect([...shown().slice(0, -1), ...folded.map((f) => f.replace(/\s\d+$/, "")), shown().at(-1)]).toEqual(parts);
         expect(folded.at(-1)).toBe("CHOSEN 15");
@@ -398,6 +411,15 @@ describe("tabs with counts", () => {
       } finally {
         spy.mockRestore();
       }
+    });
+
+    test("improve-5 (2) · «Ещё N»'s name says what it folds, its noun agreed: «Ещё 9 частей отчёта»", () => {
+      const name = moreTabsName(9);
+      expect(name).toBe("Ещё 9 частей отчёта");
+      expect(name.split(" ")).toHaveLength(4);
+      expect(moreTabsName(2)).toBe("Ещё 2 части отчёта");
+      expect(moreTabsName(21)).toBe("Ещё 21 часть отчёта");
+      expect(moreTabsName(3, ["раздел", "раздела", "разделов"])).toBe("Ещё 3 раздела");
     });
 
     test("with room for every tab nothing folds and «Ещё» is not drawn; without `overflow` the strip never folds", () => {

@@ -244,7 +244,9 @@ describe("a critic's report", () => {
   test("a zero tab reads «Критик ничего сюда не записал.»", () => {
     open("p1-review-critic-code", { tab: "unverified" });
     const tab = screen.getByRole("tab", { name: /^Не проверено/ });
-    expect(tab.querySelector("[data-slot=tab-count]")).toHaveClass("text-muted-foreground");
+    // u13 improve-5 (1): a zero tab is muted whole and its «0» takes the tab's ink — here the chosen tab's (lists.test.tsx)
+    expect(tab.querySelector("[data-slot=tab-count]")).toHaveTextContent(/^0$/);
+    expect(tab).toHaveAttribute("aria-selected", "true");
     expect(within(reader()).getByRole("tabpanel")).toHaveTextContent("Критик ничего сюда не записал.");
   });
 
@@ -503,7 +505,9 @@ describe("craft-1: the strip keeps every label whole — what does not fit folds
         expect(shown[0]).toBe("Находки0");
         expect(shown.at(-1)).toBe("Файл отчёта");
         // «Ещё N»: the trigger names how many parts it holds, in a 64 px box
-        const more = within(reader()).getByRole("button", { name: /^Ещё \d+$/ });
+        // — its visible «Ещё N», its name whole with the noun (u13 improve-5 (2): «Ещё 9 частей отчёта»)
+        const more = within(reader()).getByRole("button", { name: /^Ещё \d+ (часть|части|частей) отчёта$/ });
+        expect(more).toHaveTextContent(/^Ещё \d+$/);
         expect(more.parentElement).toHaveClass("w-16", "shrink-0", "sticky", "top-0");
         await user.click(more);
         const menu = await screen.findByRole("menu");

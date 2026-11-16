@@ -60,6 +60,9 @@ export function RunPage({ runKey }: { runKey: string }) {
         data-slot="view-body"
         className="@container/view relative min-h-0 overflow-y-auto [flex:var(--view-flex,1_1_0%)] [scrollbar-gutter:stable]"
       >
+        {/* improve-5 (3) · the outline: h1 the run, this h2 the view — read by a screen reader, drawn by the tab strip
+            above — then the view's own headings, so no level is skipped on any view. */}
+        <h2 className="sr-only">{viewLabel(view)}</h2>
         {state.status === "error" ? (
           <div className="px-5 py-4">
             <PartFailed what={`Прогон ${id}`} cause={state.cause} onRetry={() => store.retryRun(runKey)} />
@@ -76,8 +79,11 @@ export function RunPage({ runKey }: { runKey: string }) {
   );
 }
 
+const viewOfId = (view: ViewId) => VIEWS.find((v) => v.id === view) ?? VIEWS[0];
+const viewLabel = (view: ViewId) => viewOfId(view).label;
+
 function View({ view, run }: { view: ViewId; run: LoadedRun }) {
-  const Component = (VIEWS.find((v) => v.id === view) ?? VIEWS[0]).component;
+  const Component = viewOfId(view).component;
   return <Component run={run} />;
 }
 
@@ -103,15 +109,17 @@ function Title({ project, id }: { project: string; id: string }) {
 }
 
 /** The page header: identity, the goal and the outcome-first fact list. Its rows are what the operator decides by —
- * the outcome, what waits on him, the settings in one line — and the counts fold behind «Подробнее», so the view
- * keeps the page (`ux 9`: state, next action and product in the first viewport). */
+ * the outcome and what waits on him — and the settings and the counts fold behind «Подробнее», so the view keeps the
+ * page (`ux 9`: state, next action and product in the first viewport; improve-15). From 64 rem the goal and the facts
+ * stand side by side: the facts' column is sized content-out to the widest real value — a «Ждёт вас» cause on one line
+ * beside the widest label (`--facts-w`, 40 rem) — and the goal takes the rest, within its reading measure. */
 function RunHeader({ card, run, now, lost }: { card: RunCard; run: LoadedRun | null; now: number; lost: boolean }) {
   const { facts, more } = runFacts(card, now, { run, lost });
   const ref = useHeldOnClose(card.closed === true);
   return (
-    <header ref={ref} data-slot="run-header" className="@container/header shrink-0 border-b px-5 pt-4 pb-4">
+    <header ref={ref} data-slot="run-header" className="@container/header shrink-0 border-b px-5 pt-4 pb-4 [--facts-w:40rem]">
       <Title project={card.project} id={card.id} />
-      <div className="mt-3 grid items-start gap-x-10 gap-y-3 @min-[60rem]/header:grid-cols-[minmax(0,var(--container-measure))_minmax(0,1fr)]">
+      <div className="mt-3 grid items-start gap-x-10 gap-y-3 @min-[64rem]/header:grid-cols-[minmax(0,1fr)_minmax(0,var(--facts-w))]">
         <Goal goal={run ? run.goal : card.goal} run={run} />
         <FactList facts={facts} more={more} foldKey={FACTS_FOLD} label="Прогон" />
       </div>

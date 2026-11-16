@@ -129,6 +129,18 @@ export function flexRow(row: Element, width: number): Map<Element, number> {
   return new Map(facts.map((f) => [f.el, f.size]));
 }
 
+/** Where `el`'s border box starts inside `ancestor`'s border box, from the left: the ancestor's border and padding,
+ * then each box's margin on the way down and the border and padding of each box it sits in — boxes laid from the
+ * start, each first in its row (a column, a block). */
+export function leftEdge(el: Element, ancestor: Element): number {
+  const chain: Element[] = [];
+  for (let n: Element | null = el; n && n !== ancestor; n = n.parentElement) chain.unshift(n);
+  const own = (n: Element, keys: ("borderLeftWidth" | "paddingLeft" | "marginLeft")[]) => keys.reduce((sum, k) => sum + (px(getComputedStyle(n)[k]) ?? 0), 0);
+  let x = own(ancestor, ["borderLeftWidth", "paddingLeft"]);
+  for (const n of chain) x += own(n, n === el ? ["marginLeft"] : ["marginLeft", "borderLeftWidth", "paddingLeft"]);
+  return x;
+}
+
 /** The content box width of `el` inside an ancestor of known width: the ancestor's width less every border and
  * padding on the way down, and the scrollbar gutter of each box that keeps one. */
 export function innerWidth(el: Element, ancestor: Element, ancestorWidth: number): number {

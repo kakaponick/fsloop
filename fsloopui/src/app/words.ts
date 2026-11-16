@@ -16,7 +16,9 @@ export const NO_RECORD_TEXT = `${NOT_RECORDED}: ${NO_RECORD}`;
 export const VANISHED = "папки больше нет";
 /** A card that changed since the operator last opened its run (rules/ui → Conventions 9), and what it means. */
 export const NEW_MARK = "новое";
-export const NEW_MARK_TITLE = "Прогон изменился с тех пор, как вы открывали его последний раз";
+export const NEW_MARK_TITLE = "Прогон изменился с тех пор, как вы его открывали";
+/** «новое» as the glossary names it: the full card's word and the mini row's edge mark (improve-6 (5)). */
+export const NEW_MARK_TERM = `${NEW_MARK}, полоса у левого края`;
 export const NOTHING_RUNS = "Сейчас ни один прогон не идёт — новый появится здесь сам";
 
 const MIN = 60_000;
@@ -38,6 +40,19 @@ export function runningCount(going: number, silent = 0): string {
   if (going === 0) return `${count(silent, NOUNS.run)} ${quiet(silent)}`;
   const head = `${count(going, NOUNS.run)} ${plural(going, ["идёт", "идут", "идут"])}`;
   return silent ? `${head} · ${num(silent)} ${quiet(silent)}` : head;
+}
+
+/** «ждёт вас», «ждут вас»: the verb after a count of runs that wait on the operator. */
+export const waitingVerb = (n: number): string => plural(n, ["ждёт вас", "ждут вас", "ждут вас"]);
+
+/** The head's waiting part: «2 ждут вас» after the running count; `alone`, with its noun — «1 прогон ждёт вас». */
+export const waitingCount = (n: number, { alone = false } = {}): string => `${alone ? count(n, NOUNS.run) : num(n)} ${waitingVerb(n)}`;
+
+/** The sidebar's head, whole: «3 прогона идут · 2 ждут вас» — the open runs that go and are silent, then those that
+ * wait on the operator (a red gate, a blocked unit), wherever they stand in the list (improve-6 (1)). */
+export function sidebarHead(going: number, silent: number, waiting: number): string {
+  const lead = going + silent > 0 ? runningCount(going, silent) : null;
+  return [lead, waiting ? waitingCount(waiting, { alone: lead === null }) : null].filter(Boolean).join(" · ");
 }
 
 export interface SettingsPart {
@@ -114,14 +129,26 @@ export function unitsLine(units: RunCard["units"], total: number): string {
 
 const LAUNCH_SHORT: Forms = ["запуск", "запуска", "запусков"];
 
-/** «идёт 2 ч 05 мин · 34 запуска агента · 2 коммита»; compact for the card — «идёт 2 ч · 34 запуска · 2 коммита»;
- * a closed run has no «идёт». The launches are the model's `launchCount`: the recorded and the running. */
-export function activityLine(card: Pick<RunCard, "closed" | "startedAt" | "launchCount" | "commits">, now: number, { compact = false } = {}): string {
+/** «идёт 2 ч 05 мин · 34 запуска агента»; compact for the card — «идёт 2 ч · 34 запуска»; a closed run has no «идёт».
+ * The launches are the model's `launchCount`: the recorded and the running. No commit count: the units line above it
+ * says what is committed, so «0 коммитов» never stands beside «30 из 42 юнитов закоммичено» (improve-11 (1)). */
+export function activityLine(card: Pick<RunCard, "closed" | "startedAt" | "launchCount">, now: number, { compact = false } = {}): string {
   const parts: string[] = [];
   if (!card.closed && card.startedAt) parts.push(`идёт ${duration(now - Date.parse(card.startedAt), { compact })}`);
   parts.push(count(card.launchCount, compact ? LAUNCH_SHORT : NOUNS.launch));
-  if (card.commits !== null) parts.push(count(card.commits, NOUNS.commit));
   return parts.join(" · ");
+}
+
+/** Why «Коммиты» reads «не записано» while units are committed: fsloopUI reads the run's record, never git (j40). */
+export const NO_COMMITS = "в записи прогона нет коммитов";
+
+/** The run's commits for «Подробнее»: «31 коммит»; a record without them while units are committed reads «не
+ * записано» with its cause — never «0 коммитов» beside committed units (improve-11 (1), design-7); no list at all,
+ * «не записано». `recorded` false draws the not-recorded dot. */
+export function commitsLine(card: Pick<RunCard, "commits" | "units">): { recorded: boolean; text: string } {
+  if ((card.units.committed ?? 0) > 0 && !card.commits) return { recorded: false, text: `${NOT_RECORDED}: ${NO_COMMITS}` };
+  if (card.commits === null) return { recorded: false, text: NOT_RECORDED };
+  return { recorded: true, text: count(card.commits, NOUNS.commit) };
 }
 
 /** «98 запусков агента · 1 работает»: every launch, then the running ones. */
@@ -186,11 +213,14 @@ export const WAITS_GLOSSARY = [
 /** The liveness words a reader may not know, in the map's order (ui → Glossary). */
 export const LIVENESS_TERMS = ["working", "quiet", "silent"] as const;
 
-/** The glossary on the sidebar's «Прогоны», the header of every card and row under it (ui → Glossary): the liveness
- * words, «новое» and what waits on the operator — the words a card shows that a reader may not know. */
+/** The glossary on the sidebar's «Прогоны», the header of every card and row under it and of the head's counts (ui →
+ * Glossary): the liveness words, «новое» with the mini row's edge mark, «ждёт вас» and what waits on the operator —
+ * the words and the mark a card, a row or the head shows that a reader may not know. */
 export const RUNS_GLOSSARY = [
   ...LIVENESS_TERMS.map((k) => ({ value: LIVENESS[k].compact, meaning: LIVENESS[k].meaning })),
-  { value: NEW_MARK, meaning: NEW_MARK_TITLE },
+  { value: NEW_MARK_TERM, meaning: NEW_MARK_TITLE },
+  // the head's «2 ждут вас» (improve-6 (1)): what waiting means, its causes the two entries after it
+  { value: waitingVerb(1), meaning: "Прогону нужно ваше решение: красный гейт или заблокированный юнит" },
   ...WAITS_GLOSSARY,
 ] as const;
 
@@ -319,7 +349,7 @@ export function spendLine(spend: RunSpend | null): { text: string; title: string
 }
 
 /** The outcome words of a pass, explained on «Проходы» (ui → Glossary). */
-export const PASSES_GLOSSARY: readonly GlossaryEntry[] = (["next", "converged", "cap"] as const).map((k) => ({ value: PASS_OUTCOME[k].compact, meaning: PASS_OUTCOME[k].meaning }));
+export const PASSES_GLOSSARY: readonly GlossaryEntry[] = (["next", "converged", "cap", "stalled"] as const).map((k) => ({ value: PASS_OUTCOME[k].compact, meaning: PASS_OUTCOME[k].meaning }));
 
 const passWord = (outcome: string): string => (outcome in PASS_OUTCOME ? PASS_OUTCOME[outcome as PassOutcome].compact : outcome);
 

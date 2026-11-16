@@ -43,11 +43,14 @@ export type Step = keyof typeof STAGE_WORDS;
 /** The stages in a pass's order: the map's keys, the one order every view compares stages by. */
 export const STEPS = Object.keys(STAGE_WORDS) as Step[];
 
-/** A pass's outcome as passes.md writes it (fsl.mjs's allowedOutcomes): what the run did after the pass. */
+/** A pass's outcome as passes.md writes it (fsl.mjs's OUTCOMES): what the run did after the pass. `stalled` — the
+ * critical and major findings did not fall since the pass before, so the run stops passing (the real runs
+ * tga/96a6e2db, max-auto/1e23e0da). */
 export const PASS_OUTCOME = {
   next: entry("следующий проход", "neutral", 0, "Взятые в исправление находки исправит следующий проход."),
   converged: entry("нечего исправлять", "success", 1, "Проход не взял находок в исправление: проходов больше нет."),
   cap: entry("предел проходов", "warning", 2, "Последний проход прогона: оставшиеся находки открыты."),
+  stalled: entry("без продвижения", "warning", 3, "Серьёзных находок не стало меньше: новых проходов нет."),
 } satisfies Record<string, StateEntry>;
 
 export type PassOutcome = keyof typeof PASS_OUTCOME;

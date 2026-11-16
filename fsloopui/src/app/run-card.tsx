@@ -11,6 +11,7 @@ import type { RunCard } from "../../shared/model.ts";
 import { Item } from "@/components/ui/item";
 import { cn } from "@/lib/utils";
 import { Clamp, Dot, EDGE_MARK, flatItem, StatusDot, type DotState } from "../ui/index.ts";
+import type { Group } from "./held.ts";
 import { runPath } from "./routes.ts";
 import { SettingsParts } from "./settings.tsx";
 import {
@@ -171,13 +172,17 @@ export function RunCardItem({ card, now, lost, current, fresh, gone }: RunItemPr
  * inset edge mark, which moves nothing (craft-4). A closed run takes a second reserved line: the push, when it closed
  * and its goal's first words, what tells one closed run from the next (p1-review cand-3) — in the narrow band
  * (`oneLine`), where every row is one 32 px line so the band's scroll never slices one (cand-10), that line follows
- * its state as its cause. Its height comes from whether the run is closed, never from a live change of its words
- * (Strict 1). */
-export function MiniRow({ card, now, lost, current, fresh, gone, oneLine = false }: RunItemProps & { oneLine?: boolean }) {
+ * its state as its cause. A long-silent run's row takes the second line too: its goal's first words, muted, what tells
+ * «shop 37d5a31e» from «shop a49bc6c7» (improve-6 (2); its age is on the first line already). Its height comes from the
+ * fold it is placed in and whether the run is closed, never from a live change of its words (Strict 1). The open run's
+ * row is the current item: the muted ground and the Item's reserved transparent border turning ink, as on the full
+ * card (improve-6 (3)). */
+export function MiniRow({ card, now, lost, current, fresh, gone, group, oneLine = false }: RunItemProps & { group?: Group; oneLine?: boolean }) {
   const detail: ReturnType<typeof miniDetail> = gone ? { tone: "neutral", fact: VANISHED, text: VANISHED } : miniDetail(card, now, { lost });
   const mark = fresh && !gone;
   const closed = card.closed === true;
-  const second = closed && !oneLine;
+  const goalLine = !closed && group === "silent" && !oneLine;
+  const second = (closed && !oneLine) || goalLine;
   const waits = detail.waits;
   const cause = closed && oneLine ? ` · ${closedLine(card, now)}` : waits ? "" : detail.text.slice(detail.fact.length);
   // The name and the title say the whole state: a closed run's outcome with its push.
@@ -186,7 +191,11 @@ export function MiniRow({ card, now, lost, current, fresh, gone, oneLine = false
     <Item
       asChild
       size="xs"
-      className={cn("snap-start flex-col flex-nowrap items-stretch justify-center gap-0 px-2 py-0 aria-[current=page]:bg-muted", second ? "h-12" : "h-8", mark && EDGE_MARK)}
+      className={cn(
+        "snap-start flex-col flex-nowrap items-stretch justify-center gap-0 px-2 py-0 aria-[current=page]:border-foreground aria-[current=page]:bg-muted",
+        second ? "h-12" : "h-8",
+        mark && EDGE_MARK,
+      )}
     >
       <Link
         to={runPath(card.key)}
@@ -236,7 +245,7 @@ export function MiniRow({ card, now, lost, current, fresh, gone, oneLine = false
         </span>
         {second && (
           <span data-slot="mini-goal" className="block truncate text-xs text-muted-foreground">
-            {closedLine(card, now)}
+            {goalLine ? card.goal : closedLine(card, now)}
           </span>
         )}
       </Link>

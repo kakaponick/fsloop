@@ -62,7 +62,7 @@ State words:
 - **Юнит** — черновик · готов к работе · пишется · проверяется · отладка · вливается · закоммичен · заблокирован · не записано.
 - **Находка** — без решения · кандидат · ждёт юнита · исправляется · заблокирована · исправлена · закрыта · не исправлена · повторилась · открыта · дубликат · отклонена · отброшена.
 - **Запуск агента** — работает · завершён · нет отчёта.
-- **Проход** — следующий проход (the findings it took to fix go to the next pass) · нечего исправлять (it took no finding to fix: the run makes no more passes) · предел проходов (the run's last pass: the findings left stay open).
+- **Проход** — следующий проход (the findings it took to fix go to the next pass) · нечего исправлять (it took no finding to fix: the run makes no more passes) · предел проходов (the run's last pass: the findings left stay open) · без продвижения (the critical and major findings did not fall since the pass before: the run makes no more passes).
 - **Активность прогона** — работает (a write in the last 5 minutes) · тихо (5–30 minutes) · молчит (over 30 minutes) · закрыт · не записано.
 - **Absent values** — «—» (no value exists), «не найден» (an id the folder does not hold), «не записано» (a field the folder lacks).
 

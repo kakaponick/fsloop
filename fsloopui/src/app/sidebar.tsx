@@ -5,18 +5,20 @@
 // connection is lost the groups stay as last read (the shell's clock stops at the data's time).
 import { ChevronRightIcon } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import type { RunCard } from "../../shared/model.ts";
 import { NOUNS } from "../../shared/text.ts";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { pushHistory, SearchBox } from "@/table";
 import { livenessOf } from "../../shared/liveness.ts";
-import { EmptyState, FlatList, GlossaryTooltip, HeldStrip, Loading, PartFailed, readPref, usePref, writePref } from "../ui/index.ts";
-import { arrange, heldView, place, type Group, type PlacedCard, type Placement } from "./held.ts";
+import { CountLink, EmptyState, FlatList, GlossaryTooltip, HeldStrip, Loading, PartFailed, readPref, usePref, writePref } from "../ui/index.ts";
+import { arrange, GROUPS, heldView, nextWaiting, place, type Group, type PlacedCard, type Placement } from "./held.ts";
 import { useLiveStore, useRuns } from "./live.tsx";
 import { LostConnection, useShellClock } from "./lost-connection.tsx";
+import { runPath } from "./routes.ts";
 import { MiniRow, RunCardItem, type RunItemProps } from "./run-card.tsx";
-import { foldTitle, NOTHING_RUNS, PRODUCT, runMatches, runningCount, RUNS_GLOSSARY, SEARCH_PLACEHOLDER } from "./words.ts";
+import { foldTitle, NOTHING_RUNS, PRODUCT, runMatches, runningCount, RUNS_GLOSSARY, SEARCH_PLACEHOLDER, waitingVerb, waitsShort } from "./words.ts";
 
 const RUN_NOUN = { forms: NOUNS.run, gender: "m" } as const;
 /** The updatedAt of each run when the operator last had it open: a later one reads «новое». */
@@ -48,19 +50,31 @@ function runningCounts(cards: readonly RunCard[], now: number): { going: number;
   return { going: keys.length - silent, silent };
 }
 
+/** The open runs that wait on the operator — a red gate, a blocked unit — wherever they stand in the list, and the
+ * one the head's link opens: the next of them after the open run, in the list's order (improve-6 (1)). */
+function waitingRuns(cards: readonly RunCard[], now: number, openKey: string | null): { count: number; next: string | null } {
+  const order = arrange(cards, now);
+  const waiting = new Set(cards.filter((c) => c.recorded && c.closed !== true && waitsShort(c) !== null).map((c) => c.key));
+  return { count: waiting.size, next: nextWaiting(GROUPS.flatMap((g) => order[g]), waiting, openKey) };
+}
+
 /** `band`: below the shell's breakpoint the sidebar is a band above the page — its list capped low, every run a mini
  * row. */
 export function Sidebar({ openKey, band = false }: { openKey: string | null; band?: boolean }) {
   const list = useRuns();
   const store = useLiveStore();
+  const navigate = useNavigate();
   const { now, lost } = useShellClock();
   const counts = list.status === "ready" ? runningCounts(list.cards, now) : { going: 0, silent: 0 };
+  const waiting = list.status === "ready" ? waitingRuns(list.cards, now, openKey) : { count: 0, next: null };
+  const lead = counts.going + counts.silent > 0 ? runningCount(counts.going, counts.silent) : null;
   // The search is the operator's own narrowing for this visit: kept while the page lives, its terms in the history.
   const [query, setQuery] = useState("");
   const [history, setHistory] = usePref<string[]>(HISTORY, []);
   return (
     <aside aria-label="Прогоны" data-slot="sidebar" className="@container/sidebar flex min-h-0 min-w-0 flex-col border-b min-[980px]:border-r min-[980px]:border-b-0">
-      <div data-slot="sidebar-head" className="flex shrink-0 flex-col gap-1 px-4 pt-3 pb-2">
+      {/* The head's top padding is the run header's, so the product and the run's title share a line (improve-6 (4)). */}
+      <div data-slot="sidebar-head" className="flex shrink-0 flex-col gap-1 px-4 pt-4 pb-2">
         {/* The product's row holds the lost connection: shell level, in every frame, in a row that is always there. */}
         <div className="flex h-lh min-w-0 items-center justify-between gap-3 text-base">
           <p className="shrink-0 font-semibold">{PRODUCT}</p>
@@ -68,18 +82,34 @@ export function Sidebar({ openKey, band = false }: { openKey: string | null; ban
         </div>
         <div className="flex h-lh items-baseline justify-between gap-2 text-xs">
           {/* The list's header carries the glossary of what its cards say: no term inside a card, a link as a whole. */}
-          <p className="text-muted-foreground">
+          <p className="shrink-0 text-muted-foreground">
             <GlossaryTooltip term="Прогоны" entries={RUNS_GLOSSARY} />
           </p>
-          {counts.going + counts.silent > 0 && (
-            <span data-slot="running-count" className="truncate text-muted-foreground tabular-nums">
-              {runningCount(counts.going, counts.silent)}
+          {/* improve-6 (1) · how many go, then how many wait on the operator: that part links, in a count's look, to the
+              next waiting run after the open one — plain text when the open run is the only one (design-16). One line:
+              the waiting part keeps its words, the count before it gives way. */}
+          {(lead || waiting.count > 0) && (
+            <span data-slot="running-count" className="flex min-w-0 items-baseline text-muted-foreground tabular-nums">
+              {lead && <span className="min-w-0 truncate">{lead}</span>}
+              {lead && waiting.count > 0 && <span className="shrink-0 whitespace-pre">{" · "}</span>}
+              {waiting.count > 0 && (
+                <CountLink
+                  count={waiting.count}
+                  noun={lead ? undefined : NOUNS.run}
+                  suffix={waitingVerb(waiting.count)}
+                  tone="warning"
+                  href={waiting.next ? runPath(waiting.next) : undefined}
+                  onOpen={waiting.next ? () => navigate(runPath(waiting.next as string)) : undefined}
+                  linkable={waiting.next !== null}
+                  className="shrink-0"
+                />
+              )}
             </span>
           )}
         </div>
         {/* p1-review cand-3 · the search's line stands from the first paint, before the list arrives. `/` stays the
-            view's own search (rules/ui → Conventions 11). */}
-        <SearchBox value={query} onChange={setQuery} placeholder={SEARCH_PLACEHOLDER} history={history} onCommit={(term) => setHistory(pushHistory(history, term))} shortcut={false} className="mt-1" />
+            view's own search (rules/ui → Conventions 11). Its left edge is the cards' (improve-6 (4)). */}
+        <SearchBox value={query} onChange={setQuery} placeholder={SEARCH_PLACEHOLDER} history={history} onCommit={(term) => setHistory(pushHistory(history, term))} shortcut={false} className="mt-1 -ml-2" />
       </div>
       {list.status === "ready" ? (
         <RunList cards={list.cards} now={now} lost={lost} openKey={openKey} band={band} query={query} onReset={() => setQuery("")} />
@@ -160,7 +190,8 @@ function RunList({ cards, now, lost, openKey, band, query, onReset }: RunListPro
 }
 
 /** A fold: its header one 32 px row, the hairline above it inside that row, so the band's rows stay whole; `oneLine`
- * — in the band, every row of it one line too. */
+ * — in the band, every row of it one line too. Its rows know their group: a long-silent run's row, as a closed one's,
+ * takes a second line above the band (improve-6 (2)). */
 function Fold({
   group,
   label,
@@ -178,14 +209,14 @@ function Fold({
 }) {
   const [open, setOpen] = usePref(`fold:sidebar-${group}`, initial);
   return (
-    <Collapsible open={open} onOpenChange={setOpen} data-slot="sidebar-fold">
+    <Collapsible open={open} onOpenChange={setOpen} data-slot="sidebar-fold" data-group={group}>
       <CollapsibleTrigger className="group/fold flex h-8 w-full snap-start items-center gap-1.5 border-t px-2 text-left text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset">
         <ChevronRightIcon aria-hidden="true" className="size-3.5 shrink-0 transition-transform group-data-[state=open]/fold:rotate-90 motion-reduce:transition-none" />
         <span className="tabular-nums">{foldTitle(label, items.length)}</span>
       </CollapsibleTrigger>
       <CollapsibleContent className="flex flex-col">
         {items.map((p) => (
-          <MiniRow key={p.key} {...propsOf(p)} oneLine={oneLine} />
+          <MiniRow key={p.key} {...propsOf(p)} group={group} oneLine={oneLine} />
         ))}
       </CollapsibleContent>
     </Collapsible>

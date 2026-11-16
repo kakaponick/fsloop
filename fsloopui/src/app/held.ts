@@ -33,6 +33,17 @@ export function arrange(cards: readonly RunCard[], now: number): Record<Group, s
   return Object.fromEntries(GROUPS.map((g) => [g, out[g].sort(byRank(g)).map((c) => c.key)])) as Record<Group, string[]>;
 }
 
+/** The waiting run the sidebar's head opens: the first of `waiting` after `current` in the list's `order`, round to
+ * its start; null when none waits but the current run (a link to the page the user is on carries nothing — `ux 2`). */
+export function nextWaiting(order: readonly string[], waiting: ReadonlySet<string>, current: string | null): string | null {
+  const from = current === null ? -1 : order.indexOf(current);
+  for (let step = 1; step <= order.length; step++) {
+    const key = order[(from + step + order.length) % order.length];
+    if (waiting.has(key) && key !== current) return key;
+  }
+  return null;
+}
+
 /** The order the operator sees, and the cards it was taken from (a vanished card is drawn from here). */
 export interface Placement {
   order: Record<Group, string[]>;

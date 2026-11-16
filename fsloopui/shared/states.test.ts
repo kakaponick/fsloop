@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { STEPS as FSL_STEPS } from "../../skills/fsloop/fsl.mjs";
+import { OUTCOMES as FSL_OUTCOMES, STEPS as FSL_STEPS } from "../../skills/fsloop/fsl.mjs";
 import { LIVENESS } from "./liveness.ts";
 import { agentKind, CHECK_OUTCOME, checkOutcome, DECISION, FINDING_STATUS, LAUNCH_STATE, launchName, launchNames, launchState, PASS_OUTCOME, reportWord, SEVERITY, stageOf, STAGE_WORDS, STEPS, UNIT_STATE, VERDICT } from "./states.ts";
 
@@ -25,9 +25,11 @@ describe("the stage map (common.md → Design conventions)", () => {
     expect(STEPS).toEqual(["init", "map", "spike", "decompose", "units", "review", "fix", "verdict", "assess", "integrate", "finish"]);
   });
 
-  test("a pass's outcome as passes.md writes it: next, converged, cap", () => {
-    expect(Object.keys(PASS_OUTCOME)).toEqual(["next", "converged", "cap"]);
+  test("a pass's outcome as passes.md writes it: next, converged, cap; improve-11 (3) · stalled — every outcome fsl.mjs allows has its word", () => {
+    expect(Object.keys(PASS_OUTCOME)).toEqual(["next", "converged", "cap", "stalled"]);
+    expect(Object.keys(PASS_OUTCOME).sort()).toEqual([...FSL_OUTCOMES].sort());
     expect(PASS_OUTCOME.next.compact).toBe("следующий проход");
+    expect(PASS_OUTCOME.stalled).toEqual({ compact: "без продвижения", full: "без продвижения", tone: "warning", rank: 3, meaning: "Серьёзных находок не стало меньше: новых проходов нет." });
   });
 
   test("a stage with a pass reads «проход k · <word>», its compact form the word", () => {

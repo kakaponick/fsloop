@@ -19,15 +19,18 @@ import {
   RUNS_GLOSSARY,
   SEARCH_PLACEHOLDER,
   settingsLine,
+  sidebarHead,
   stageCompact,
   stageLine,
   unitsLine,
   waitCauses,
+  waitingCount,
   WAITS_GLOSSARY,
   waitsLine,
 } from "./words.ts";
+import { nextWaiting } from "./held.ts";
 import { fixtureApp, json, keyOf, MIN, NOW, renderShell, type FixtureApp } from "./testing.tsx";
-import { applyStylesheet, contentWidth, flexRow, innerWidth, textWidth, usedBlockSize } from "./layout-testing.ts";
+import { applyStylesheet, contentWidth, flexRow, innerWidth, leftEdge, textWidth, usedBlockSize } from "./layout-testing.ts";
 
 const iso = (ms: number) => new Date(ms).toISOString();
 const words = (s: string) => s.split(" ").length;
@@ -47,6 +50,32 @@ describe("the card's words, built once", () => {
     expect(runningCount(1, 3)).toBe("1 прогон идёт · 3 молчат");
     expect(runningCount(0, 2)).toBe("2 прогона молчат");
     expect(runningCount(0, 1)).toBe("1 прогон молчит");
+  });
+
+  test("improve-6 · the head: how many go, then how many wait on you; alone, the waiting part names its runs", () => {
+    const head = sidebarHead(3, 0, 2);
+    expect(head).toBe("3 прогона идут · 2 ждут вас");
+    expect(words(head)).toBe(7);
+    const widest = sidebarHead(2, 1, 1);
+    expect(widest).toBe("2 прогона идут · 1 молчит · 1 ждёт вас");
+    expect(words(widest)).toBe(10);
+    expect(sidebarHead(0, 0, 1)).toBe("1 прогон ждёт вас");
+    expect(sidebarHead(3, 0, 0)).toBe("3 прогона идут");
+    expect(sidebarHead(0, 0, 0)).toBe("");
+    expect(waitingCount(21)).toBe("21 ждёт вас");
+    expect(waitingCount(5, { alone: true })).toBe("5 прогонов ждут вас");
+  });
+
+  test("improve-6 · the head's waiting part opens the next waiting run after the current one, in the sidebar's order; none when the current run is the only one", () => {
+    const order = ["a", "b", "c", "d", "e"];
+    const waiting = new Set(["b", "d"]);
+    expect(nextWaiting(order, waiting, "a")).toBe("b");
+    expect(nextWaiting(order, waiting, "b")).toBe("d");
+    expect(nextWaiting(order, waiting, "d")).toBe("b");
+    expect(nextWaiting(order, waiting, "e")).toBe("b");
+    expect(nextWaiting(order, waiting, null)).toBe("b");
+    expect(nextWaiting(order, new Set(["b"]), "b")).toBeNull();
+    expect(nextWaiting(order, new Set(), "a")).toBeNull();
   });
 
   test("the settings: mode, passes, units at once, models, the mirror", () => {
@@ -77,16 +106,16 @@ describe("the card's words, built once", () => {
     expect(unitsLine({}, 0)).toBe("юнитов ещё нет");
   });
 
-  test("the activity: how long it goes, every agent launch, commits; craft-17 · the card's compact form", () => {
+  test("the activity: how long it goes, every agent launch; craft-17 · the card's compact form; improve-11 (1) · no commit count — the units line says what is committed, so «0 коммитов» never stands beside committed units", () => {
     // 33 recorded and 1 running: the model's launchCount.
-    const facts = { closed: false, startedAt: iso(NOW - 125 * MIN), launchCount: 34, commits: 2 };
+    const facts = { closed: false, startedAt: iso(NOW - 125 * MIN), launchCount: 34 };
     const a = activityLine(facts, NOW);
-    expect(a).toBe("идёт 2 ч 05 мин · 34 запуска агента · 2 коммита");
-    expect(words(a)).toBe(12);
+    expect(a).toBe("идёт 2 ч 05 мин · 34 запуска агента");
+    expect(words(a)).toBe(9);
     const c = activityLine(facts, NOW, { compact: true });
-    expect(c).toBe("идёт 2 ч · 34 запуска · 2 коммита");
-    expect(words(c)).toBe(9);
-    expect(activityLine({ closed: true, startedAt: iso(NOW - 125 * MIN), launchCount: 1, commits: null }, NOW)).toBe("1 запуск агента");
+    expect(c).toBe("идёт 2 ч · 34 запуска");
+    expect(words(c)).toBe(6);
+    expect(activityLine({ closed: true, startedAt: iso(NOW - 125 * MIN), launchCount: 1 }, NOW)).toBe("1 запуск агента");
     expect(launchesLine(98, 1)).toBe("98 запусков агента · 1 работает");
   });
 
@@ -222,7 +251,7 @@ describe("the sidebar over the fixture root of 63", () => {
     expect(cards().map((c) => c.getAttribute("href"))).toEqual(["/r/fsloop/077e72d5", "/r/bots/42d34077", "/r/admin/a5b5ec85"]);
   });
 
-  test("craft-21 · «Прогоны» explains the words the cards show: the liveness, «новое», what waits", async () => {
+  test("craft-21 · «Прогоны» explains the words the cards show: the liveness, «новое», what waits; improve-6 (5) · «новое» names the mini row's edge bar too", async () => {
     renderShell(fx.transport, { path: `/r/${keyOf(0)}` });
     await ready();
     const term = within(sidebar()).getByRole("button", { name: "Прогоны" });
@@ -232,10 +261,138 @@ describe("the sidebar over the fixture root of 63", () => {
       "работает — Прогон или его агенты писали файлы меньше 5 минут назад.",
       "тихо — Прогон не писал файлы 5–30 минут: агент думает или ждёт долгую команду.",
       "молчит — Нет записей больше 30 минут: прогон мог встать — проверьте его сессию.",
-      "новое — Прогон изменился с тех пор, как вы открывали его последний раз",
+      // improve-6 (5) · «новое» is also the bar at a mini row's left edge: the glossary names both.
+      "новое, полоса у левого края — Прогон изменился с тех пор, как вы его открывали",
+      // improve-6 (1) · the head's waiting part, closed by the cold read: what «ждёт вас» means
+      "ждёт вас — Прогону нужно ваше решение: красный гейт или заблокированный юнит",
       "красный гейт — проверка этапа нашла нарушения, и прогон не идёт дальше",
       "заблокирован — Юнит остановлен: прогон ждёт решения или другого юнита.",
     ]);
+  });
+
+  test("improve-6 (1), design-16 · the head reads «3 прогона идут · 2 ждут вас» on its reserved line; «2 ждут вас» links in CountLink's look to the next waiting run after the current one — admin, then the silent trigger run", async () => {
+    const user = userEvent.setup();
+    const { probe } = renderShell(fx.transport, { path: `/r/${keyOf(0)}` });
+    await ready();
+    const head = sidebar().querySelector("[data-slot=running-count]") as HTMLElement;
+    expect(head.textContent).toBe("3 прогона идут · 2 ждут вас");
+    const link = within(head).getByRole("link", { name: "2 ждут вас" });
+    expect(link).toHaveAttribute("data-slot", "count-link");
+    expect(link.querySelector("[data-slot=dot]")).toHaveAttribute("data-tone", "warning");
+    expect(link).toHaveAttribute("href", "/r/admin/a5b5ec85");
+    await user.click(link);
+    expect(probe.location?.pathname).toBe("/r/admin/a5b5ec85");
+    // The silent run that waits too (fixtures/make.ts, «silent-waits»): from admin, the next one.
+    expect(keyOf(50)).toBe("trigger/08989893");
+    expect(within(head).getByRole("link", { name: "2 ждут вас" })).toHaveAttribute("href", `/r/${keyOf(50)}`);
+    // Strict 1: the line is one reserved line from the first paint; the waiting part keeps its words, the count before
+    // it gives way.
+    await applyStylesheet();
+    // one line of the head's 12 px type at its 1.4 line height
+    expect(usedBlockSize(head.parentElement as HTMLElement)).toBe(16.8);
+    expect(getComputedStyle(head).flexWrap).toBe("nowrap");
+    expect(getComputedStyle(within(head).getByRole("link")).flexShrink).toBe("0");
+    expect(getComputedStyle(within(head).getByText("3 прогона идут")).textOverflow).toBe("ellipsis");
+  });
+
+  test("design-16 · when the only waiting run is the one open, the waiting part is plain text: no link to the page the user is on", async () => {
+    fx.answer((path) =>
+      path === "/api/runs"
+        ? fx.app.handle(new Request(`http://127.0.0.1${path}`)).then(async (res) => {
+            const body = (await res.json()) as { list: Record<string, unknown>[] };
+            body.list = body.list.map((c) => (c.key === keyOf(50) ? { ...c, redGate: null, blocked: [] } : c));
+            return json(200, body);
+          })
+        : null,
+    );
+    renderShell(fx.transport, { path: "/r/admin/a5b5ec85" });
+    await ready();
+    const head = sidebar().querySelector("[data-slot=running-count]") as HTMLElement;
+    expect(head.textContent).toBe("3 прогона идут · 1 ждёт вас");
+    expect(within(head).queryByRole("link")).toBeNull();
+  });
+
+  test("improve-6 (2) · at 1440 a long-silent run's mini row takes a second reserved line, its goal's first words in muted small type, so two runs of one project tell apart; in the narrow band it stays one 32 px line", async () => {
+    const silentRows = () => [...sidebar().querySelectorAll<HTMLElement>("[data-slot=sidebar-fold][data-group=silent] [data-slot=mini-row]")];
+    const first = renderShell(fx.transport, { path: `/r/${keyOf(0)}` });
+    await ready();
+    const rows = silentRows();
+    expect(rows).toHaveLength(4);
+    await applyStylesheet();
+    const goals = rows.map((row) => {
+      const goal = row.querySelector("[data-slot=mini-goal]") as HTMLElement;
+      expect(goal, row.title).not.toBeNull();
+      expect(usedBlockSize(row), row.title).toBe(48);
+      expect(getComputedStyle(goal).fontSize).toBe("12px");
+      expect(getComputedStyle(goal).textOverflow).toBe("ellipsis");
+      // the goal is the muted second part: never part of the row's name
+      expect(row.getAttribute("aria-label")).not.toContain(goal.textContent);
+      return goal.textContent ?? "";
+    });
+    for (const goal of goals) expect(goal).toMatch(/^(Run \d+: |Set up )/);
+    expect(new Set(goals).size).toBe(rows.length);
+    first.unmount();
+    renderShell(fx.transport, { path: `/r/${keyOf(0)}`, wide: false });
+    await ready();
+    await applyStylesheet();
+    expect(silentRows()).toHaveLength(4);
+    for (const row of silentRows()) {
+      expect(row.querySelector("[data-slot=mini-goal]")).toBeNull();
+      expect(usedBlockSize(row)).toBe(32);
+    }
+  });
+
+  test("improve-6 (2) · at the 316 px sidebar a long-silent row keeps at least its goal's first word whole on its second line", async () => {
+    const goals = new Map<string, string | null>();
+    answerWidest("db.ren.net", goals);
+    renderShell(fx.transport, { path: `/r/${keyOf(0)}` });
+    await ready();
+    await applyStylesheet();
+    const rows = [...sidebar().querySelectorAll<HTMLElement>("[data-slot=sidebar-fold][data-group=silent] [data-slot=mini-row]")];
+    expect(rows).toHaveLength(4);
+    for (const row of rows) {
+      const second = row.querySelector("[data-slot=mini-goal]") as HTMLElement;
+      const goal = goals.get(row.getAttribute("href") ?? "");
+      expect(goal, `${row.title}: no goal`).toBeTruthy();
+      expect(second.textContent).toBe(goal);
+      const first = (goal as string).trim().split(/\s+/)[0];
+      const size = Number.parseFloat(getComputedStyle(second).fontSize);
+      expect(textWidth(first, { size }), `${row.title}: the goal's first word «${first}» is cut`).toBeLessThanOrEqual(innerWidth(second, sidebar(), 316));
+    }
+  });
+
+  test("improve-6 (3) · the current mini row wears the full card's 1 px ink border — the Item's reserved border turning ink, so nothing moves", async () => {
+    const user = userEvent.setup();
+    const first = renderShell(fx.transport, { path: "/r/admin/a5b5ec85" });
+    await ready();
+    await applyStylesheet();
+    const card = cards()[2];
+    expect(card).toHaveAttribute("aria-current", "page");
+    const ink = getComputedStyle(card).borderTopColor;
+    expect(getComputedStyle(cards()[0]).borderTopColor).not.toBe(ink);
+    first.unmount();
+    renderShell(fx.transport, { path: `/r/${keyOf(0)}` });
+    await ready();
+    await user.click(within(sidebar()).getByRole("button", { name: "Закрытые · 53" }));
+    await applyStylesheet();
+    const rows = [...sidebar().querySelectorAll<HTMLElement>("[data-slot=mini-row]")];
+    const current = rows.find((r) => r.getAttribute("aria-current") === "page") as HTMLElement;
+    expect(current).toHaveAttribute("href", `/r/${keyOf(0)}`);
+    expect(getComputedStyle(current).borderTopColor).toBe(ink);
+    for (const row of [current, rows[0]]) expect(getComputedStyle(row).borderTopWidth).toBe("1px");
+    expect(getComputedStyle(rows[0]).borderTopColor).not.toBe(ink);
+  });
+
+  test("improve-6 (4) · the search's left edge lines up with the cards', and the head's top padding is the run header's", async () => {
+    renderShell(fx.transport, { path: "/r/admin/a5b5ec85" });
+    await ready();
+    await screen.findByRole("heading", { level: 1 });
+    await applyStylesheet();
+    const search = sidebar().querySelector("[data-slot=table-search]") as HTMLElement;
+    expect(leftEdge(search, sidebar())).toBe(leftEdge(cards()[0], sidebar()));
+    const head = sidebar().querySelector("[data-slot=sidebar-head]") as HTMLElement;
+    const header = document.querySelector("[data-slot=run-header]") as HTMLElement;
+    expect(getComputedStyle(head).paddingTop).toBe(getComputedStyle(header).paddingTop);
   });
 
   test("craft-35 · a card is named «project · id · liveness», the rest its description; the page's h1 is the first heading", async () => {
@@ -456,7 +613,8 @@ describe("the sidebar over the fixture root of 63", () => {
       expect(getComputedStyle(cause).textOverflow).toBe("ellipsis");
       expect(getComputedStyle(sep).flexShrink).toBe("0");
     }
-    const closed = rows.filter((r) => r.querySelector("[data-slot=mini-goal]"));
+    // the closed fold's rows (a long-silent row's second line is its goal alone — improve-6 (2))
+    const closed = rows.filter((r) => r.closest("[data-group=closed]") && r.querySelector("[data-slot=mini-goal]"));
     expect(closed).toHaveLength(53);
     for (const row of closed) {
       const second = row.querySelector("[data-slot=mini-goal]") as HTMLElement;
