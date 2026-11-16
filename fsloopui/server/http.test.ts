@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
@@ -22,12 +22,17 @@ writeRun(join(runs, OPEN), {
   mtime: NOW,
   now: NOW,
   record: true,
-  launches: [{ id: "p1-map-craft-shell", stage: "p1-map", agent: "fsloop-critic", description: "craft shell", report: criticReport({ lens: "craft assess", findings: ["craft-1 [craft] major high local src/shell.tsx:3 — ux 2 — the frame p1-baseline-shell- clips the toolbar — /impeccable adapt: wrap it."] }) }],
+  launches: [
+    { id: "p1-map-craft-shell", stage: "p1-map", agent: "fsloop-critic", description: "craft shell", report: criticReport({ lens: "craft assess", findings: ["craft-1 [craft] major high local src/shell.tsx:3 — ux 2 — the frame p1-baseline-shell- clips the toolbar — /impeccable adapt: wrap it."] }) },
+    // A launches.md row whose report path leaves the run folder: the file exists, and is never served.
+    { id: "p1-map-craft-outside", stage: "p1-map", agent: "fsloop-critic", description: "craft outside", reportPath: "../outside.md", report: criticReport({ lens: "craft assess" }) },
+  ],
   shots: ["p1-baseline-shell-1440-light.png"],
 });
 writeRun(join(runs, CLOSED), { id: CLOSED, mtime: NOW, now: NOW, record: true, gates: ["integrate", "finish"].map((stage) => ({ stage, green: true, at: "2026-11-16T09:00:00Z" })) });
 
-const app = createApp({ roots: [root], distDir: dist, intervalMs: 20 });
+// No poller: a test moves the server with `pulse()` and waits for what it checks (code-1).
+const app = createApp({ roots: [root], distDir: dist, poll: false });
 afterAll(() => {
   app.close();
   rmSync(temp, { recursive: true, force: true });
@@ -93,8 +98,29 @@ describe("handle — the API", () => {
     }
   });
 
+  test("/api/report never follows a launch's report path out of the run folder (the containment guard)", async () => {
+    expect(readFileSync(join(runs, "outside.md"), "utf8")).toContain("LENS: craft assess");
+    const res = await get(`/api/report?run=app/${OPEN}&file=outside.md`);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: `Отчёт outside.md не найден в прогоне app/${OPEN}`, cause: "ни один запуск прогона не называет этот файл" });
+  });
+
+  test("/api/report: a report of the run deleted on disk is a 404 «файла нет»", async () => {
+    const file = join(runs, OPEN, "reports", "p1-map-craft-shell.md");
+    const text = readFileSync(file, "utf8");
+    rmSync(file);
+    try {
+      const res = await get(`/api/report?run=app/${OPEN}&file=p1-map-craft-shell.md`);
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: "Отчёт p1-map-craft-shell.md не прочитан", cause: "файла нет" });
+    } finally {
+      writeFileSync(file, text);
+    }
+  });
+
   test("/api/report names why a report of the run cannot be read", async () => {
     const dir = join(runs, OPEN, "reports");
+    const text = readFileSync(join(dir, "p1-map-craft-shell.md"), "utf8");
     rmSync(join(dir, "p1-map-craft-shell.md"));
     mkdirSync(join(dir, "p1-map-craft-shell.md"));
     try {
@@ -105,7 +131,8 @@ describe("handle — the API", () => {
       expect(body.cause).toMatch(/EISDIR/);
     } finally {
       rmSync(join(dir, "p1-map-craft-shell.md"), { recursive: true });
-      writeFileSync(join(dir, "p1-map-craft-shell.md"), criticReport({ lens: "craft assess" }));
+      // the report as it was: a later case still reads its finding
+      writeFileSync(join(dir, "p1-map-craft-shell.md"), text);
     }
   });
 
@@ -134,6 +161,9 @@ describe("handle — the API", () => {
     expect(first.runs).toHaveProperty(`app/${OPEN}`);
     expect(typeof first.list).toBe("number");
     writeFileSync(join(runs, OPEN, "journal.md"), "| # | stage | question | decision | why | refs |\n|---|---|---|---|---|---|\n| 1 | p1-map | Route? | worktree | many pages | — |\n");
+    // Two ticks: the first sees the change, the second reads it once its bytes stayed still.
+    app.pulse();
+    app.pulse();
     let next = await nextTick();
     while (next.runs[`app/${OPEN}`] === first.runs[`app/${OPEN}`]) next = await nextTick();
     expect(next.runs[`app/${OPEN}`]).toBeGreaterThan(first.runs[`app/${OPEN}`]);
@@ -144,6 +174,39 @@ describe("handle — the API", () => {
   test("an unknown API path is a 404, a wrong method a 405", async () => {
     expect((await get("/api/nothing")).status).toBe(404);
     expect((await app.handle(new Request("http://127.0.0.1:4747/api/runs", { method: "DELETE" }))).status).toBe(405);
+  });
+});
+
+describe("handle — only this machine's pages reach the API (code-7)", () => {
+  const verdict = (headers: Record<string, string>) => app.handle(new Request("http://127.0.0.1:4747/api/verdict", { method: "POST", headers, body: JSON.stringify({ run: `app/${OPEN}`, finding: "p1-map-craft-shell#craft-1", verdict: "agree" }) }));
+  const human = join(runs, OPEN, "human.jsonl");
+
+  test("a write from another site's page is refused: a foreign Origin, a text/plain body", async () => {
+    const foreign = await verdict({ "content-type": "application/json", origin: "https://evil.example" });
+    expect(foreign.status).toBe(403);
+    expect(await foreign.json()).toEqual({ error: "Запрос со страницы https://evil.example отклонён: fsloopUI отвечает только своим страницам" });
+    // The form-encoded and plain-text bodies a page sends with no preflight.
+    for (const type of ["text/plain", "application/x-www-form-urlencoded"]) {
+      const res = await verdict({ "content-type": type, origin: "http://127.0.0.1:4747" });
+      expect(res.status, type).toBe(415);
+      expect(await res.json()).toEqual({ error: "Тело запроса — не JSON: нужен content-type application/json" });
+    }
+    expect(existsSync(human)).toBe(false);
+  });
+
+  test("a foreign Host (a rebound DNS name) is refused on every route", async () => {
+    for (const path of ["/api/runs", `/api/run?run=app/${OPEN}`, "/"]) {
+      const res = await app.handle(new Request(`http://127.0.0.1:4747${path}`, { headers: { host: "evil.example:4747" } }));
+      expect(res.status, path).toBe(403);
+      expect(await res.json()).toEqual({ error: "Адрес evil.example:4747 отклонён: fsloopUI отвечает только на 127.0.0.1 и localhost" });
+    }
+  });
+
+  test("this machine's own pages pass: the server's address, localhost, the dev server's proxy", async () => {
+    for (const headers of [{ host: "127.0.0.1:4747" }, { host: "localhost:4747", origin: "http://localhost:4747" }, { host: "localhost:5173", origin: "http://localhost:5173" }] as Record<string, string>[]) expect((await app.handle(new Request("http://127.0.0.1:4747/api/runs", { headers }))).status).toBe(200);
+    const ok = await verdict({ "content-type": "application/json; charset=utf-8", origin: "http://127.0.0.1:4747", host: "127.0.0.1:4747" });
+    expect(ok.status).toBe(200);
+    rmSync(human);
   });
 });
 

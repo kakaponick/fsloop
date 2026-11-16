@@ -50,7 +50,7 @@ export function cardOf({ key, project, run, lastWriteAt }: { key: string; projec
     errors: run.errors.length,
     dir: run.dir,
     worktree: run.worktree,
-    version: run.version ?? null,
+    version: run.recordVersion,
   };
 }
 
@@ -62,8 +62,8 @@ function mtime(path: string): number {
   }
 }
 
-/** The newest mtime of a folder's entries, nested folders included. */
-function newestUnder(dir: string, only?: RegExp): number {
+/** The newest mtime of a folder's entries, nested folders included; `skip` — names left out at its top. */
+function newestUnder(dir: string, only?: RegExp, skip?: ReadonlySet<string>): number {
   let latest = 0;
   let entries;
   try {
@@ -72,6 +72,7 @@ function newestUnder(dir: string, only?: RegExp): number {
     return 0;
   }
   for (const e of entries) {
+    if (skip?.has(e.name)) continue;
     const p = join(dir, e.name);
     if (e.isDirectory()) latest = Math.max(latest, only ? 0 : mtime(p), newestUnder(p, only));
     else if (!only || only.test(e.name)) latest = Math.max(latest, mtime(p));
@@ -79,11 +80,15 @@ function newestUnder(dir: string, only?: RegExp): number {
   return latest;
 }
 
-/** When the run last wrote anything: its folder's files at any depth; for an open run also the orchestrator's
- * transcripts its record names with their sub-agents' transcripts, the launches' transcripts, and each running
- * launch's last write. Null when nothing is dated. */
+/** Files of a run folder the run does not write: the user's verdicts, which fsloopUI itself appends. A verdict is
+ * not the run working (rules/ui → Live data 4); the version stamp still sees it. */
+const NOT_THE_RUNS = new Set(["human.jsonl"]);
+
+/** When the run last wrote anything: its folder's files at any depth but fsloopUI's own; for an open run also the
+ * orchestrator's transcripts its record names with their sub-agents' transcripts, the launches' transcripts, and
+ * each running launch's last write. Null when nothing is dated. */
 export function lastWriteOf(run: Run): string | null {
-  let latest = newestUnder(run.dir);
+  let latest = newestUnder(run.dir, undefined, NOT_THE_RUNS);
   if (!run.closed) {
     for (const s of run.sessions) {
       if (!s.transcript) continue;

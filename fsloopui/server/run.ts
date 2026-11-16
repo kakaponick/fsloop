@@ -5,9 +5,9 @@
 // A closed run is read from its run.json; an open one is parsed live, falling back to run.json when that fails.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { build, collect, HUMAN_VERDICTS } from "../../skills/fsloop/fsl.mjs";
-import type { Convention, FileError, Finding, FindingSource, JournalEntry, Launch, Run, RunningLaunch, Surface, Unit, UnitCheck, UserVerdict } from "../shared/model.ts";
-import { agentKind, launchName, unitStateOf, type Decision, type FindingStatus, type Verdict } from "../shared/states.ts";
+import { build, collect, HUMAN_VERDICTS, parseVerdict } from "../../skills/fsloop/fsl.mjs";
+import type { Convention, FileError, Finding, FindingSource, JournalEntry, Launch, LaunchVerdict, Run, VerdictResult, RunningLaunch, Surface, Unit, UnitCheck, UserVerdict } from "../shared/model.ts";
+import { agentKind, launchName, launchNames, unitStateOf, type Decision, type FindingStatus, type Verdict } from "../shared/states.ts";
 import { firstSentence, framesOf, headOf, splitText } from "./finding-text.ts";
 
 /** git as fsl.mjs calls it: null when git cannot answer. */
@@ -102,7 +102,7 @@ function listShots(runDir: string): string[] {
 const sourceOf = (f: Json): FindingSource => (f.own ? "own" : /#open-\d+$/.test(f.id) ? "open" : /#cand-\d+$/.test(f.id) ? "candidate" : "critic");
 const craftSurface = (l: Json | undefined) => /^craft (.+)$/.exec(l?.description ?? "")?.[1] ?? null;
 
-function findingOf(f: Json, launches: Map<string, Json>, units: Json[], shots: string[], human: Map<string, UserVerdict[]>): Finding {
+function findingOf(f: Json, launches: Map<string, Json>, names: Map<string, string>, units: Json[], shots: string[], human: Map<string, UserVerdict[]>): Finding {
   const source = sourceOf(f);
   const launch = f.launch ? launches.get(f.launch) : undefined;
   let head = { lens: f.category ?? null, severity: f.severity ?? null, confidence: f.confidence ?? null, cause: f.cause && !NONE.test(f.cause) ? f.cause : null, location: f.location ?? null };
@@ -129,7 +129,7 @@ function findingOf(f: Json, launches: Map<string, Json>, units: Json[], shots: s
     id: f.id,
     local: f.local,
     launch: f.launch ?? null,
-    launchName: launchName(launch ? { agent: launch.agent, description: launch.description } : null),
+    launchName: (launch && names.get(launch.id)) ?? launchName(launch ? { agent: launch.agent, description: launch.description } : null),
     stage: f.stage,
     pass: f.pass ?? null,
     source,
@@ -212,6 +212,16 @@ function sinceOf(u: Json, running: RunningLaunch[]): string | undefined {
   return ends.at(-1) ?? undefined;
 }
 
+/** A launch's VERDICT lines through fsl.mjs's own grammar — one reader of the line, never a second regex. */
+function verdictsOf(l: Json): LaunchVerdict[] {
+  const out: LaunchVerdict[] = [];
+  for (const item of (l.block?.VERDICT?.items ?? []) as string[]) {
+    const v = parseVerdict(String(item));
+    if (v) out.push({ id: v.id, result: v.result as VerdictResult });
+  }
+  return out;
+}
+
 export function readRun(runDir: string, opts: ReadOptions = {}): Run {
   const errors: FileError[] = [];
   const record = readRecord(runDir, errors);
@@ -248,7 +258,8 @@ export function readRun(runDir: string, opts: ReadOptions = {}): Run {
 
   const rawLaunches = (json.launches ?? []) as Json[];
   const byId = new Map(rawLaunches.map((l) => [l.id as string, l]));
-  const findings = ((json.findings ?? []) as Json[]).map((f) => findingOf(f, byId, rawUnits, shots, human));
+  const names = launchNames(rawLaunches.map((l) => ({ id: l.id, stage: l.stage ?? null, agent: l.agent || null, description: l.description || null })));
+  const findings = ((json.findings ?? []) as Json[]).map((f) => findingOf(f, byId, names, rawUnits, shots, human));
   const launches: Launch[] = rawLaunches.map((l) => {
     if (l.reportMissing) errors.push({ file: l.report || l.id, cause: l.report && existsSync(join(runDir, l.report)) ? "файл пуст" : "файла нет" });
     const sections = Object.fromEntries(Object.entries((l.block ?? {}) as Json).map(([k, v]) => [k, { value: v.value ?? "", items: v.items ?? [] }]));
@@ -257,7 +268,7 @@ export function readRun(runDir: string, opts: ReadOptions = {}): Run {
       stage: l.stage,
       agent: l.agent || null,
       description: l.description || null,
-      name: launchName({ agent: l.agent || null, description: l.description || null }),
+      name: names.get(l.id) ?? launchName({ agent: l.agent || null, description: l.description || null }),
       kind: agentKind({ agent: l.agent || null, description: l.description || null }),
       model: l.model || null,
       unit: l.unit ?? null,
@@ -270,6 +281,7 @@ export function readRun(runDir: string, opts: ReadOptions = {}): Run {
       reportMissing: Boolean(l.reportMissing),
       sections,
       unparsed: l.unparsed ?? [],
+      verdicts: verdictsOf(l),
       findings: findings.filter((f) => f.launch === l.id).map((f) => f.id),
     };
     // Written by the row or absent: a row saved before a column existed is unknown, never zero.
@@ -287,6 +299,7 @@ export function readRun(runDir: string, opts: ReadOptions = {}): Run {
     dir: runDir,
     recorded,
     source,
+    recordVersion: typeof record?.version === "number" ? record.version : null,
     goal: json.goal ?? null,
     mode: json.mode ?? null,
     N: json.N ?? null,
@@ -304,6 +317,7 @@ export function readRun(runDir: string, opts: ReadOptions = {}): Run {
     units,
     launches,
     running,
+    launchCount: launches.length + running.length,
     commits: Array.isArray(json.commits) ? json.commits.length : null,
     findings,
     surfaces: surfacesOf(json, findings, shots),

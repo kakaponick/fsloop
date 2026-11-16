@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, test } from "vitest";
-import { briefText, criticReport, decisionTable, implementReport, ownTable, writeRecord, writeRun, writeRunningLaunch, writeTranscript, type RunSpec } from "../fixtures/make.ts";
+import { afterAll, describe, expect, inject, test } from "vitest";
+import { briefText, criticReport, decisionTable, implementReport, ownTable, PROJECTS, runId, writeRecord, writeRun, writeRunningLaunch, writeTranscript, type RunSpec } from "../fixtures/make.ts";
 import { readRun } from "./run.ts";
 
 const NOW = Date.parse("2026-11-16T10:00:00Z");
@@ -264,5 +264,56 @@ describe("readRun — a launch's boot, child launches and agent id; a unit's che
   test("a unit with no logs carries no checks", () => {
     const dir = fixture({ units: [{ id: "u1", state: "ready", title: "actions pages" }] });
     expect(readRun(dir).units[0].checks).toEqual([]);
+  });
+});
+
+describe("readRun — a verdict launch's lines as fsl.mjs parses them (code-9)", () => {
+  test("each VERDICT line fsl.mjs reads, with its result; a line it leaves unparsed is counted nowhere", () => {
+    const dir = join(temp, "verd0001");
+    const code = "p1-review-critic-code";
+    writeRun(dir, {
+      id: "verd0001",
+      mtime: NOW,
+      now: NOW,
+      launches: [
+        { id: code, stage: "p1-review", agent: "fsloop-critic", description: "critic code", report: criticReport({ lens: "code", findings: [REAL.code29, REAL.code21] }) },
+        { id: "p1-verdict-critic-code-verdict", stage: "p1-verdict", agent: "fsloop-critic", description: "critic code verdict", report: criticReport({ lens: "code verdict", verdict: [`${code}#code-29 resolved — one peer-key function`, `${code}#code-21 partial — one caller still copies it`, "code-21 is now resolved by u1, said in prose"], findings: [] }) },
+      ],
+    });
+    const launch = readRun(dir, { git: () => null }).launches[1];
+    expect(launch.verdicts).toEqual([
+      { id: `${code}#code-29`, result: "resolved" },
+      { id: `${code}#code-21`, result: "partial" },
+    ]);
+    expect(launch.unparsed.map((u) => u.text)).toEqual(["code-21 is now resolved by u1, said in prose"]);
+    expect(readRun(dir, { git: () => null }).launches[0].verdicts).toEqual([]);
+  });
+});
+
+describe("readRun — the fixture run at the production maximum (craft-8, craft-10)", () => {
+  // Folder 40 of the shared fixture root: 97 launches over two passes, one launch running (fixtures/make.ts → maxRun).
+  let first = 0;
+  const project = PROJECTS.find((p) => (first += p.runs) > 40)?.name ?? "";
+  const run = readRun(join(inject("fixtureRoot"), project, ".claude", "fsloop", "runs", runId(40)), { git: () => null });
+
+  test("one launch count where the run is parsed: the 97 recorded and the 1 running", () => {
+    expect(run.launches).toHaveLength(97);
+    expect(run.running).toHaveLength(1);
+    expect(run.launchCount).toBe(98);
+  });
+
+  test("a launch name two launches share carries its pass, or its stage when the pass is shared too", () => {
+    const name = (finding: string) => run.findings.find((f) => f.id === finding)?.launchName;
+    // «code» critics review and assess in both passes: the pass alone does not tell them apart.
+    expect(name("p1-review-critic-code#code-6")).toBe("code · проход 1 · ревью");
+    expect(name("p2-review-critic-code#code-6")).toBe("code · проход 2 · ревью");
+    expect(name("p1-assess-critic-code#code-1")).toBe("code · проход 1 · приёмка");
+    expect(run.launches.find((l) => l.id === "p2-assess-critic-runtime")?.name).toBe("runtime · проход 2 · приёмка");
+    // «improve» assesses once in each pass: its pass is enough.
+    expect(name("p1-assess-critic-improve#improve-1")).toBe("improve · проход 1");
+    expect(name("p2-assess-critic-improve#improve-1")).toBe("improve · проход 2");
+    // A name no other launch carries stays as it is: «parity» reviews in pass 1 only.
+    expect(name("p1-review-critic-parity#parity-1")).toBe("parity");
+    expect(run.launches.find((l) => l.id === "p1-map-map")?.name).toBe("карта");
   });
 });

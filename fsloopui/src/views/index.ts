@@ -2,13 +2,15 @@
 // (`?view=`). This registry is the shell's (u3); each view's folder is its own unit's — Находки u4, Юниты u5,
 // Отчёты, Соглашения and Журнал u6 — and replaces its placeholder there, never here.
 import type { ComponentType } from "react";
-import type { Run } from "../../shared/model.ts";
-import type { ServedRun } from "../../server/store.ts";
+import type { Run, ServedRun } from "../../shared/model.ts";
 import { ConventionsView } from "./conventions/index.tsx";
 import { FindingsView } from "./findings/index.tsx";
+import type { ViewId } from "./ids.ts";
 import { JournalView } from "./journal/index.tsx";
 import { ReportsView } from "./reports/index.tsx";
 import { UnitsView } from "./units/index.tsx";
+
+export { DEFAULT_VIEW, VIEW_IDS, type ViewId } from "./ids.ts";
 
 /** A run as the server serves it: the model, its key, project and version. */
 export type LoadedRun = ServedRun;
@@ -16,10 +18,6 @@ export type LoadedRun = ServedRun;
 export interface ViewProps {
   run: LoadedRun;
 }
-
-export const VIEW_IDS = ["findings", "units", "reports", "conventions", "journal"] as const;
-export type ViewId = (typeof VIEW_IDS)[number];
-export const DEFAULT_VIEW: ViewId = "findings";
 
 export interface ViewDef {
   id: ViewId;
@@ -33,7 +31,7 @@ export interface ViewDef {
 export const VIEWS: readonly ViewDef[] = [
   { id: "findings", label: "Находки", count: (run) => run.findings.length, component: FindingsView },
   { id: "units", label: "Юниты", count: (run) => run.units.length, component: UnitsView },
-  { id: "reports", label: "Отчёты", count: (run) => run.launches.length, component: ReportsView },
+  { id: "reports", label: "Отчёты", count: (run) => run.launchCount, component: ReportsView },
   { id: "conventions", label: "Соглашения", count: (run) => run.conventions.length, component: ConventionsView },
   { id: "journal", label: "Журнал", count: (run) => run.journal.length, component: JournalView },
 ];

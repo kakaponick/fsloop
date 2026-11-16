@@ -1,7 +1,7 @@
 // The addresses of fsloopUI (rules/ui → Layout 2, Conventions 12): a run is /r/<project>/<id>, its view and the
 // object a view opens are query keys — `view`, then `finding`, `unit`, `report` with `tab`, `entry`. A project
 // name may hold a slash (two projects of one name), so the run id is the last segment and the rest is the project.
-import { VIEW_IDS, DEFAULT_VIEW, type ViewId } from "../views/index.ts";
+import { VIEW_IDS, DEFAULT_VIEW, type ViewId } from "../views/ids.ts";
 
 export type RunParams = Partial<Record<"view" | "finding" | "unit" | "report" | "tab" | "entry" | "page", string>>;
 

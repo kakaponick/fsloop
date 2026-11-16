@@ -15,6 +15,8 @@ export interface AppOptions {
   distDir: string;
   /** How often open runs are checked for changes; every fifth check also finds new runs and checks closed ones. */
   intervalMs?: number;
+  /** False: no poller — the caller moves the server with `pulse()` (tests, code-1). */
+  poll?: boolean;
   now?: () => number;
   git?: Git;
 }
@@ -50,7 +52,36 @@ export const REPORT_NAME = /^[A-Za-z0-9_-][A-Za-z0-9._-]*\.md$/;
 
 const ROUTES: Record<string, string> = { "/api/runs": "GET", "/api/run": "GET", "/api/events": "GET", "/api/frame": "GET", "/api/report": "GET", "/api/verdict": "POST" };
 
-export function createApp({ roots, distDir, intervalMs = 2000, now = Date.now, git }: AppOptions) {
+const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
+const hostnameOf = (host: string): string | null => {
+  try {
+    return new URL(`http://${host}`).hostname;
+  } catch {
+    return null;
+  }
+};
+
+/** Why a request is not this machine's own page talking to the server, or null when it is (code-7). The Host must name
+ * the loopback — a rebound DNS name reads no run; an Origin, when the browser sends one, must be a loopback page — any
+ * other site's page writes no verdict. The port is not checked: `npm run dev` proxies its own loopback origin here. */
+function foreign(req: Request, url: URL): string | null {
+  const host = req.headers.get("host") ?? url.host;
+  if (!LOOPBACK.has(hostnameOf(host) ?? "")) return `Адрес ${host} отклонён: fsloopUI отвечает только на 127.0.0.1 и localhost`;
+  const origin = req.headers.get("origin");
+  if (origin !== null) {
+    let page: URL | null = null;
+    try {
+      page = new URL(origin);
+    } catch {}
+    if (!page || page.protocol !== "http:" || !LOOPBACK.has(page.hostname)) return `Запрос со страницы ${origin} отклонён: fsloopUI отвечает только своим страницам`;
+  }
+  return null;
+}
+
+/** A POST body is JSON by its content type: a form or plain-text body — what a page sends with no preflight — is refused. */
+const isJson = (req: Request) => (req.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase() === "application/json";
+
+export function createApp({ roots, distDir, intervalMs = 2000, poll = true, now = Date.now, git }: AppOptions) {
   const store = createStore({ roots, git });
   store.refresh({ full: true });
   const encoder = new TextEncoder();
@@ -73,18 +104,22 @@ export function createApp({ roots, distDir, intervalMs = 2000, now = Date.now, g
     send(tick());
   };
 
-  let n = 0;
-  const timer = setInterval(() => {
+  /** One tick: re-read what changed and tell the clients. The poller calls it; with `poll: false` the caller does —
+   * a change is read on the second tick that finds it settled (store.refresh). */
+  function pulse({ full = true }: { full?: boolean } = {}) {
     try {
-      store.refresh({ full: ++n % 5 === 0 });
+      store.refresh({ full });
     } catch (e) {
       console.error("fsloopUI: refresh failed", e);
     }
     broadcast();
-  }, intervalMs);
+  }
+
+  let n = 0;
+  const timer = poll ? setInterval(() => pulse({ full: ++n % 5 === 0 }), intervalMs) : null;
   // A comment line keeps proxies from closing a quiet stream.
   const keepAlive = setInterval(() => send(encoder.encode(": ping\n\n")), 15_000);
-  timer.unref?.();
+  timer?.unref?.();
   keepAlive.unref?.();
 
   function events(): Response {
@@ -134,6 +169,7 @@ export function createApp({ roots, distDir, intervalMs = 2000, now = Date.now, g
   }
 
   async function verdict(req: Request): Promise<Response> {
+    if (!isJson(req)) return json(415, { error: "Тело запроса — не JSON: нужен content-type application/json" });
     let body: Record<string, unknown>;
     try {
       body = await req.json();
@@ -177,6 +213,8 @@ export function createApp({ roots, distDir, intervalMs = 2000, now = Date.now, g
 
   async function handle(req: Request): Promise<Response> {
     const url = new URL(req.url);
+    const refused = foreign(req, url);
+    if (refused) return json(403, { error: refused });
     const method = ROUTES[url.pathname];
     if (url.pathname.startsWith("/api/")) {
       if (!method) return json(404, { error: `Нет такого адреса: ${url.pathname}` });
@@ -198,7 +236,7 @@ export function createApp({ roots, distDir, intervalMs = 2000, now = Date.now, g
   }
 
   function close() {
-    clearInterval(timer);
+    if (timer) clearInterval(timer);
     clearInterval(keepAlive);
     for (const c of clients)
       try {
@@ -207,7 +245,7 @@ export function createApp({ roots, distDir, intervalMs = 2000, now = Date.now, g
     clients.clear();
   }
 
-  return { handle, close, store };
+  return { handle, close, pulse, store };
 }
 
 export type App = ReturnType<typeof createApp>;

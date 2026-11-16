@@ -32,7 +32,7 @@ writeRun(dir, {
 // An earlier verdict, written before fsloopUI ran.
 writeFileSync(join(dir, "human.jsonl"), JSON.stringify({ finding: FINDING, verdict: "disagree", note: null, at: "2026-11-16T08:00:00Z" }) + "\n");
 
-const app = createApp({ roots: [root], distDir: join(temp, "dist"), intervalMs: 60_000, now: () => NOW });
+const app = createApp({ roots: [root], distDir: join(temp, "dist"), poll: false, now: () => NOW });
 afterAll(() => {
   app.close();
   rmSync(temp, { recursive: true, force: true });
@@ -96,7 +96,7 @@ describe("POST /api/verdict", () => {
     expect(unknown.status).toBe(404);
     expect(await unknown.json()).toEqual({ error: "Находка p1-map-craft-shell#craft-9 не найдена в прогоне app/ver00001" });
     expect((await post({ run: "app/nope", finding: FINDING, verdict: "agree" })).status).toBe(404);
-    expect((await app.handle(new Request("http://127.0.0.1:4747/api/verdict", { method: "POST", body: "{" }))).status).toBe(400);
+    expect((await app.handle(new Request("http://127.0.0.1:4747/api/verdict", { method: "POST", headers: { "content-type": "application/json" }, body: "{" }))).status).toBe(400);
     expect(lines()).toHaveLength(before);
   });
 });

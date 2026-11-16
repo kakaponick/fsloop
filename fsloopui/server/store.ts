@@ -4,14 +4,17 @@
 import { createHash } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
-import type { Run, RunCard } from "../shared/model.ts";
+import type { Run, RunCard, ServedRun } from "../shared/model.ts";
 import { cardOf, lastWriteOf } from "./card.ts";
 import { discover, type FoundRun } from "./discover.ts";
 import { readRun, type Git } from "./run.ts";
 
 interface Entry {
   found: FoundRun;
+  /** The stamp the model was read at. */
   stamp: string;
+  /** A newer stamp seen on the last tick and not read yet: the run is read once a tick finds it unchanged. */
+  pending: string | null;
   version: number;
   card: RunCard;
   /** Kept for a run that is not closed; a closed one is read again when it is asked for. */
@@ -20,7 +23,15 @@ interface Entry {
   sessions: string[];
 }
 
-export type ServedRun = Run & { key: string; project: string; version: number };
+const isDir = (p: string) => {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+const RECORD = "run.json";
 
 /** Every file under a folder with its size and mtime, as one hash. */
 function folderStamp(dir: string, extra: string[]): string {
@@ -67,15 +78,29 @@ export function createStore({ roots, git }: { roots: string[]; git?: Git }) {
   let listVersion = 0;
   let listSig = "";
 
+  function drop(key: string) {
+    entries.delete(key);
+    closedRuns.delete(key);
+  }
+
   function load(found: FoundRun, prev?: Entry): Entry {
     const sessions = prev?.sessions ?? [];
     const stamp = folderStamp(found.dir, launchesStarted(sessions));
-    const run = readRun(found.dir, { git });
+    let run = readRun(found.dir, { git });
+    const recordFailed = run.errors.filter((e) => e.file === RECORD);
+    if (recordFailed.length && prev?.card.recorded) {
+      // run.json cannot be read right now (half-written, or locked while fsl.mjs renames it): the previous record
+      // stands, with the file's error; the next change of the folder reads it again (rules/ui → Conventions 14).
+      const before = prev.run ?? closedRuns.get(found.key) ?? null;
+      if (!before) return { ...prev, stamp, pending: null };
+      run = { ...before, errors: [...before.errors.filter((e) => e.file !== RECORD), ...recordFailed] };
+    }
     const transcripts = run.sessions.map((s) => s.transcript).filter((t): t is string => Boolean(t));
     closedRuns.delete(found.key);
     return {
       found,
       stamp: transcripts.join() === sessions.join() ? stamp : folderStamp(found.dir, launchesStarted(transcripts)),
+      pending: null,
       version: (prev?.version ?? 0) + 1,
       card: cardOf({ key: found.key, project: found.project, run, lastWriteAt: lastWriteOf(run) }),
       run: run.closed ? null : run,
@@ -84,18 +109,29 @@ export function createStore({ roots, git }: { roots: string[]; git?: Git }) {
     };
   }
 
-  /** Re-reads what changed. `full` also discovers new run folders and checks the closed runs. */
+  /** Re-reads what changed. `full` also discovers new run folders and checks the closed runs. A run is re-read only
+   * from settled bytes: a tick that finds its folder changed waits, and the next tick that finds it unchanged reads
+   * it — a file caught half-written never replaces the last good model (rules/ui → Conventions 4, 14). */
   function refresh({ full = false }: { full?: boolean } = {}) {
     if (full || !entries.size) {
       const found = discover(roots);
       const keys = new Set(found.map((f) => f.key));
-      for (const k of [...entries.keys()]) if (!keys.has(k)) entries.delete(k);
+      for (const k of [...entries.keys()]) if (!keys.has(k)) drop(k);
       for (const f of found) if (!entries.has(f.key)) entries.set(f.key, load(f));
     }
     for (const [key, e] of entries) {
       if (!full && e.closed === true) continue;
-      if (folderStamp(e.found.dir, launchesStarted(e.sessions)) !== e.stamp) entries.set(key, load(e.found, e));
-      else if (e.run && !e.closed) e.card = { ...e.card, lastWriteAt: lastWriteOf(e.run) };
+      // A folder gone is gone now, not at the next full tick (Conventions 13: «его папки больше нет»).
+      if (!isDir(e.found.dir)) {
+        drop(key);
+        continue;
+      }
+      const stamp = folderStamp(e.found.dir, launchesStarted(e.sessions));
+      if (stamp === e.stamp) {
+        e.pending = null;
+        if (e.run && !e.closed) e.card = { ...e.card, lastWriteAt: lastWriteOf(e.run) };
+      } else if (stamp !== e.pending) e.pending = stamp;
+      else entries.set(key, load(e.found, e));
     }
     const sig = JSON.stringify([...entries.values()].map((e) => ({ ...e.card, lastWriteAt: e.card.lastWriteAt ? Math.floor(Date.parse(e.card.lastWriteAt) / BUCKET) : null })));
     if (sig !== listSig) {

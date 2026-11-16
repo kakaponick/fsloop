@@ -1,7 +1,6 @@
 // The words of «Юниты» that code builds (rules/ui → Copy 3–4: each is tested with the widest real input against a
 // literal): the detail's section headings, a check's outcome and its attempts, the toolbar facts, a missing unit, the
 // cell's cause. State words come from shared/states.ts; the plural, durations and Moscow time from shared/text.ts.
-import { NOT_RECORDED } from "../../../shared/states.ts";
 import { count, NOUNS, type Forms } from "../../../shared/text.ts";
 import { notFoundText, type GlossaryEntry } from "@/ui";
 
@@ -33,11 +32,8 @@ const ATTEMPTS: Forms = ["попытка", "попытки", "попыток"];
 /** «4 попытки» — shown only when a check ran more than once. */
 export const attemptsText = (n: number): string | null => (n > 1 ? count(n, ATTEMPTS) : null);
 
-/** A check's last outcome: «прошла», «упала · exit 1»; a line the log did not split reads as written. */
-export function checkOutcome(exit: number | null): string {
-  if (exit === null) return NOT_RECORDED;
-  return exit === 0 ? "прошла" : `упала · exit ${exit}`;
-}
+/** A check's last outcome: the words of shared/states.ts's check-outcome map (code-10). */
+export { checkOutcome } from "../../../shared/states.ts";
 
 /** The log a check's line comes from: «verify.log.lines» → «verify». */
 export const logName = (file: string): string => file.replace(/\.log\.lines$|\.lines$/, "");

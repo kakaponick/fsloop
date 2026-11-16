@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
@@ -62,7 +62,10 @@ describe("cardOf", () => {
   test("the facts the run page folds behind «Подробнее»: the run folder, the worktree, the record's version", () => {
     expect(card.dir).toBe(dir);
     expect(card.worktree).toBeNull();
-    expect(card.version).toBe(readRun(dir).version ?? null);
+    // run.json's own version, as fsl.mjs wrote it — never the store's re-read counter (runtime-4).
+    const written = JSON.parse(readFileSync(join(dir, "run.json"), "utf8")).version;
+    expect(typeof written).toBe("number");
+    expect(card.version).toBe(written);
     const bare = join(temp, "bare-run");
     writeRun(bare, { id: "bare-run", common: false, mtime: NOW, now: NOW });
     expect(cardOf({ key: "k", project: "app", run: readRun(bare), lastWriteAt: null })).toMatchObject({ recorded: false, dir: bare, worktree: null, version: null });
@@ -124,6 +127,15 @@ describe("lastWriteOf — the time liveness counts from", () => {
     writeFileSync(join(projects, "C--dev-app", session, "subagents", "agent-feed01.jsonl"), "{}\n");
     utimesSync(join(projects, "C--dev-app", session, "subagents", "agent-feed01.jsonl"), new Date(NOW - MIN), new Date(NOW - MIN));
     expect(lastWriteOf(r)).toBe(new Date(NOW - MIN).toISOString());
+  });
+
+  test("the user's verdict is fsloopUI's write, not the run's: human.jsonl leaves lastWriteAt alone (runtime-1)", () => {
+    const dir = run();
+    const before = lastWriteOf(readRun(dir));
+    expect(before).toBe(new Date(NOW - 40 * MIN).toISOString());
+    writeFileSync(join(dir, "human.jsonl"), JSON.stringify({ finding: "p1-map-map#1", verdict: "agree", note: null, at: new Date(NOW).toISOString() }) + "\n");
+    utimesSync(join(dir, "human.jsonl"), new Date(NOW), new Date(NOW));
+    expect(lastWriteOf(readRun(dir))).toBe(before);
   });
 
   test("no write at all reads «не записано»", () => {

@@ -152,8 +152,18 @@ export interface Launch {
   /** The report's sections but FINDINGS (and an implementer's OPEN): LENS, AUDIT, CONVENTIONS, UNVERIFIED … */
   sections: Record<string, ReportSection>;
   unparsed: UnparsedLine[];
+  /** Its VERDICT lines as fsl.mjs's own grammar reads them (`parseVerdict`); a line it cannot read is in `unparsed`. */
+  verdicts: LaunchVerdict[];
   findings: string[];
 }
+
+/** A verdict critic's line on one finding: «<id> resolved — …». */
+export interface LaunchVerdict {
+  id: string;
+  result: VerdictResult;
+}
+
+export type VerdictResult = "resolved" | "partial" | "unresolved";
 
 export interface RunningLaunch {
   agentId: string;
@@ -247,7 +257,8 @@ export interface Run {
   recorded: boolean;
   /** Where the model came from: a live parse of the folder, or run.json when the live parse failed or the run is closed. */
   source: "live" | "record";
-  version?: number;
+  /** run.json's own `version` (its format), as fsl.mjs wrote it; null without a record. */
+  recordVersion: number | null;
   goal: string | null;
   mode: string | null;
   N: number | null;
@@ -265,6 +276,9 @@ export interface Run {
   units: Unit[];
   launches: Launch[];
   running: RunningLaunch[];
+  /** Every launch of the run — the recorded and the running — counted once here (rules/ui → Conventions 3): the
+   * «Отчёты» tab, its «Агент» filter and its status bar list this many. */
+  launchCount: number;
   commits: number | null;
   findings: Finding[];
   surfaces: Surface[];
@@ -273,6 +287,10 @@ export interface Run {
   frames: string[];
   errors: FileError[];
 }
+
+/** A run as the server serves it: the model, its key, its project and the store's version of it — a counter that
+ * rises with each re-read, not run.json's `recordVersion`. */
+export type ServedRun = Run & { key: string; project: string; version: number };
 
 /** A run as the server lists it: the run's key and project, its model, its last write. */
 export interface RunCard {

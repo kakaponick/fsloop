@@ -49,7 +49,8 @@ export function fixtureApp({ only, empty = false }: { only?: number[]; empty?: b
   else if (!shared) makeFixtureRoot(root, { now: NOW, only });
   const dist = join(temp, "dist");
   mkdirSync(dist);
-  const app = createApp({ roots: [root], distDir: dist, intervalMs: 20, git: () => null });
+  // No poller (code-1): a write moves the server itself through `pulse()`, and a test waits for its condition.
+  const app = createApp({ roots: [root], distDir: dist, poll: false, git: () => null });
   const requests: string[] = [];
   let answer: ((path: string) => Promise<Response> | null) | null = null;
   let current: Connection | null = null;
@@ -112,7 +113,8 @@ export function fixtureApp({ only, empty = false }: { only?: number[]; empty?: b
     answer(fn: ((path: string) => Promise<Response> | null) | null) {
       answer = fn;
     },
-    /** Writes a file of run folder n, dated `at` (folder included), as fsloop would. */
+    /** Writes a file of run folder n, dated `at` (folder included), as fsloop would, then ticks the server twice: the
+     * first tick sees the change, the second reads it settled — and tells the stream. */
     write(n: number, rel: string, text: string, at = NOW - MIN / 2) {
       if (shared) throw new Error("fixtureApp: the shared root of 63 is read-only — build the folders you write with `only`");
       const path = join(dirOf(n), rel);
@@ -120,6 +122,12 @@ export function fixtureApp({ only, empty = false }: { only?: number[]; empty?: b
       writeFileSync(path, text);
       utimesSync(path, new Date(at), new Date(at));
       utimesSync(dirOf(n), new Date(at), new Date(at));
+      app.pulse();
+      app.pulse();
+    },
+    /** One tick of the server: what changed on disk outside `write` (a new run folder) is read and told. */
+    pulse() {
+      app.pulse();
     },
     /** The live stream drops: the store hears its error. */
     drop() {

@@ -21,15 +21,20 @@ export { keyOf, MIN, NOW } from "../../app/testing.tsx";
 export function findingsApp(only: number[]) {
   const fx: FixtureApp = fixtureApp({ only });
   const dist = mkdtempSync(join(tmpdir(), "fsloopui-findings-"));
-  const writer = createApp({ roots: [fx.root], distDir: dist, intervalMs: 3_600_000, now: () => NOW, git: () => null });
+  const writer = createApp({ roots: [fx.root], distDir: dist, poll: false, now: () => NOW, git: () => null });
   const sent: VerdictBody[] = [];
   let failing: string | null = null;
   const post: PostVerdict = async (body) => {
     sent.push(body);
     if (failing !== null) return new Response(JSON.stringify({ error: failing }), { status: 500, headers: { "content-type": "application/json" } });
-    // the writer knows the findings a test added to the folder since it started
-    writer.store.refresh({ full: true });
-    return writer.handle(new Request("http://127.0.0.1:4747/api/verdict", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
+    // the writer knows the findings a test added to the folder since it started: two ticks, the second reads them settled
+    writer.pulse();
+    writer.pulse();
+    const res = await writer.handle(new Request("http://127.0.0.1:4747/api/verdict", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
+    // the view's server reads what the writer appended, settled, and tells the stream
+    fx.app.pulse();
+    fx.app.pulse();
+    return res;
   };
   return {
     fx,

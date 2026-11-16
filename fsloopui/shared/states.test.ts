@@ -1,11 +1,11 @@
 import { describe, expect, test } from "vitest";
 import { STEPS } from "../../skills/fsloop/fsl.mjs";
 import { LIVENESS } from "./liveness.ts";
-import { agentKind, DECISION, FINDING_STATUS, LAUNCH_STATE, launchName, launchState, reportWord, SEVERITY, stageOf, STAGE_WORDS, UNIT_STATE, VERDICT } from "./states.ts";
+import { agentKind, CHECK_OUTCOME, checkOutcome, DECISION, FINDING_STATUS, LAUNCH_STATE, launchName, launchNames, launchState, reportWord, SEVERITY, stageOf, STAGE_WORDS, UNIT_STATE, VERDICT } from "./states.ts";
 
 describe("glossary lines (ui → Glossary → Bound)", () => {
   test("every value of every state map reads «value — meaning» in 80 characters or fewer", () => {
-    const maps = { UNIT_STATE, SEVERITY, DECISION, FINDING_STATUS, VERDICT, LAUNCH_STATE, LIVENESS };
+    const maps = { UNIT_STATE, SEVERITY, DECISION, FINDING_STATUS, VERDICT, LAUNCH_STATE, LIVENESS, CHECK_OUTCOME };
     const over = Object.entries(maps).flatMap(([name, map]) =>
       Object.entries(map as Record<string, { compact: string; meaning: string }>)
         .map(([key, e]) => ({ at: `${name}.${key}`, line: `${e.compact} — ${e.meaning}` }))
@@ -102,5 +102,39 @@ describe("launches", () => {
   test("a critic's report is «отчёт критика», any other «отчёт запуска»", () => {
     expect(reportWord({ agent: "fsloop-critic", description: "critic code" })).toBe("отчёт критика");
     expect(reportWord({ agent: "fsloop-implement", description: "u1 implement" })).toBe("отчёт запуска");
+  });
+
+  test("a name two launches share carries the pass, or the stage when the pass is shared too (craft-10)", () => {
+    const critic = (id: string, stage: string, description: string) => ({ id, stage, agent: "fsloop-critic", description });
+    const names = launchNames([
+      critic("p1-map-craft-shell", "p1-map", "craft shell"),
+      critic("p1-review-critic-runtime", "p1-review", "critic runtime"),
+      critic("p2-review-critic-runtime", "p2-review", "critic runtime"),
+      critic("p2-assess-critic-runtime", "p2-assess", "critic runtime"),
+      critic("p1-review-critic-code", "p1-review", "critic code"),
+      critic("p2-review-critic-code", "p2-review", "critic code"),
+      { id: "p1-units-u1-implement", stage: "p1-units", agent: "fsloop-implement", description: "u1 implement" },
+    ]);
+    expect(Object.fromEntries(names)).toEqual({
+      "p1-map-craft-shell": "craft · shell",
+      "p1-review-critic-runtime": "runtime · проход 1",
+      "p2-review-critic-runtime": "runtime · проход 2 · ревью",
+      "p2-assess-critic-runtime": "runtime · проход 2 · приёмка",
+      "p1-review-critic-code": "code · проход 1",
+      "p2-review-critic-code": "code · проход 2",
+      "p1-units-u1-implement": "u1 · исполнитель",
+    });
+    // Nothing tells two launches of one stage apart: both keep the bare name.
+    expect([...launchNames([critic("a", "p1-review", "critic code"), critic("b", "p1-review", "critic code")]).values()]).toEqual(["code", "code"]);
+  });
+});
+
+describe("a unit check's outcome (rules/ui → Conventions 1, code-10)", () => {
+  test("passed, failed with its exit code, not recorded — words of the shared map", () => {
+    expect(CHECK_OUTCOME.passed).toMatchObject({ compact: "прошла", tone: "success" });
+    expect(CHECK_OUTCOME.failed).toMatchObject({ compact: "упала", tone: "warning" });
+    expect(checkOutcome(0)).toBe("прошла");
+    expect(checkOutcome(127)).toBe("упала · exit 127");
+    expect(checkOutcome(null)).toBe("не записано");
   });
 });

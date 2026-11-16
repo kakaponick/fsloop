@@ -76,6 +76,18 @@ export type UnitState = keyof typeof UNIT_STATE;
 
 export const unitStateOf = (state: string | null | undefined): UnitState => (state && state in UNIT_STATE ? (state as UnitState) : "unknown");
 
+/** A unit check's outcome: a line of its verify, land or debug log, by its exit code. */
+export const CHECK_OUTCOME = {
+  passed: entry("прошла", "success", 0, "Проверка юнита завершилась с кодом выхода 0."),
+  failed: entry("упала", "warning", 1, "Проверка юнита завершилась с ненулевым кодом выхода."),
+} satisfies Record<string, StateEntry>;
+
+/** «прошла», «упала · exit 1»; a line the log did not split — «не записано». */
+export function checkOutcome(exit: number | null): string {
+  if (exit === null) return NOT_RECORDED;
+  return exit === 0 ? CHECK_OUTCOME.passed.compact : `${CHECK_OUTCOME.failed.compact} · exit ${exit}`;
+}
+
 // ── findings ─────────────────────────────────────────────────────────────────────────────────
 
 export const SEVERITY = {
@@ -170,6 +182,25 @@ export function launchName(l: LaunchLike | null): string {
     return `${unit ?? description} · ${KIND_WORDS.implement}`;
   }
   return description || l.agent || NOT_RECORDED;
+}
+
+/** The launch names of a run by launch id. A name two launches share carries what tells them apart: «code · проход 2»
+ * when the pass does, «code · проход 2 · ревью» when two of them share the pass too; launches of one stage that
+ * nothing tells apart keep the bare name. Every surface reads these (craft-10: one concept, one word). */
+export function launchNames(launches: readonly (LaunchLike & { id: string; stage: string | null })[]): Map<string, string> {
+  const all = launches.map((l) => ({ id: l.id, name: launchName(l), stage: stageOf(l.stage) }));
+  const groups = new Map<string, typeof all>();
+  for (const l of all) groups.set(l.name, [...(groups.get(l.name) ?? []), l]);
+  const out = new Map<string, string>();
+  for (const l of all) {
+    const group = groups.get(l.name) ?? [];
+    const alone = (same: (o: (typeof all)[number]) => boolean) => group.filter(same).length === 1;
+    if (group.length === 1) out.set(l.id, l.name);
+    else if (l.stage.pass !== null && alone((o) => o.stage.pass === l.stage.pass)) out.set(l.id, `${l.name} · проход ${l.stage.pass}`);
+    else if (l.stage.stage && alone((o) => o.stage.stage === l.stage.stage)) out.set(l.id, `${l.name} · ${l.stage.full}`);
+    else out.set(l.id, l.name);
+  }
+  return out;
 }
 
 /** «отчёт критика» for a critic's report, «отчёт запуска» for any other. */

@@ -103,6 +103,7 @@ describe("the shell's walk", () => {
     renderShell(app.transport, { path: `/r/${keyOf(24)}` });
     await loaded();
     rmSync(app.dirOf(24), { recursive: true, force: true });
+    app.pulse();
     expect(await screen.findByText(runNotFoundText("077e72d5", [app.root]))).toBeInTheDocument();
     const card = within(sidebar()).getByRole("link", { name: /077e72d5/ });
     expect(within(card).getByText("папки больше нет")).toBeInTheDocument();

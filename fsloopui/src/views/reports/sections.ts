@@ -165,16 +165,13 @@ export const worstTone = (counts: readonly SeverityCount[]): Tone => (counts.len
 export const VERDICT_WORDS = ["resolved", "partial", "unresolved"] as const;
 export type VerdictWord = (typeof VERDICT_WORDS)[number];
 
-/** A verdict launch's outcome, counted from its VERDICT lines («<id> resolved — …»); null for another report. */
-export function verdictCounts(l: Pick<Launch, "sections">): Record<VerdictWord, number> | null {
-  const s = l.sections.VERDICT;
+/** A verdict launch's outcome, counted from the verdicts the model parsed with fsl.mjs's grammar (code-9); a line it
+ * left unparsed counts nowhere. Null for another report. */
+export function verdictCounts(l: Pick<Launch, "sections" | "verdicts">): Record<VerdictWord, number> | null {
   const lens = l.sections.LENS?.value ?? "";
-  if (!s && !/verdict/.test(lens)) return null;
+  if (!l.sections.VERDICT && !/verdict/.test(lens)) return null;
   const out: Record<VerdictWord, number> = { resolved: 0, partial: 0, unresolved: 0 };
-  for (const item of (s?.items ?? []).filter(filled)) {
-    const word = /\b(unresolved|resolved|partial)\b/.exec(item)?.[1] as VerdictWord | undefined;
-    if (word) out[word]++;
-  }
+  for (const v of l.verdicts) out[v.result]++;
   return out;
 }
 
