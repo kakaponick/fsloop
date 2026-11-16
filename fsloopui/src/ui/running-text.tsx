@@ -1,0 +1,235 @@
+// The running-text renderer (rules/ui → Layout 5): a finding's rule, observation and fix, a report's sections, a
+// journal entry and a goal keep their form — paragraphs, line breaks, bullet and numbered lists, headings, inline
+// code and bold — at a capped reading measure. A markdown table or a code block scrolls sideways in its own
+// bounded container. Ids become links only through the resolver the caller gives. The text is parsed into React
+// elements, never into HTML: a tag in the text is shown as text.
+import { Fragment, type ReactNode } from "react";
+import { cn } from "@/lib/utils";
+
+/** The address of an id the text names, or null when the token is not an id of this run. */
+export type Resolve = (token: string) => string | null;
+
+export interface RunningTextProps {
+  text: string | null | undefined;
+  resolve?: Resolve;
+  /** Renders a resolved link; a plain anchor by default (the app passes its router's link). */
+  renderLink?: (href: string, children: ReactNode, token: string) => ReactNode;
+  /** Off where the container already caps the measure. */
+  measure?: boolean;
+  className?: string;
+}
+
+type Inline = string;
+type ListItem = { depth: number; lines: Inline[] };
+type Block =
+  | { kind: "p"; lines: Inline[] }
+  | { kind: "h"; level: 3 | 4; text: Inline }
+  | { kind: "ul" | "ol"; start: number; items: ListItem[] }
+  | { kind: "table"; head: Inline[]; rows: Inline[][] }
+  | { kind: "code"; text: string };
+
+const BULLET = /^(\s*)[-*•]\s+(.*)$/;
+const NUMBERED = /^(\s*)(\d+)[.)]\s+(.*)$/;
+const HEADING = /^(#{1,6})\s+(.*)$/;
+const TABLE_ROW = /^\s*\|.*\|\s*$/;
+const TABLE_RULE = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+const FENCE = /^\s*```/;
+
+/** A table row's cells; `\|` stays a bar inside a cell. */
+function cells(line: string): string[] {
+  const body = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+  return body.split(/(?<!\\)\|/).map((cell) => cell.trim().replace(/\\\|/g, "|"));
+}
+
+/** Splits text into blocks; exported for the tests. */
+export function parseBlocks(text: string): Block[] {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  const blocks: Block[] = [];
+  let i = 0;
+  const last = () => blocks[blocks.length - 1];
+  while (i < lines.length) {
+    const line = lines[i];
+    if (FENCE.test(line)) {
+      const body: string[] = [];
+      i++;
+      while (i < lines.length && !FENCE.test(lines[i])) body.push(lines[i++]);
+      i++;
+      blocks.push({ kind: "code", text: body.join("\n") });
+      continue;
+    }
+    if (TABLE_ROW.test(line) && i + 1 < lines.length && TABLE_RULE.test(lines[i + 1])) {
+      const head = cells(line);
+      const rows: string[][] = [];
+      i += 2;
+      while (i < lines.length && TABLE_ROW.test(lines[i])) rows.push(cells(lines[i++]));
+      blocks.push({ kind: "table", head, rows });
+      continue;
+    }
+    if (line.trim() === "") {
+      i++;
+      continue;
+    }
+    const heading = HEADING.exec(line);
+    if (heading) {
+      blocks.push({ kind: "h", level: heading[1].length <= 2 ? 3 : 4, text: heading[2].trim() });
+      i++;
+      continue;
+    }
+    const bullet = BULLET.exec(line);
+    const numbered = bullet ? null : NUMBERED.exec(line);
+    if (bullet || numbered) {
+      const kind = bullet ? "ul" : "ol";
+      const depth = Math.floor((bullet ?? numbered)![1].replace(/\t/g, "  ").length / 2);
+      const content = bullet ? bullet[2] : numbered![3];
+      const prev = last();
+      if (prev && prev.kind === kind && blocks.length && lines[i - 1]?.trim() !== "") prev.items.push({ depth, lines: [content] });
+      else blocks.push({ kind, start: numbered ? Number(numbered[2]) : 1, items: [{ depth, lines: [content] }] });
+      i++;
+      continue;
+    }
+    const prev = last();
+    // An indented line right under a list item continues it, its line break kept.
+    if (prev && (prev.kind === "ul" || prev.kind === "ol") && /^\s{2,}\S/.test(line) && lines[i - 1]?.trim() !== "") {
+      prev.items[prev.items.length - 1].lines.push(line.trim());
+      i++;
+      continue;
+    }
+    if (prev && prev.kind === "p" && lines[i - 1]?.trim() !== "") prev.lines.push(line.trim());
+    else blocks.push({ kind: "p", lines: [line.trim()] });
+    i++;
+  }
+  return blocks;
+}
+
+const ID_TOKEN = /[A-Za-z0-9][A-Za-z0-9_./:-]*(?:#[A-Za-z0-9_.-]+)?/g;
+const MARKS = /(`[^`]+`)|(\*\*[^*]+\*\*)/g;
+
+const defaultLink = (href: string, children: ReactNode) => (
+  <a href={href} className="underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+    {children}
+  </a>
+);
+
+function Inline({ text, resolve, renderLink }: { text: string; resolve?: Resolve; renderLink: NonNullable<RunningTextProps["renderLink"]> }) {
+  const linked = (plain: string, key: string): ReactNode => {
+    if (!resolve) return plain;
+    const out: ReactNode[] = [];
+    let at = 0;
+    for (const m of plain.matchAll(ID_TOKEN)) {
+      const token = m[0].replace(/[.:]+$/, "");
+      const href = resolve(token);
+      if (!href) continue;
+      out.push(plain.slice(at, m.index));
+      out.push(<Fragment key={`${key}-${m.index}`}>{renderLink(href, token, token)}</Fragment>);
+      at = m.index + token.length;
+    }
+    out.push(plain.slice(at));
+    return out;
+  };
+  const parts: ReactNode[] = [];
+  let at = 0;
+  for (const m of text.matchAll(MARKS)) {
+    parts.push(<Fragment key={`t${at}`}>{linked(text.slice(at, m.index), `t${at}`)}</Fragment>);
+    if (m[1]) {
+      const body = m[1].slice(1, -1);
+      const href = resolve?.(body) ?? null;
+      const code = <code className="rounded-sm bg-code px-1 font-mono text-xs">{body}</code>;
+      parts.push(<Fragment key={`c${m.index}`}>{href ? renderLink(href, code, body) : code}</Fragment>);
+    } else {
+      parts.push(<strong key={`b${m.index}`} className="font-semibold">{linked(m[2].slice(2, -2), `b${m.index}`)}</strong>);
+    }
+    at = m.index + m[0].length;
+  }
+  parts.push(<Fragment key={`t${at}`}>{linked(text.slice(at), `t${at}`)}</Fragment>);
+  return <>{parts}</>;
+}
+
+function Lines({ lines, ...rest }: { lines: string[]; resolve?: Resolve; renderLink: NonNullable<RunningTextProps["renderLink"]> }) {
+  return (
+    <>
+      {lines.map((line, n) => (
+        <Fragment key={n}>
+          {n > 0 && <br />}
+          <Inline text={line} {...rest} />
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
+const INDENT = ["", "ml-5", "ml-10", "ml-15"];
+
+export function RunningText({ text, resolve, renderLink = defaultLink, measure = true, className }: RunningTextProps) {
+  const blocks = parseBlocks(text ?? "");
+  const inline = { resolve, renderLink };
+  return (
+    <div data-slot="running-text" className={cn("flex min-w-0 flex-col gap-2 text-sm break-words", measure && "max-w-measure", className)}>
+      {blocks.map((block, n) => {
+        switch (block.kind) {
+          case "p":
+            return (
+              <p key={n} className="m-0">
+                <Lines lines={block.lines} {...inline} />
+              </p>
+            );
+          case "h":
+            return block.level === 3 ? (
+              <h3 key={n} className="m-0 mt-2 text-base font-semibold first:mt-0">
+                <Inline text={block.text} {...inline} />
+              </h3>
+            ) : (
+              <h4 key={n} className="m-0 mt-1 text-sm font-semibold first:mt-0">
+                <Inline text={block.text} {...inline} />
+              </h4>
+            );
+          case "ul":
+          case "ol": {
+            const List = block.kind;
+            return (
+              <List key={n} start={block.kind === "ol" && block.start !== 1 ? block.start : undefined} className={cn("m-0 flex flex-col gap-1 pl-5", block.kind === "ul" ? "list-disc" : "list-decimal")}>
+                {block.items.map((item, k) => (
+                  <li key={k} className={cn("pl-0.5 marker:text-muted-foreground", INDENT[Math.min(item.depth, 3)])}>
+                    <Lines lines={item.lines} {...inline} />
+                  </li>
+                ))}
+              </List>
+            );
+          }
+          case "table":
+            return (
+              <div key={n} role="region" aria-label="Таблица" tabIndex={0} className="max-w-full overflow-x-auto rounded-md border [scrollbar-gutter:stable]">
+                <table className="w-max min-w-full border-collapse text-sm">
+                  <thead>
+                    <tr>
+                      {block.head.map((cell, k) => (
+                        <th key={k} scope="col" className="border-b px-2 py-1.5 text-left align-bottom text-xs font-normal text-muted-foreground">
+                          <Inline text={cell} {...inline} />
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {block.rows.map((row, r) => (
+                      <tr key={r} className="border-b last:border-b-0">
+                        {row.map((cell, k) => (
+                          <td key={k} className="max-w-md px-2 py-1.5 align-top">
+                            <Inline text={cell} {...inline} />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          case "code":
+            return (
+              <pre key={n} tabIndex={0} className="m-0 max-w-full overflow-x-auto rounded-md bg-code px-3 py-2 font-mono text-xs [scrollbar-gutter:stable]">
+                <code>{block.text}</code>
+              </pre>
+            );
+        }
+      })}
+    </div>
+  );
+}

@@ -1,0 +1,281 @@
+---
+name: fsloopUI
+description: A calm, dense reading instrument for fsloop runs — warm greys, ink as the one primary, colour only for signal.
+colors:
+  paper: "#fbfbfa"
+  ink: "#1b1b1a"
+  on-ink: "#ffffff"
+  popover: "#ffffff"
+  muted: "#f0f0ed"
+  muted-ink: "#6d6d69"
+  hairline: "#e2e2dd"
+  code-ground: "#efefec"
+  signal-danger: "#c4372c"
+  signal-warning: "#b17716"
+  signal-success: "#2c8a4b"
+  signal-info: "#2b68c9"
+typography:
+  body:
+    fontFamily: "system-ui, Segoe UI, sans-serif"
+    fontSize: "0.8125rem"
+    fontWeight: 400
+    lineHeight: 1.45
+    letterSpacing: "normal"
+  small:
+    fontFamily: "system-ui, Segoe UI, sans-serif"
+    fontSize: "0.75rem"
+    fontWeight: 400
+    lineHeight: 1.4
+    letterSpacing: "normal"
+  mono:
+    fontFamily: "ui-monospace, Cascadia Mono, Consolas, monospace"
+    fontSize: "0.75rem"
+    fontWeight: 400
+    lineHeight: 1.4
+    letterSpacing: "normal"
+  title:
+    fontFamily: "system-ui, Segoe UI, sans-serif"
+    fontSize: "0.875rem"
+    fontWeight: 600
+    lineHeight: 1.45
+    letterSpacing: "normal"
+  heading:
+    fontFamily: "system-ui, Segoe UI, sans-serif"
+    fontSize: "1.0625rem"
+    fontWeight: 600
+    lineHeight: 1.35
+    letterSpacing: "normal"
+rounded:
+  sm: "4px"
+  md: "6px"
+  lg: "8px"
+  xl: "10px"
+spacing:
+  dot: "7px"
+  thumb-w: "118px"
+  thumb-h: "74px"
+  count: "3ch"
+  strip: "1.75rem"
+  measure: "75ch"
+components:
+  button-primary:
+    backgroundColor: "{colors.ink}"
+    textColor: "{colors.on-ink}"
+    rounded: "{rounded.lg}"
+    height: "32px"
+    padding: "0 10px"
+  button-outline:
+    backgroundColor: "{colors.paper}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.lg}"
+    height: "28px"
+    padding: "0 10px"
+  input-default:
+    textColor: "{colors.ink}"
+    rounded: "{rounded.lg}"
+    height: "28px"
+    padding: "0 8px"
+  status-dot:
+    backgroundColor: "{colors.muted-ink}"
+    rounded: "{rounded.xl}"
+    size: "{spacing.dot}"
+  frame-thumb:
+    backgroundColor: "{colors.muted}"
+    rounded: "{rounded.sm}"
+    width: "{spacing.thumb-w}"
+    height: "{spacing.thumb-h}"
+  inline-code:
+    backgroundColor: "{colors.code-ground}"
+    textColor: "{colors.ink}"
+    typography: "{typography.mono}"
+    rounded: "{rounded.sm}"
+    padding: "0 4px"
+---
+
+# Design System: fsloopUI
+
+Visual system only: tokens, colour, type, depth and the look of the shared components. Who the product is for, its voice and its glossary live in `PRODUCT.md`; how to build UI — `.claude/rules/ui.md` (the project's rules) over fsloop's `skills/fsloop/law/ui.md`, `ux.md`, `table.md`. The theme is `fsloopui/src/styles/index.css`; the shared components are `fsloopui/src/ui/`, built on the shadcn/ui library in `fsloopui/src/components/ui/` (style `radix-nova`, base `neutral`); every part in its states is on the kit page, `/kit` in dev.
+
+## Overview
+
+**Creative North Star: "The Reading Desk"**
+
+A desk where one operator reads what his unattended runs did: a warm-grey sheet, ink for words, and nothing else asking for attention unless it waits on him. The world is the prototype's (`tga/.claude/fsloop/prototype-viewer/template.html`), kept and written down: its twelve colours, its system faces, its 13 px text at 1.45, its 8 px radius. fsloopUI adds no brand and no new direction.
+
+Two jobs shape it. Scanning — many runs, hundreds of findings — wants density: one line per row, tabular numerals, fixed widths so nothing jitters. Reading — a finding's rule, a report, a goal of 8 617 characters — wants measure: running text keeps its paragraphs, lists and code at a 75-character line. Light and dark are equal surfaces and follow the system.
+
+**Key Characteristics:**
+- Warm-grey surface; colour only for signal (red, amber, green), shown as a 7 px dot beside a plain word.
+- 13 px body at 1.45, 12 px mono for identifiers, tabular numerals for every count.
+- Flat: depth is a hairline or a 1 px ring; the one shadow is the toast's.
+- Nothing moves on its own: every late part has its box reserved, a live list holds its order.
+- Russian interface; what fsloop or a critic wrote is shown as written.
+
+## Colors
+
+The chrome is greys with a faint warm cast; hue appears only where it carries a state the operator should act on.
+
+| Token (theme variable) | Light | Dark | Role |
+|---|---|---|---|
+| Paper (`--background`, `--card`) | `#fbfbfa` | `#101111` | The page and its regions |
+| Ink (`--foreground`, `--primary`) | `#1b1b1a` | `#e8e8e4` | Text, the primary button, the selected tab's underline |
+| On ink (`--primary-foreground`) | `#ffffff` | `#111111` | Text on a primary button |
+| Popover (`--popover`) | `#ffffff` | `#171818` | Menus, selects, dialogs: one step off the page |
+| Muted (`--muted`, `--secondary`, `--accent`) | `#f0f0ed` | `#1b1c1c` | Hover rows, the target mark's ground, inert fills |
+| Muted ink (`--muted-foreground`, `--ring`) | `#6d6d69` | `#98988f` | Labels, meta, a zero, the neutral dot, the edge mark |
+| Hairline (`--border`, `--input`) | `#e2e2dd` | `#2b2c2c` | Dividers, field strokes |
+| Code ground (`--code`) | `#efefec` | `#1c1d1d` | Inline code and code blocks |
+| Signal danger (`--destructive`) | `#c4372c` | `#f0655b` | critical; a destructive control |
+| Signal warning (`--warning`) | `#b17716` | `#dfa53d` | major; a red gate, a blocked unit, «молчит», a part that failed |
+| Signal success (`--success`) | `#2c8a4b` | `#57b979` | A committed unit, a finding fixed, a met goal |
+| Signal info (`--info`) | `#2b68c9` | `#6ba3f6` | Chart series only |
+
+### Named Rules
+
+**The Signal-Only Rule.** A hue is a state the operator should act on (red, amber) or a thing done (green); work in progress — writing, verifying, landing — is neutral, because the run carries it and nothing is asked (`rules/ui` → Conventions 2). Severity is the one category with a tone: critical red, major amber, minor neutral.
+
+**The Dot Rule.** A state's colour is a dot, never a fill, a badge, a border or coloured text (`ui` → Status color is a dot).
+
+**The Contrast Floor.** Text tokens hold 4.5:1 on every ground they sit on (paper, muted, popover, code) in both themes; a signal tone, used only as a dot, holds 3:1 — `fsloopui/src/ui/tokens.test.ts` computes both from the token values.
+
+## Typography
+
+**Body / UI font:** the platform sans (`system-ui, "Segoe UI", sans-serif`). **Mono:** `ui-monospace, "Cascadia Mono", Consolas, monospace`. No web fonts: the instrument loads nothing it does not need, and every glyph is on first paint.
+
+### Hierarchy
+- **Heading** (600, 17 px / 1.35): a report's title, the kit's page title.
+- **Title** (600, 14 px / 1.45): a section heading inside a page, a card's project.
+- **Body** (400, 13 px / 1.45, `text-sm`): the default — rows, facts, running text, menus, buttons.
+- **Small** (400, 12 px / 1.4, `text-xs`): meta lines, a column header, a strip, a caption.
+- **Mono** (400, 12 px, `font-mono text-xs`): ids, paths, shas, commands, file names; never as a costume.
+
+### Named Rules
+
+**The Tabular Rule.** Every number that changes or aligns — a count, a tab's count, a time, a duration — is set in tabular numerals, and a count that changes keeps a box three digits wide (`min-w-count`).
+
+**The Measure Rule.** Running text stops at 75 characters (`max-w-measure`); a table or a code block inside it scrolls sideways in its own bordered box instead of widening the column.
+
+## Layout
+
+The shell's grid owns the only viewport breakpoint (980 px): above it, a 316 px sidebar and the run page in `minmax(0, 1fr)`; below it, the sidebar becomes a capped band above the page. Every region — sidebar, run header, view body — is a size container, and a component adapts by container query to the region it sits in (`rules/ui` → Layout 1). Components are sized by their content: triggers hug their value, tabs stay content-width and left-aligned, a fact list takes one label column and one value column.
+
+Spacing follows Tailwind's 4 px scale. Rows breathe at 4–8 px vertical padding, groups at 12–16 px, sections at 32 px.
+
+**The Reserved-Box Rule.** Anything that appears after first paint has its box before it appears: a frame thumbnail (118 × 74), a count (three digits), the held-order strip's line (28 px), a loading state the size of the region it fills, `scrollbar-gutter: stable` on a scrolling region (`rules/ui` → Strict 1).
+
+## Elevation & Depth
+
+Flat. Regions separate by a hairline or by the one step from paper to popover; menus, selects and dialogs carry the library's 1 px ring. The toast is the only element with a soft shadow. The dialog's overlay dims the page; the frame viewer's ground is muted so a screenshot reads as an object.
+
+### Shadow Vocabulary
+- **Edge mark** (`shadow-edge`: `inset 3px 0 0` muted ink) — a row changed in the last minutes.
+- **Target mark** (`shadow-target`: `inset 0 0 0 1px` ink, on the muted ground) — the object a link opened.
+
+Both are inset, so marking a row moves nothing; neither takes a signal hue (`rules/ui` → Conventions 9).
+
+## Shapes
+
+`--radius` 8 px: buttons, fields, cards and the frame viewer's stage at 6–8 px, a thumbnail and inline code at 4 px, a dialog at 10 px. The status dot is round. Pills appear nowhere: a state is never a badge.
+
+## Components
+
+Each shared part below lives in `fsloopui/src/ui/` (exported from `src/ui/index.ts`) and composes the library's component for its job; a part is hand-made only where the library has none. Every part has a test of its states and its keyboard beside it.
+
+### Status Dot — `StatusDot`, `Dot`
+A 7 px dot in the state's tone, then the word in regular text; the tone comes from the shared state map entry (`fsloopui/shared/states.ts`, `liveness.ts`), never from a caller's colour. A cell reads the compact form «state · age · cause», truncated at the end with the whole in its title; a fact reads the full form. Serves `rules/ui` → Conventions 1, 2; `ui` → Status color is a dot.
+
+### Absent Values — `Dash`, `NotFound`, `NotRecorded`
+«—» in muted ink where no value exists; «юнит u7 не найден» / «находка … не найдена», the id in mono, where the run names an id its folder lacks; «не записано» with a neutral dot (and its cause) where the folder lacks the field. Serves Conventions 4, 5.
+
+### Count — `CountLink`
+The number first, its noun agreed («3 находки»), tabular. A link (thin underline, ink) only above 0 and only when the list it opens shows the same number; a zero is a muted «0» beside a neutral dot. Serves Conventions 7, Copy 3.
+
+### Tabs with Counts — `CountTabs`
+The library's tabs in their line variant, content-width and left-aligned; each tab carries its count in a three-digit box, a zero muted; the active tab keeps the weight of the others — its ink and underline mark it, so choosing a tab shifts nothing. ←/→ move. Serves Layout 4, Conventions 7.
+
+### Fact List — `FactList`
+One label–value table: muted labels in one column, values in the other, one fact to a row. Outcome rows open it, facts follow, and the facts decided by least fold behind one «Подробнее» row at its end, open or closed as last left (browser storage). Serves `ux 9`, Layout 3.
+
+### Running Text — `RunningText`
+Paragraphs with their line breaks, bullet and numbered lists, headings, inline code on the code ground, bold; a markdown table or a code block in its own bordered box that scrolls sideways; ids linked only through the caller's resolver. Parsed into elements, never HTML: a tag in the text shows as text. At the 75-character measure. Serves Layout 5.
+
+### Clamp — `Clamp`
+Two lines (one to four), with «… развернуть» laid over the end of the last line only when the clamp hides text; expanded, the text scrolls inside a 20 rem region and «свернуть» returns. A card's clamp has no trigger. Serves Layout 6.
+
+### Frames — `FrameThumb`, `FrameStrip`, `FrameViewer`
+A 118 × 74 thumbnail on the muted ground, its box fixed before the image loads, up to 16 then «ещё N кадров». The viewer is a dialog over the page titled by the file name, «3 из 8 кадров», a fixed stage (90 vw × 78 vh) so stepping never moves ‹ ›; ‹ ›, ←/→ and the wheel step one frame per gesture and stop at the ends; Escape returns focus to the thumbnail. Serves Layout 7, `ui` → Wheel.
+
+### Flat List — `FlatList`, `flatItem`
+The sidebar's cards and the report rail: one Tab stop (the open item), ↑/↓, Home/End, Enter; an item with an address is one link as a whole, headings are not stops. Serves Conventions 8.
+
+### Held-Order Strip — `HeldStrip`
+One line at a live list's end, its 28 px always reserved: «2 новых прогона · 1 прогон сместился · показать», the verb naming the click — «показать», «убрать», «обновить список»; a narrow host (below 28 rem) reads the compact form without the noun. Muted ink, a hairline above, a polite live region. Serves Live data 1–2.
+
+### Change Marks — `markProps`, `OutOfFilter`
+The edge mark and the target mark (Elevation), and «вне фильтра» in muted small text on a row the filters hide but a link or a live change keeps. Serves Conventions 9, 12.
+
+### Loading — `Loading`
+«Загрузка…» in muted ink with the library's spinner, centred in the region it fills, `role="status"`; a table's first load draws it in a bordered frame over the whole region. Never a skeleton. Serves Strict 2, Tables 2.
+
+### Empty State — `EmptyState`
+The library's empty, unbordered, muted: «Юнитов ещё нет — они появятся на этапе «декомпозиция»» (the stage word from the shared map), «В этом прогоне не было находок», or «Нет находок, подходящих под фильтры» with the active filters and «Сбросить фильтры». Serves `ui` → Empty states, Conventions 15.
+
+### Part Failed — `PartFailed`
+The library's alert, content-width: an amber dot, «Отчёт critique-3.md не прочитан: <причина>», and «Повторить» only where a retry can change the result. Serves Conventions 14.
+
+### Select and Combobox — `CountSelect`, `CountCombobox`
+A select (at most 7 options) and a combobox (popover + command, searched in its field, 10 rows in view) whose triggers hug «Поле: значение» and whose options carry their count in a right-aligned tabular slot, a zero muted. Serves `ui` → Choosing from a list, Widths.
+
+### Menu — `Menu`, `copyItem`
+The library's dropdown and context menu over one item set, groups split by a rule; items read «Открыть <объект>» and «Скопировать <что>»; a blocked item stays listed, disabled, its reason in its title. Serves `table #4`.
+
+### Dialog — `AppDialog`
+The library's dialog: a title always, the body scrolling inside an 85 vh cap, the footer's actions at content width on the right, ✕ last in the focus order; focus returns to the opener. Serves `ui` → Dialogs, `ux 7`.
+
+### Tooltip and Glossary — `Hint`, `GlossaryTooltip`
+The library's tooltip, ink ground, plain text only: an icon-only control's name with its shortcut as `Kbd`, or a glossary on a term's dotted label — at most 8 entries of at most 80 characters, «value — meaning». Serves `ui` → Tooltip, Glossary.
+
+### Toast and Copy — `notify`, `copyText`, `AppToaster`
+Sonner at the bottom right: a success leaves on its own; a failure stays until closed, its cause under the title and one action beside it. Titles stop at 60 characters. `copyText` copies (a selection joined by newlines) and says «Скопировано: <что>». Serves `ui` → Toast.
+
+### Keys — `Keys`, `useShortcut`
+`Kbd` caps named from the physical key code («/», «Esc», «←»); the shortcut hook binds by `event.code` and stays off in a text field, with a dialog open, on a key repeat and with a modifier. Serves Conventions 11.
+
+### Browser Storage — `usePref`, `readPref`, `writePref`
+One module, read synchronously so a persisted value is on first paint, every access guarded; it holds folds, «Подробнее», the pin and view state. Serves `ui` → Persisted preferences, Tables 4.
+
+### Role Map
+
+The roles of `law/ui.md` → Roles, as fsloopUI fills them:
+
+| role | component |
+|---|---|
+| primitives | the shadcn/ui library, `fsloopui/src/components/ui/` |
+| status dot | `StatusDot` (`src/ui/status-dot.tsx`) |
+| glossary tooltip | `GlossaryTooltip` (`src/ui/tooltip.tsx`) |
+| blocked action | `Hint` holding the reason, on a control that stays focusable |
+| confirm dialog / confirm button | — (fsloopUI has no destructive action) |
+| toast | `notify`, `AppToaster` (`src/ui/toast.tsx`) |
+| empty state | `EmptyState` (`src/ui/empty-state.tsx`); a table's own variant is u7's |
+| fact list | `FactList` (`src/ui/fact-list.tsx`) |
+| page header | the run page frame (`src/app/`, u3) |
+| adaptive toolbar | `src/table/` (u7) |
+| status bar | `src/table/` StatusBar (u7) |
+| data table | `src/table/` (u7) |
+| what's-new registry | — (none kept) |
+
+## Do's and Don'ts
+
+### Do:
+- **Do** take a state's word and tone from its shared map, through `StatusDot`.
+- **Do** reserve every late part's box: a count's three digits, a strip's line, a thumbnail's 118 × 74.
+- **Do** show «Загрузка…» with a spinner, centred, in a region already at its final size.
+- **Do** keep running text at its measure, and let a table inside it scroll sideways.
+- **Do** set ids, paths and commands in mono, and what a critic wrote as written.
+
+### Don't:
+- **Don't** use a skeleton, anywhere; the library's `skeleton` is never imported.
+- **Don't** colour a state as a badge, a fill, a border or a word; never a pulse on «работает».
+- **Don't** write a raw colour, radius or size in a component; the theme's token is the answer.
+- **Don't** bold the active tab or anything that toggles: a weight change shifts its neighbours.
+- **Don't** put content in a tooltip, an object in a side panel, or an event the operator did not start in a toast.

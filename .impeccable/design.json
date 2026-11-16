@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-16T03:53:11Z",
+  "title": "Design System: fsloopUI",
+  "extensions": {
+    "colorMeta": {
+      "paper": { "role": "neutral", "displayName": "Paper", "canonical": "#fbfbfa", "dark": "#101111", "tonalRamp": ["#1b1b1a", "#353533", "#52524f", "#6d6d69", "#98988f", "#c9c9c3", "#e2e2dd", "#fbfbfa"] },
+      "ink": { "role": "primary", "displayName": "Ink", "canonical": "#1b1b1a", "dark": "#e8e8e4", "tonalRamp": ["#1b1b1a", "#2b2c2c", "#454543", "#6d6d69", "#98988f", "#c9c9c3", "#e2e2dd", "#f0f0ed"] },
+      "on-ink": { "role": "neutral", "displayName": "On Ink", "canonical": "#ffffff", "dark": "#111111" },
+      "popover": { "role": "neutral", "displayName": "Popover", "canonical": "#ffffff", "dark": "#171818" },
+      "muted": { "role": "neutral", "displayName": "Muted", "canonical": "#f0f0ed", "dark": "#1b1c1c" },
+      "muted-ink": { "role": "neutral", "displayName": "Muted Ink", "canonical": "#6d6d69", "dark": "#98988f" },
+      "hairline": { "role": "neutral", "displayName": "Hairline", "canonical": "#e2e2dd", "dark": "#2b2c2c" },
+      "code-ground": { "role": "neutral", "displayName": "Code Ground", "canonical": "#efefec", "dark": "#1c1d1d" },
+      "signal-danger": { "role": "signal", "displayName": "Signal Danger", "canonical": "#c4372c", "dark": "#f0655b", "tonalRamp": ["#3d110d", "#6b1e18", "#9a2b22", "#c4372c", "#d6645b", "#e5938c", "#f1c2bd", "#fae9e7"] },
+      "signal-warning": { "role": "signal", "displayName": "Signal Warning", "canonical": "#b17716", "dark": "#dfa53d", "tonalRamp": ["#36240a", "#5c3d10", "#875a14", "#b17716", "#cf9a3e", "#e2bb74", "#f0dbae", "#faf1e1"] },
+      "signal-success": { "role": "signal", "displayName": "Signal Success", "canonical": "#2c8a4b", "dark": "#57b979", "tonalRamp": ["#0d2a17", "#154627", "#1f6637", "#2c8a4b", "#4fa86c", "#83c597", "#bbe0c6", "#e8f5ec"] },
+      "signal-info": { "role": "chart", "displayName": "Signal Info", "canonical": "#2b68c9", "dark": "#6ba3f6", "tonalRamp": ["#0c1f3d", "#14356a", "#1f4d98", "#2b68c9", "#5389da", "#86ace7", "#bcd2f3", "#e8f0fc"] }
+    },
+    "typographyMeta": {
+      "body": { "displayName": "Body", "purpose": "The default: rows, facts, running text, menus, buttons." },
+      "small": { "displayName": "Small", "purpose": "Meta lines, column headers, strips, captions." },
+      "mono": { "displayName": "Mono", "purpose": "Ids, paths, shas, commands, file names — never a costume." },
+      "title": { "displayName": "Title", "purpose": "A section heading inside a page, a card's project." },
+      "heading": { "displayName": "Heading", "purpose": "A report's title, the kit's page title." }
+    },
+    "shadows": [
+      { "name": "edge", "value": "inset 3px 0 0 var(--muted-foreground)", "purpose": "The edge mark: a row changed in the last minutes; neutral, inside the row's box." },
+      { "name": "target", "value": "inset 0 0 0 1px var(--foreground)", "purpose": "The target mark: the object a link opened, on the muted ground." }
+    ],
+    "motion": [
+      { "name": "overlay", "value": "100ms fade and 95% zoom", "purpose": "Dialogs, menus and tooltips open and close in the library's primitive; nothing else animates, and reduced motion stops the fold's chevron." }
+    ],
+    "breakpoints": [
+      { "name": "shell", "value": "980px", "purpose": "The shell's one viewport breakpoint: below it the sidebar becomes a band above the page." },
+      { "name": "strip-full", "value": "28rem container", "purpose": "The held-order strip writes its nouns from this host width up." }
+    ]
+  },
+  "components": [
+    {
+      "name": "Status Dot",
+      "kind": "custom",
+      "refersTo": "status-dot",
+      "description": "A state's colour: a 7px dot in the state's tone beside its word in regular text.",
+      "html": "<span class=\"ds-dot-row\"><span class=\"ds-dot ds-dot-warning\"></span>заблокирован · 12 мин · ждёт u2</span> <span class=\"ds-dot-row\"><span class=\"ds-dot\"></span>пишется</span> <span class=\"ds-dot-row\"><span class=\"ds-dot ds-dot-success\"></span>закоммичен</span>",
+      "css": ".ds-dot-row { display: inline-flex; align-items: center; gap: 6px; margin-right: 16px; font: 400 13px/1.45 system-ui, 'Segoe UI', sans-serif; color: var(--foreground, #1b1b1a); } .ds-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted-foreground, #6d6d69); flex: none; } .ds-dot-warning { background: var(--warning, #b17716); } .ds-dot-success { background: var(--success, #2c8a4b); }"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one filled button: ink on paper.",
+      "html": "<button class=\"ds-btn-primary\">Сохранить оценку</button>",
+      "css": ".ds-btn-primary { height: 32px; padding: 0 10px; border: 1px solid transparent; border-radius: 8px; background: var(--primary, #1b1b1a); color: var(--primary-foreground, #ffffff); font: 500 13px/1 system-ui, 'Segoe UI', sans-serif; cursor: pointer; transition: background 0.15s; } .ds-btn-primary:hover { background: color-mix(in oklch, var(--primary, #1b1b1a) 80%, transparent); } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring, #6d6d69) 50%, transparent); }"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "Almost every action: a hairline stroke on paper, muted on hover.",
+      "html": "<button class=\"ds-btn-outline\">Сбросить фильтры</button>",
+      "css": ".ds-btn-outline { height: 28px; padding: 0 10px; border: 1px solid var(--border, #e2e2dd); border-radius: 8px; background: var(--background, #fbfbfa); color: var(--foreground, #1b1b1a); font: 500 13px/1 system-ui, 'Segoe UI', sans-serif; cursor: pointer; } .ds-btn-outline:hover { background: var(--muted, #f0f0ed); } .ds-btn-outline:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring, #6d6d69) 50%, transparent); }"
+    },
+    {
+      "name": "Select With Count",
+      "kind": "input",
+      "refersTo": "input-default",
+      "description": "A trigger that hugs «Поле: значение», its option counts in a tabular slot.",
+      "html": "<button class=\"ds-select\"><span class=\"ds-select-label\">Вид:</span> Все <span class=\"ds-count\">723</span><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"m6 9 6 6 6-6\"/></svg></button>",
+      "css": ".ds-select { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px 0 10px; border: 1px solid var(--input, #e2e2dd); border-radius: 6px; background: transparent; color: var(--foreground, #1b1b1a); font: 400 13px/1 system-ui, 'Segoe UI', sans-serif; cursor: pointer; } .ds-select-label { color: var(--muted-foreground, #6d6d69); } .ds-count { min-width: 3ch; font-variant-numeric: tabular-nums; } .ds-select svg { color: var(--muted-foreground, #6d6d69); } .ds-select:focus-visible { outline: none; border-color: var(--ring, #6d6d69); box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring, #6d6d69) 50%, transparent); }"
+    },
+    {
+      "name": "Tabs With Counts",
+      "kind": "nav",
+      "refersTo": "tab",
+      "description": "Content-width tabs, each with its count in a three-digit box; a zero muted; the active tab marked by ink and an underline, never by weight.",
+      "html": "<nav class=\"ds-tabs\"><a class=\"ds-tab ds-tab-active\">Находки <span class=\"ds-count\">723</span></a><a class=\"ds-tab\">Юниты <span class=\"ds-count\">42</span></a><a class=\"ds-tab\">Соглашения <span class=\"ds-count ds-zero\">0</span></a></nav>",
+      "css": ".ds-tabs { display: inline-flex; gap: 4px; font: 500 13px/1 system-ui, 'Segoe UI', sans-serif; } .ds-tab { display: inline-flex; gap: 6px; padding: 8px 8px 9px; color: var(--muted-foreground, #6d6d69); border-bottom: 2px solid transparent; cursor: pointer; } .ds-tab:hover { color: var(--foreground, #1b1b1a); } .ds-tab-active { color: var(--foreground, #1b1b1a); border-bottom-color: var(--foreground, #1b1b1a); } .ds-count { min-width: 3ch; font-variant-numeric: tabular-nums; } .ds-zero { color: var(--muted-foreground, #6d6d69); }"
+    },
+    {
+      "name": "Fact List",
+      "kind": "card",
+      "refersTo": "fact-list",
+      "description": "One label–value table: outcome rows first, facts after, the rest behind «Подробнее».",
+      "html": "<dl class=\"ds-facts\"><dt>Этап</dt><dd><span class=\"ds-dot\"></span>проход 1 · юниты в работе</dd><dt>Гейт</dt><dd><span class=\"ds-dot ds-dot-warning\"></span>красный гейт: типы</dd><dt>Режим</dt><dd>worktree</dd><dt>Модели</dt><dd>claude-opus-5-5</dd></dl>",
+      "css": ".ds-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 16px; margin: 0; font: 400 13px/1.45 system-ui, 'Segoe UI', sans-serif; color: var(--foreground, #1b1b1a); } .ds-facts dt { color: var(--muted-foreground, #6d6d69); } .ds-facts dd { margin: 0; display: inline-flex; align-items: center; gap: 6px; } .ds-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted-foreground, #6d6d69); } .ds-dot-warning { background: var(--warning, #b17716); }"
+    },
+    {
+      "name": "Held-Order Strip",
+      "kind": "custom",
+      "refersTo": "held-strip",
+      "description": "One reserved line at a live list's end; the verb names what the click does.",
+      "html": "<button class=\"ds-strip\">2 новых прогона · 1 прогон сместился · показать</button>",
+      "css": ".ds-strip { display: flex; align-items: center; width: 320px; height: 28px; padding: 0 8px; border: 0; border-top: 1px solid var(--border, #e2e2dd); background: transparent; color: var(--muted-foreground, #6d6d69); font: 400 12px/1.4 system-ui, 'Segoe UI', sans-serif; text-align: left; cursor: pointer; } .ds-strip:hover { background: var(--muted, #f0f0ed); color: var(--foreground, #1b1b1a); }"
+    },
+    {
+      "name": "Loading",
+      "kind": "custom",
+      "refersTo": "loading",
+      "description": "«Загрузка…» with a spinner, centred in a region already at its final size; never a skeleton.",
+      "html": "<div class=\"ds-loading\" role=\"status\"><svg class=\"ds-spin\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M21 12a9 9 0 1 1-6.219-8.56\"/></svg>Загрузка…</div>",
+      "css": ".ds-loading { display: flex; align-items: center; justify-content: center; gap: 8px; width: 320px; height: 120px; border: 1px solid var(--border, #e2e2dd); border-radius: 8px; color: var(--muted-foreground, #6d6d69); font: 400 13px/1.45 system-ui, 'Segoe UI', sans-serif; } .ds-spin { animation: ds-spin 1s linear infinite; } @keyframes ds-spin { to { transform: rotate(360deg); } } @media (prefers-reduced-motion: reduce) { .ds-spin { animation-duration: 3s; } }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Reading Desk",
+    "overview": "A desk where one operator reads what his unattended runs did: a warm-grey sheet, ink for words, and nothing else asking for attention unless it waits on him. The world is the prototype's (tga/.claude/fsloop/prototype-viewer/template.html), kept and written down: its twelve colours, its system faces, its 13 px text at 1.45, its 8 px radius. fsloopUI adds no brand and no new direction. Two jobs shape it. Scanning — many runs, hundreds of findings — wants density: one line per row, tabular numerals, fixed widths so nothing jitters. Reading — a finding's rule, a report, a goal of 8 617 characters — wants measure: running text keeps its paragraphs, lists and code at a 75-character line. Light and dark are equal surfaces and follow the system.",
+    "keyCharacteristics": [
+      "Warm-grey surface; colour only for signal (red, amber, green), shown as a 7 px dot beside a plain word.",
+      "13 px body at 1.45, 12 px mono for identifiers, tabular numerals for every count.",
+      "Flat: depth is a hairline or a 1 px ring; the one shadow is the toast's.",
+      "Nothing moves on its own: every late part has its box reserved, a live list holds its order.",
+      "Russian interface; what fsloop or a critic wrote is shown as written."
+    ],
+    "rules": [
+      { "name": "The Signal-Only Rule", "body": "A hue is a state the operator should act on (red, amber) or a thing done (green); work in progress — writing, verifying, landing — is neutral, because the run carries it and nothing is asked (rules/ui → Conventions 2). Severity is the one category with a tone: critical red, major amber, minor neutral.", "section": "colors" },
+      { "name": "The Dot Rule", "body": "A state's colour is a dot, never a fill, a badge, a border or coloured text (ui → Status color is a dot).", "section": "colors" },
+      { "name": "The Contrast Floor", "body": "Text tokens hold 4.5:1 on every ground they sit on (paper, muted, popover, code) in both themes; a signal tone, used only as a dot, holds 3:1 — fsloopui/src/ui/tokens.test.ts computes both from the token values.", "section": "colors" },
+      { "name": "The Tabular Rule", "body": "Every number that changes or aligns — a count, a tab's count, a time, a duration — is set in tabular numerals, and a count that changes keeps a box three digits wide (min-w-count).", "section": "typography" },
+      { "name": "The Measure Rule", "body": "Running text stops at 75 characters (max-w-measure); a table or a code block inside it scrolls sideways in its own bordered box instead of widening the column.", "section": "typography" },
+      { "name": "The Reserved-Box Rule", "body": "Anything that appears after first paint has its box before it appears: a frame thumbnail (118 × 74), a count (three digits), the held-order strip's line (28 px), a loading state the size of the region it fills, scrollbar-gutter: stable on a scrolling region (rules/ui → Strict 1).", "section": "layout" }
+    ],
+    "dos": [
+      "Do take a state's word and tone from its shared map, through StatusDot.",
+      "Do reserve every late part's box: a count's three digits, a strip's line, a thumbnail's 118 × 74.",
+      "Do show «Загрузка…» with a spinner, centred, in a region already at its final size.",
+      "Do keep running text at its measure, and let a table inside it scroll sideways.",
+      "Do set ids, paths and commands in mono, and what a critic wrote as written."
+    ],
+    "donts": [
+      "Don't use a skeleton, anywhere; the library's skeleton is never imported.",
+      "Don't colour a state as a badge, a fill, a border or a word; never a pulse on «работает».",
+      "Don't write a raw colour, radius or size in a component; the theme's token is the answer.",
+      "Don't bold the active tab or anything that toggles: a weight change shifts its neighbours.",
+      "Don't put content in a tooltip, an object in a side panel, or an event the operator did not start in a toast."
+    ]
+  }
+}

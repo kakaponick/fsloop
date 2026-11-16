@@ -12,10 +12,10 @@ export type Liveness = "working" | "quiet" | "silent" | "closed" | "unknown";
 
 export const LIVENESS: Record<Liveness, StateEntry> = {
   working: { compact: "работает", full: "работает — прогон писал в последние 5 минут", tone: "neutral", rank: 0, meaning: "Прогон или его агенты писали файлы меньше 5 минут назад." },
-  quiet: { compact: "тихо", full: "тихо — прогон не писал от 5 до 30 минут", tone: "neutral", rank: 1, meaning: "Прогон не писал файлы от 5 до 30 минут: агент думает или ждёт долгую команду." },
-  silent: { compact: "молчит", full: "молчит — прогон не писал больше 30 минут", tone: "warning", rank: 2, meaning: "Прогон не писал файлы больше 30 минут: он мог остановиться — проверьте его сессию." },
+  quiet: { compact: "тихо", full: "тихо — прогон не писал от 5 до 30 минут", tone: "neutral", rank: 1, meaning: "Прогон не писал файлы 5–30 минут: агент думает или ждёт долгую команду." },
+  silent: { compact: "молчит", full: "молчит — прогон не писал больше 30 минут", tone: "warning", rank: 2, meaning: "Нет записей больше 30 минут: прогон мог встать — проверьте его сессию." },
   closed: { compact: "закрыт", full: "закрыт — прогон завершён", tone: "neutral", rank: 3, meaning: "Прогон прошёл этап «завершение»." },
-  unknown: { compact: "не записано", full: "не записано — время последней записи неизвестно", tone: "neutral", rank: 4, meaning: "В папке прогона нет файлов, по которым видно время его последней записи." },
+  unknown: { compact: "не записано", full: "не записано — время последней записи неизвестно", tone: "neutral", rank: 4, meaning: "В папке прогона нет файлов с временем последней записи." },
 };
 
 export interface LivenessValue {

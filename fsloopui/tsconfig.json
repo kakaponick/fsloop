@@ -18,7 +18,8 @@
     "skipLibCheck": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "paths": { "@/*": ["./src/*"] }
   },
   "include": ["src", "server", "shared", "fixtures", "vite.config.ts"],
   "exclude": ["node_modules", "dist", "fixtures/root"]

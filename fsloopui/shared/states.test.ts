@@ -1,6 +1,20 @@
 import { describe, expect, test } from "vitest";
 import { STEPS } from "../../skills/fsloop/fsl.mjs";
-import { agentKind, DECISION, FINDING_STATUS, launchName, launchState, reportWord, SEVERITY, stageOf, STAGE_WORDS, UNIT_STATE, VERDICT } from "./states.ts";
+import { LIVENESS } from "./liveness.ts";
+import { agentKind, DECISION, FINDING_STATUS, LAUNCH_STATE, launchName, launchState, reportWord, SEVERITY, stageOf, STAGE_WORDS, UNIT_STATE, VERDICT } from "./states.ts";
+
+describe("glossary lines (ui → Glossary → Bound)", () => {
+  test("every value of every state map reads «value — meaning» in 80 characters or fewer", () => {
+    const maps = { UNIT_STATE, SEVERITY, DECISION, FINDING_STATUS, VERDICT, LAUNCH_STATE, LIVENESS };
+    const over = Object.entries(maps).flatMap(([name, map]) =>
+      Object.entries(map as Record<string, { compact: string; meaning: string }>)
+        .map(([key, e]) => ({ at: `${name}.${key}`, line: `${e.compact} — ${e.meaning}` }))
+        .filter(({ line }) => line.length > 80)
+        .map(({ at, line }) => `${at} (${line.length}): ${line}`),
+    );
+    expect(over).toEqual([]);
+  });
+});
 
 describe("the stage map (common.md → Design conventions)", () => {
   test("covers fsl.mjs's steps plus init, integrate and finish", () => {
