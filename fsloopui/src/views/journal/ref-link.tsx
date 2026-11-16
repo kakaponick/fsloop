@@ -3,10 +3,12 @@
 // «Юниты», a launch or a judge in «Отчёты», another entry here; a pass or a free text is plain; an id the run
 // does not hold reads «не найден»; «—» is no ref at all. Beside each link, the one-line fact it resolves to, so the
 // basis of a decision reads without a click (craft-30): a finding's severity and sentence, a unit's state and title,
-// a report's kind and launch, an entry's question — cut at the column's end, whole in its title and where it leads.
+// a report's kind and launch, an entry's question — on up to two lines of the column (cand-17), whole in its title
+// and where it leads. The ref's id is searched, so it wears the search's one mark (`highlight`, table #12).
+import type { ReactNode } from "react";
 import type { JournalRef, Run } from "../../../shared/model.ts";
 import { reportWord, SEVERITY, UNIT_STATE } from "../../../shared/states.ts";
-import { NotFound, StatusDot, type DotState } from "@/ui";
+import { Dot, NotFound, stateWord, type DotState } from "@/ui";
 import { ObjectLink, type ObjectKind } from "../../app/links.tsx";
 
 type RunLike = Pick<Run, "findings" | "units" | "launches" | "journal"> & { key: string };
@@ -67,27 +69,31 @@ export function refFact(run: RunLike, ref: Pick<JournalRef, "id" | "kind">): Ref
 /** The «не найден» word for an id-shaped text the run does not hold: a unit «u7», a finding «…#…», else a launch. */
 const guessKind = (id: string) => (/^[uf]\d+$/.test(id) ? "unit" : id.includes("#") ? "finding" : "launch");
 
-export function RefLink({ run, refItem }: { run: RunLike; refItem: JournalRef }) {
+/** The fact's one line of words: «critical · <sentence>», «закоммичен · <title>», or the text alone. */
+export const refFactText = (fact: RefFact): string => (fact.state ? [stateWord(fact.state), fact.text].filter(Boolean).join(" · ") : fact.text);
+
+const plain = (text: string): ReactNode => text;
+
+export function RefLink({ run, refItem, highlight = plain }: { run: RunLike; refItem: JournalRef; highlight?: (text: string) => ReactNode }) {
   if (!isRef(refItem)) return null;
   const target = refObject(refItem);
   if (target) {
     const fact = refFact(run, refItem);
+    const text = fact && refFactText(fact);
     return (
       <span data-slot="ref" className="flex min-w-0 items-baseline gap-2">
         <ObjectLink run={run} kind={target.kind} id={target.id} className="shrink-0">
-          <span className="font-mono text-xs">{refItem.id}</span>
+          <span className="font-mono text-xs">{highlight(refItem.id)}</span>
         </ObjectLink>
-        {fact &&
-          (fact.state ? (
-            <StatusDot state={fact.state} detail={fact.text || undefined} truncate className="text-muted-foreground" />
-          ) : (
-            <span className="min-w-0 truncate text-muted-foreground" title={fact.text}>
-              {fact.text}
-            </span>
-          ))}
+        {fact && (
+          <span data-slot="ref-fact" title={text ?? undefined} className="line-clamp-2 min-w-0 text-muted-foreground">
+            {fact.state && <Dot tone={fact.state.tone} className="mr-1.5 align-middle" />}
+            {text}
+          </span>
+        )}
       </span>
     );
   }
   if (!refItem.found) return <NotFound kind={guessKind(refItem.id)} id={refItem.id} />;
-  return <span className="font-mono text-xs break-all">{refItem.id}</span>;
+  return <span className="font-mono text-xs break-all">{highlight(refItem.id)}</span>;
 }

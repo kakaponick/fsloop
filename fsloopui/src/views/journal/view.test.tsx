@@ -6,14 +6,14 @@
 // placed at once; the entries in view in the status bar; a journal that cannot be read fails in its place; every late
 // part's box reserved (f7: craft-15, craft-16, craft-30, craft-31, craft-32).
 import "../../ui/test-setup.ts";
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, describe, expect, test, vi } from "vitest";
 import type { JournalEntry } from "../../../shared/model.ts";
 import { writePref } from "@/ui";
 import { runPath } from "../../app/routes.ts";
 import { fixtureApp, keyOf, loadedRun, renderOver, renderView } from "../reports/testing.tsx";
-import { entriesInView, entryHead, inViewText, JournalView, LABELS, stageFilter } from "./index.tsx";
+import { entriesInView, entryHead, entryRangeText, inViewText, JournalView, LABELS, railStages, SEARCH, stageAt, stageFilter } from "./index.tsx";
 import { refObject } from "./ref-link.tsx";
 
 const N = 40; // 143 entries
@@ -53,10 +53,13 @@ describe("the journal as a reading list", () => {
     // `text-base` is the Title role, 14 px, in this theme (styles/index.css: --text-base 0.875rem; DESIGN.md → Typography)
     expect(within(e).getByRole("heading", { level: 3 })).toHaveClass("text-base", "font-semibold");
     expect([...e.querySelectorAll("dt")].map((dt) => dt.textContent)).toEqual(["Решение", "Почему", "Ссылки"]);
-    expect(fact(e, LABELS.decision)?.firstElementChild).toHaveClass("font-medium", "text-foreground");
+    // cand-23: the decision leads in ink at the body's weight — 600 belongs to the question alone (DESIGN.md → Typography)
+    expect(fact(e, LABELS.decision)?.firstElementChild).toHaveClass("text-foreground");
+    expect(fact(e, LABELS.decision)?.firstElementChild).not.toHaveClass("font-medium");
     expect(e.querySelector("dl")).toHaveClass("grid-cols-1", "@min-[40rem]/view:grid-cols-[5.5rem_minmax(0,1fr)]");
-    // an entry without refs has no «Ссылки» row at all
-    expect(fact(article(6), LABELS.refs)).toBeUndefined();
+    // cand-22: an entry without refs keeps its «Ссылки» row, the value «—» (rules/ui → Conventions 5)
+    expect([...article(6).querySelectorAll("dt")].map((dt) => dt.textContent)).toEqual(["Решение", "Почему", "Ссылки"]);
+    expect(fact(article(6), LABELS.refs)?.querySelector("[data-slot=dash]")).not.toBeNull();
   });
 
   test("craft-16: the status bar names the entries in view, «на экране #40–#42», in a box reserved before it is known", async () => {
@@ -92,7 +95,20 @@ describe("the journal as a reading list", () => {
     expect(within(refs(11)).getByRole("link", { name: "j10" })).toHaveAttribute("href", runPath(KEY, { view: "journal", entry: "10" }));
     expect(refs(11)).toHaveTextContent("j10Question 10: which way?");
     expect(refs(7)).toHaveTextContent("юнит u99 не найден");
-    expect(fact(article(6), LABELS.refs)).toBeUndefined();
+    expect(fact(article(6), LABELS.refs)).toHaveTextContent("—");
+  });
+
+  test("cand-17: a ref's fact wraps to two lines in the column beside it, whole in its title", async () => {
+    renderView(fx, KEY, path(), JournalView);
+    await loaded();
+    const finding = fact(article(5), LABELS.refs)?.querySelector("[data-slot=ref-fact]");
+    expect(finding).toHaveClass("line-clamp-2", "min-w-0");
+    expect(finding).not.toHaveClass("truncate");
+    expect(finding).toHaveAttribute("title", expect.stringMatching(/^critical · the reader is written twice, once per caller \(6\)/));
+    expect(finding?.querySelector("[data-slot=dot]")).toHaveAttribute("data-tone", "danger");
+    const unit = fact(article(14), LABELS.refs)?.querySelector("[data-slot=ref-fact]");
+    expect(unit).toHaveClass("line-clamp-2");
+    expect(unit).toHaveTextContent("закоммичен · part 15");
   });
 
   test("a launch and a judge open their report, named by its kind and launch; a pass is plain text", () => {
@@ -135,7 +151,11 @@ describe("search, «Этап», and a link to an entry", () => {
     await loaded();
     expect([...document.querySelectorAll<HTMLElement>("[data-toolbar-item]")].map((el) => el.dataset.toolbarItem)).toEqual(["search", "filter-stage"]);
     const search = screen.getByRole("searchbox");
-    expect(search).toHaveAttribute("placeholder", "Вопрос, решение, ссылка");
+    // cand-20: the placeholder names every field searched — the question, the decision, the why, the stage, and «id»
+    // for the entry's number and its refs' ids — within the ~215 px the 320 px field leaves its text at 1440 px
+    // beside its icon, key cap and two buttons: 34 characters at the body's 13 px
+    expect(search).toHaveAttribute("placeholder", "Вопрос, решение, почему, этап, id");
+    expect(SEARCH.placeholder.length).toBeLessThanOrEqual(34);
     await user.click(search);
     await user.paste("#12");
     await loaded(11);
@@ -194,14 +214,33 @@ describe("search, «Этап», and a link to an entry", () => {
     expect(article(120)).toHaveClass("shadow-target");
     expect(within(article(120)).getByText("вне фильтра")).toBeInTheDocument();
     await waitFor(() => expect(scroll.mock.contexts).toContain(article(120)));
-    expect(article(120)).toHaveAttribute("tabindex", "-1");
+    // focused, it holds the list's one Tab stop (cand-19)
+    expect(article(120)).toHaveAttribute("tabindex", "0");
     expect(document.activeElement).toBe(article(120));
     expect(new URLSearchParams(view.probe.location?.search).get("entry")).toBe("120");
     view.unmount();
     renderView(fx, KEY, path({ entry: "999" }), JournalView);
     await loaded(59);
-    expect(document.querySelector("[data-slot=entry-missing]")).toHaveTextContent("Запись журнала 999 не найдена: в журнале этого прогона её нет — проверьте ссылку");
+    expect(document.querySelector("[data-slot=entry-missing]")).toHaveTextContent("Запись журнала 999 не найдена: в этом прогоне решения #1–#143");
     scroll.mockRestore();
+  });
+
+  test("cand-21: an unknown entry says once what is missing and what the run holds, and «Закрыть» drops the address", async () => {
+    const user = userEvent.setup({ delay: null });
+    const view = renderView(fx, KEY, path({ entry: "999" }), JournalView);
+    await loaded();
+    expect(entryRangeText(run.journal)).toBe(": в этом прогоне решения #1–#143");
+    expect(entryRangeText(run.journal).trim().split(/\s+/)).toHaveLength(6);
+    expect(entryRangeText(run.journal.slice(0, 1))).toBe(": в этом прогоне решение #1");
+    expect(entryRangeText([])).toBe("");
+    const line = document.querySelector("[data-slot=entry-missing]") as HTMLElement;
+    expect(line).toHaveTextContent(/^Запись журнала 999 не найдена: в этом прогоне решения #1–#143\.\s*Закрыть$/);
+    await user.click(within(line).getByRole("button", { name: "Закрыть" }));
+    expect(document.querySelector("[data-slot=entry-missing]")).toBeNull();
+    // the button it closed is gone: focus lands on the list's Tab stop, not the page's body
+    expect(document.activeElement).toBe(article(1));
+    expect(new URLSearchParams(view.probe.location?.search).get("entry")).toBeNull();
+    expect(new URLSearchParams(view.probe.location?.search).get("view")).toBe("journal");
   });
 
   test("craft-32: no entry adds a landmark — the labels are a description list, not labelled sections", async () => {
@@ -271,8 +310,95 @@ describe("live and empty", () => {
     renderView(fx, KEY, path(), JournalView);
     await loaded();
     expect(document.querySelector("[data-slot=adaptive-toolbar]")).toHaveClass("h-7", "shrink-0");
-    expect(document.querySelector("[data-toolbar-item=filter-stage] [data-slot=toolbar-sizer]")).not.toBeNull();
+    // «Этап» hugs its value like every filter (DESIGN.md → Adaptive Toolbar): it is the toolbar's last item, so its
+    // width pushes nothing, and the change is the user's own
+    expect(document.querySelector("[data-toolbar-item=filter-stage] [data-slot=toolbar-sizer]")).toBeNull();
     expect(document.querySelector("[data-slot=journal-scroll]")).toHaveClass("[scrollbar-gutter:stable]");
     expect(bar()).toHaveClass("h-8", "shrink-0");
+  });
+});
+
+describe("pass 2 (f16): volume, keyboard, the entry's address", () => {
+  test("cand-18, cand-7: a stage rail beside the list from 52 rem — each stage with its count opens its first entry, «Последнее решение» the newest, a number its entry", async () => {
+    const user = userEvent.setup({ delay: null });
+    const view = renderView(fx, KEY, path(), JournalView);
+    await loaded();
+    // the rail's column is in the grid from 52 rem whether its content is known or not; below it the list takes all
+    expect(document.querySelector("[data-slot=journal-body]")).toHaveClass("grid", "grid-cols-1", "@min-[52rem]/view:grid-cols-[minmax(0,calc(var(--container-measure)+9.5rem))_14rem]");
+    const rail = screen.getByRole("navigation", { name: "Этапы журнала" });
+    expect(rail).toHaveClass("hidden", "@min-[52rem]/view:flex", "overflow-y-auto", "[scrollbar-gutter:stable]");
+    const items = within(rail).getAllByRole("link");
+    expect(items.map((a) => a.textContent)).toEqual(["проход 1 · карта59", "проход 1 · ревью40", "проход 2 · ревью44", "Последнее решение#143"]);
+    for (const a of items) expect(a).toHaveClass("h-7");
+    expect(items[0]).toHaveAttribute("href", runPath(KEY, { view: "journal", entry: "1" }));
+    expect(items[1]).toHaveAttribute("href", runPath(KEY, { view: "journal", entry: "60" }));
+    expect(items[3]).toHaveAttribute("href", runPath(KEY, { view: "journal", entry: "143" }));
+    // a stage word truncates in the 14 rem rail (the longest, «проход 2 · проверка исправлений»): its title holds it whole
+    expect(items[1]).toHaveAttribute("title", "проход 1 · ревью: #60–#99, 40 решений");
+    expect(items[1].firstElementChild).toHaveClass("truncate");
+    await user.click(items[2]);
+    expect(new URLSearchParams(view.probe.location?.search).get("entry")).toBe("100");
+    await waitFor(() => expect(article(100)).toHaveAttribute("data-target"));
+    expect(document.activeElement).toBe(article(100));
+    const go = within(rail).getByRole("textbox", { name: "Перейти к решению: номер" });
+    await user.type(go, "#120{Enter}");
+    expect(new URLSearchParams(view.probe.location?.search).get("entry")).toBe("120");
+    await waitFor(() => expect(document.activeElement).toBe(article(120)));
+    await user.type(within(rail).getByRole("textbox", { name: "Перейти к решению: номер" }), "999{Enter}");
+    expect(await screen.findByText(/в этом прогоне решения #1–#143/)).toBeInTheDocument();
+  });
+
+  test("cand-18: the rail's stages over the rows in view, and the stage the list shows first", () => {
+    expect(railStages(run.journal)).toEqual([
+      { stage: "p1-map", label: "проход 1 · карта", first: "1", last: "59", count: 59 },
+      { stage: "p1-review", label: "проход 1 · ревью", first: "60", last: "99", count: 40 },
+      { stage: "p2-review", label: "проход 2 · ревью", first: "100", last: "143", count: 44 },
+    ]);
+    expect(stageAt(["60", "62"], run.journal)).toBe("p1-review");
+    expect(stageAt(["58", "61"], run.journal)).toBe("p1-map");
+    expect(stageAt(null, run.journal)).toBeNull();
+  });
+
+  test("cand-19: the list is one Tab stop — ↑/↓ move between entries, Tab enters the focused entry's links, Enter follows one", async () => {
+    const user = userEvent.setup({ delay: null });
+    const view = renderView(fx, KEY, path(), JournalView);
+    await loaded();
+    const list = document.querySelector("[data-slot=journal-scroll]") as HTMLElement;
+    const stops = () => [...list.querySelectorAll<HTMLElement>("a[href], button, input, [tabindex]")].filter((el) => el.tabIndex >= 0);
+    expect(stops()).toEqual([article(1)]);
+    article(5).focus();
+    expect(stops()).toEqual([article(5), within(article(5)).getByRole("link", { name: "p1-review-critic-code#code-6" })]);
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(article(6));
+    await user.keyboard("{ArrowUp}");
+    expect(document.activeElement).toBe(article(5));
+    await user.tab();
+    expect(document.activeElement).toBe(within(article(5)).getByRole("link", { name: "p1-review-critic-code#code-6" }));
+    await user.keyboard("{Enter}");
+    expect(new URLSearchParams(view.probe.location?.search).get("view")).toBe("findings");
+  });
+
+  test("cand-7: an entry's menu copies its address — «Скопировать адрес решения»", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderView(fx, KEY, path(), JournalView);
+    await loaded();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    fireEvent.contextMenu(article(40));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByText("#40 · Question 40: which way?")).toBeInTheDocument();
+    await user.click(within(menu).getByRole("menuitem", { name: "Скопировать адрес решения" }));
+    expect(writeText).toHaveBeenCalledWith(`${window.location.origin}${runPath(KEY, { view: "journal", entry: "40" })}`);
+  });
+
+  test("f9's debt: a ref's id wears the search's one mark — the ids are searched", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderView(fx, KEY, path(), JournalView);
+    await loaded();
+    await user.click(screen.getByRole("searchbox"));
+    await user.paste("code-6");
+    await waitFor(() => expect(articles().length).toBeLessThan(143), { timeout: 4000 });
+    const link = within(fact(article(5), LABELS.refs) as HTMLElement).getByRole("link", { name: "p1-review-critic-code#code-6" });
+    expect(link.querySelector("mark[data-slot=hit]")).toHaveTextContent("code-6");
   });
 });
