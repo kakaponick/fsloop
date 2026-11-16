@@ -62,7 +62,7 @@ The user's own rules, stated in his words; they outrank every other rule of this
 13. **The run page's frame** — one frame for every view: header, first-load state, «not found» («Прогон <id> не найден: его папки больше нет в <корень>»), and a read error with «Повторить».
 14. **A part that failed** — a file of the run folder that cannot be read fails in its own place: «<Что> не прочитан: <причина>» («Отчёт critique-3.md не прочитан: …»); the rest of the run shows. «Повторить» stands only where a retry can change the result.
 15. **Empty because not yet** — a view empty because the run has not reached the stage that fills it names that stage: «Критики ещё не писали отчётов — находки появятся на этапе «ревью»». No runs under the root says which root and that a new run appears by itself.
-16. **Views of a table** — a preset of filters is one «Вид» select, first in the findings toolbar, each item with its count (Все · Без оценки · В исправление · Кандидаты · Закоммичены). Choosing one replaces the filters and leaves sort, columns and search alone; filters changed by hand read «Свой набор». An empty named view names itself and what fills it.
+16. **Views of a table** — a preset of filters is one «Вид» select, first in a table's toolbar, each item with its count: in «Находки» Все · Без оценки · С возражением · В исправление · Кандидаты · Закоммичены («С возражением» is every verdict but «согласен»); in «Юниты» Все · В работе · Не начаты · Заблокированы · Закоммичены. Choosing one replaces the filters and leaves sort, columns and search alone; filters changed by hand read «Свой набор». An empty named view names itself and what fills it.
 
 ## Live data
 
