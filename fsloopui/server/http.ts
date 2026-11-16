@@ -6,7 +6,7 @@ import { HUMAN_VERDICTS } from "../../skills/fsloop/fsl.mjs";
 import { VERDICT, type Verdict } from "../shared/states.ts";
 import type { Git } from "./run.ts";
 import { createStore } from "./store.ts";
-import { appendVerdict, isVerdict } from "./verdict.ts";
+import { appendVerdicts, isVerdict } from "./verdict.ts";
 
 export interface AppOptions {
   /** Roots of projects, projects or run folders. */
@@ -122,15 +122,20 @@ export function createApp({ roots, distDir, intervalMs = 2000, now = Date.now, g
     const run = store.run(key);
     if (!run) return notFound(key);
     if (!isVerdict(body.verdict)) return json(400, { error: `Оценка ${String(body.verdict)} неизвестна: ${(HUMAN_VERDICTS as Verdict[]).map((v) => VERDICT[v].compact).join(", ")}` });
-    const finding = String(body.finding ?? "");
-    if (!run.findings.some((f) => f.id === finding)) return json(404, { error: `Находка ${finding} не найдена в прогоне ${key}` });
+    // One finding (`finding`) or a selection (`findings`, ux 6): every id must be the run's, or nothing is written.
+    const many = Array.isArray(body.findings);
+    const ids = many ? (body.findings as unknown[]).map(String) : [String(body.finding ?? "")];
+    if (!ids.length) return json(400, { error: "Не выбрано ни одной находки" });
+    const known = new Set(run.findings.map((f) => f.id));
+    const missing = ids.find((id) => !known.has(id));
+    if (missing !== undefined) return json(404, { error: `Находка ${missing} не найдена в прогоне ${key}` });
     const note = body.note ?? null;
     if (note !== null && (typeof note !== "string" || note.length > NOTE_MAX)) return json(400, { error: `Заметка — текст не длиннее ${NOTE_MAX} символов` });
     try {
-      const saved = appendVerdict(run.dir, { finding, verdict: body.verdict, note }, new Date(now()).toISOString());
+      const saved = appendVerdicts(run.dir, { findings: [...new Set(ids)], verdict: body.verdict, note }, new Date(now()).toISOString());
       store.touch(key);
       broadcast();
-      return json(200, { verdict: saved });
+      return json(200, many ? { verdict: saved, findings: [...new Set(ids)] } : { verdict: saved });
     } catch (e) {
       return json(500, { error: `Оценка не сохранилась: ${e instanceof Error ? e.message : String(e)}` });
     }

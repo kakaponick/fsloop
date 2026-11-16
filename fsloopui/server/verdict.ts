@@ -29,9 +29,15 @@ function endsMidLine(path: string): boolean {
 
 /** Appends `{finding, verdict, note, at}`; earlier lines stay, the latest one is the finding's verdict. */
 export function appendVerdict(runDir: string, { finding, verdict, note }: { finding: string; verdict: Verdict; note?: string | null }, at = new Date().toISOString()): UserVerdict {
+  return appendVerdicts(runDir, { findings: [finding], verdict, note }, at);
+}
+
+/** A selection's verdict (ux 6): one line per finding, the same verdict, note and time, in one write. */
+export function appendVerdicts(runDir: string, { findings, verdict, note }: { findings: readonly string[]; verdict: Verdict; note?: string | null }, at = new Date().toISOString()): UserVerdict {
   if (!isVerdict(verdict)) throw new Error(`unknown verdict ${String(verdict)}`);
   const path = join(runDir, "human.jsonl");
-  const line = { finding, verdict, note: typeof note === "string" && note.trim() ? note.trim() : null, at };
-  appendFileSync(path, `${endsMidLine(path) ? "\n" : ""}${JSON.stringify(line)}\n`);
-  return { verdict, note: line.note, at };
+  const kept = typeof note === "string" && note.trim() ? note.trim() : null;
+  const text = findings.map((finding) => `${JSON.stringify({ finding, verdict, note: kept, at })}\n`).join("");
+  appendFileSync(path, `${endsMidLine(path) ? "\n" : ""}${text}`);
+  return { verdict, note: kept, at };
 }

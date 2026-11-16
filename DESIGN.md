@@ -274,6 +274,15 @@ The bottom strip of every view, 32 px, small muted type with tabular numerals: t
 ### View State — `useTableView`, `useRunView`
 Through the one storage module: sort, columns, widths, page size, the page split, the pin and the search history per table id; filters and search per table id and run. The page and the open rows live in the URL, owned by the caller; the selection in memory. Serves `table #7`, `rules/ui` → Tables 4, Conventions 12.
 
+### Finding Row — `FindingRow` and the cells (`fsloopui/src/finding/`, exported from `src/finding/index.ts`)
+A finding reads the same on every surface. In «Находки» it is a table row: «Серьёзность» (dot + word, «не записано» with a neutral dot when the critic named none), «ID» (the local id in mono, the full id in the title), «Находка» (the first sentence as written, the width-free column; a loose line's raw text), «Отчёт» (the compact launch name, «прогон» for the run's own finding), «Состояние» (the state's dot and word, then its unit: «исправляется · u3»), «Оценка» (the user's verdict, «—» before one). «Место», «Уверенность», «Охват», «Этап» are in the columns menu, hidden by default. Elsewhere — a unit's findings, a report's — the same parts make `FindingRow`, one 32 px line: severity · id as a link to the finding · sentence · state, in fixed widths so rows align. Serves `rules/ui` → Conventions 1, 4, Tables 5.
+
+### Finding Article — `FindingArticle`
+What a finding's row expands into, on every surface: a fact line (severity in full, «уверенность критика», «охват правки», the report as a link, the stage with its pass, the place in mono with a copy button, «не записано» where the line named none), then the text as the critic wrote it — «Наблюдение», «Правка» (its `/impeccable` command as code), «Вопрос, который закрывает правка», «Правило», or one «Текст находки» where the line has no split; never a section twice. Beside it, from a 52 rem container, a second column: «Решение прогона» (the state in full, each unit as «u3 «title» — закоммичен» linked to the unit, the run's why) and the verdict. «Кадры находки» last, as the frame strip. Section headings are small muted type; the text keeps its measure. Serves `rules/ui` → Tables 3, Layout 5, 7.
+
+### Verdict Control — `VerdictControl` (`fsloopui/src/views/findings/verdict.tsx`)
+The user's one write, in the detail and in the «Оценить…» dialog alike: a reserved one-line status — «Ваша оценка: согласен · 19:41 МСК» or what choosing does — then the note (a fixed 64 px field that the user may drag taller, up to 160 px) with its hint, then the four verdicts as one outline toggle group whose pressed item is filled in ink. Choosing a verdict is the save: optimistic, no pending state; choosing the pressed one again saves a changed note. A failed write puts the row back, keeps the note and raises the failure toast with «Повторить». Serves `rules/ui` → Conventions 6, Strict 1, `ux 6`.
+
 ### Role Map
 
 The roles of `law/ui.md` → Roles, as fsloopUI fills them:

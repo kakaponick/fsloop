@@ -13,12 +13,21 @@ const root = join(temp, "projects");
 const ID = "ver00001";
 const dir = join(root, "app", ".claude", "fsloop", "runs", ID);
 const FINDING = "p1-map-craft-shell#craft-1";
+const SECOND = "p1-map-craft-shell#craft-2";
 writeRun(dir, {
   id: ID,
   mtime: NOW,
   now: NOW,
   record: true,
-  launches: [{ id: "p1-map-craft-shell", stage: "p1-map", agent: "fsloop-critic", description: "craft shell", report: criticReport({ lens: "craft assess", findings: ["craft-1 [craft] major high local src/shell.tsx:3 — ux 2 — the toolbar is clipped — /impeccable adapt: wrap it."] }) }],
+  launches: [
+    {
+      id: "p1-map-craft-shell",
+      stage: "p1-map",
+      agent: "fsloop-critic",
+      description: "craft shell",
+      report: criticReport({ lens: "craft assess", findings: ["craft-1 [craft] major high local src/shell.tsx:3 — ux 2 — the toolbar is clipped — /impeccable adapt: wrap it.", "craft-2 [craft] minor med local src/shell.tsx:9 — ux 1 — the tab reads «Run» — /impeccable clarify: name the run."] }),
+    },
+  ],
 });
 // An earlier verdict, written before fsloopUI ran.
 writeFileSync(join(dir, "human.jsonl"), JSON.stringify({ finding: FINDING, verdict: "disagree", note: null, at: "2026-11-16T08:00:00Z" }) + "\n");
@@ -57,6 +66,25 @@ describe("POST /api/verdict", () => {
   test("an empty note is no note", async () => {
     expect((await post({ run: `app/${ID}`, finding: FINDING, verdict: "agree", note: "  " })).status).toBe(200);
     expect(JSON.parse(lines().at(-1) ?? "")).toMatchObject({ verdict: "agree", note: null });
+  });
+
+  test("a selection: one note, many findings, one line each, all or none", async () => {
+    const before = lines().length;
+    const res = await post({ run: `app/${ID}`, findings: [FINDING, SECOND], verdict: "false-positive", note: "same cause" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ verdict: { verdict: "false-positive", note: "same cause", at: "2026-11-16T10:00:00.000Z" }, findings: [FINDING, SECOND] });
+    expect(lines().slice(before).map((l) => JSON.parse(l))).toEqual([
+      { finding: FINDING, verdict: "false-positive", note: "same cause", at: "2026-11-16T10:00:00.000Z" },
+      { finding: SECOND, verdict: "false-positive", note: "same cause", at: "2026-11-16T10:00:00.000Z" },
+    ]);
+    const run = readRun(dir);
+    expect(run.findings.filter((f) => f.verdict?.verdict === "false-positive").map((f) => f.id)).toEqual([FINDING, SECOND]);
+    // one id the run lacks refuses the whole selection
+    const partly = await post({ run: `app/${ID}`, findings: [FINDING, "p1-map-craft-shell#craft-9"], verdict: "agree" });
+    expect(partly.status).toBe(404);
+    expect(await partly.json()).toEqual({ error: "Находка p1-map-craft-shell#craft-9 не найдена в прогоне app/ver00001" });
+    expect((await post({ run: `app/${ID}`, findings: [], verdict: "agree" })).status).toBe(400);
+    expect(lines()).toHaveLength(before + 2);
   });
 
   test("refuses a verdict outside the four, an unknown finding, an unknown run, a body that is not JSON", async () => {
