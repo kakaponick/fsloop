@@ -193,6 +193,35 @@ describe("flat list", () => {
     expect(onOpen).toHaveBeenCalledWith("p1-review-craft");
   });
 
+  test("p2-verdict-critic-craft-verdict-3#craft-3: `gate` — an item's own links and buttons take Tab only while focus is inside the item", async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <FlatList label="Соглашения" gate>
+          <article tabIndex={-1} {...flatItem("1")}>
+            <a href="#c1">1</a> <button type="button">место 1</button>
+          </article>
+          <article tabIndex={-1} {...flatItem("2")}>
+            <a href="#c2">2</a>
+          </article>
+        </FlatList>
+        <button type="button">после списка</button>
+      </>,
+    );
+    const [first, second] = [...document.querySelectorAll<HTMLElement>("article")];
+    const stops = () => [...document.querySelectorAll<HTMLElement>("article, article a, article button")].filter((el) => el.tabIndex >= 0);
+    expect(stops()).toEqual([first]);
+    first.focus();
+    expect(stops()).toEqual([first, within(first).getByRole("link"), within(first).getByRole("button")]);
+    await user.tab();
+    expect(within(first).getByRole("link")).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(second).toHaveFocus();
+    expect(stops()).toEqual([second, within(second).getByRole("link")]);
+    await user.click(screen.getByRole("button", { name: "после списка" }));
+    expect(stops()).toEqual([second]);
+  });
+
   test("gap 10 (f16): Enter on a link or a button inside an item that is not a link is theirs — the item does not take it", async () => {
     const onOpen = vi.fn();
     const onCopy = vi.fn();

@@ -12,7 +12,7 @@ import { SEVERITY, UNIT_STATE } from "../../shared/states.ts";
 import { Button } from "@/components/ui/button";
 import { AppDialog } from "./dialog.tsx";
 import { keyLabel, Keys } from "./kbd.tsx";
-import { copyItem, copyLabel, Menu } from "./menu.tsx";
+import { copyItem, copyLabel, Menu, PLACE_WHAT } from "./menu.tsx";
 import { comboboxValueText, CountCombobox, CountSelect } from "./select.tsx";
 import { renderUi } from "./test-utils.tsx";
 import { copyText, notify, toastTitle } from "./toast.tsx";
@@ -188,6 +188,21 @@ describe("select and combobox", () => {
     expect(screen.getByRole("combobox", { name: "Юнит: u4 и ещё 1" })).toBeInTheDocument();
     expect(comboboxValueText([], units)).toBe("все");
   });
+
+  test("p2-verdict-critic-craft-verdict#craft-4: an option's `short` is the closed trigger's text; the open list keeps the whole label", async () => {
+    const user = userEvent.setup();
+    const reports = [
+      { value: "p1-review-critic-craft", label: "critic craft · ревью, проход 1 · 5 critical · 10 major · 15 minor", short: "critic craft" },
+      { value: "p1-map-map", label: "map · карта, проход 1 · итог: done", short: "map" },
+    ];
+    expect(comboboxValueText(["p1-review-critic-craft"], reports)).toBe("critic craft");
+    expect(comboboxValueText(["p1-review-critic-craft", "p1-map-map"], reports)).toBe("critic craft и ещё 1");
+    renderUi(<CountCombobox label="Отчёт" single placeholder="Найти отчёт" value={["p1-review-critic-craft"]} onValueChange={() => {}} options={reports} />);
+    const trigger = screen.getByRole("combobox", { name: "Отчёт: critic craft" });
+    expect(trigger).toHaveTextContent(/^Отчёт:critic craft$/);
+    await user.click(trigger);
+    expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual(["critic craft · ревью, проход 1 · 5 critical · 10 major · 15 minor", "map · карта, проход 1 · итог: done"]);
+  });
 });
 
 describe("menu", () => {
@@ -240,6 +255,21 @@ describe("menu", () => {
     walk(src);
     expect(files).toBeGreaterThan(50);
     expect([...written]).toEqual(["ui/menu.tsx"]);
+  });
+
+  test("p2-verdict-critic-code-verdict#verdict-3: one word for a place — «место» is written once, beside the builder, and both copies read «Скопировать место»", () => {
+    expect(copyLabel(PLACE_WHAT)).toBe("Скопировать место");
+    const src = resolve(__dirname, "..");
+    const written: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) && /=\s*"место"/.test(readFileSync(p, "utf8"))) written.push(relative(src, p).replace(/\\/g, "/"));
+      }
+    };
+    walk(src);
+    expect(written).toEqual(["ui/menu.tsx"]);
   });
 
   test("a context menu with a header, an item's id, shortcut and blocked reason, and a choice in a submenu", async () => {

@@ -8,6 +8,8 @@ import { NOUNS } from "../../shared/text.ts";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
+  AddressLink,
+  AddressMenu,
   AppDialog,
   Clamp,
   copyItem,
@@ -31,14 +33,17 @@ import {
   Loading,
   markProps,
   Menu,
+  MissingLine,
   NotFound,
   notify,
   NotRecorded,
   OutOfFilter,
   PartFailed,
   RunningText,
+  SCROLLER,
   StatusDot,
   copyText,
+  useReveal,
   type HeldCounts,
 } from "@/ui";
 import { Highlight } from "@/table";
@@ -121,6 +126,13 @@ function AbsentSection() {
         </Case>
         <Case label="Id, которого нет в прогоне, — с отметкой поиска по этому id">
           <NotFound kind="unit" id="u77" highlight={(t) => <Highlight text={t} tokens={["u77"]} />} />
+        </Case>
+        <Case label="Адрес, которого нет в списке: что есть в прогоне и выход">
+          <div className="flex flex-col gap-1">
+            <MissingLine kind="entry" id="999" range={["1", "143"]} slot="kit-entry-missing" onClose={() => {}} />
+            <MissingLine kind="convention" id="99" range={["1", "26"]} slot="kit-convention-missing" onClose={() => {}} />
+            <MissingLine kind="convention" id="3" range={null} slot="kit-convention-none" onClose={() => {}} />
+          </div>
         </Case>
         <Case label="Поле не записано">
           <div className="flex flex-col gap-1">
@@ -307,9 +319,60 @@ function ListsSection() {
               <div className="px-3 py-1.5">Обычная строка</div>
             </div>
           </Case>
+          <AddressCase />
         </div>
       </div>
     </Section>
+  );
+}
+
+/** The one form of an object on its list: its number a link to its address, its menu copying it, the list one Tab
+ * stop with each item's own links gated, the reveal moving the list's own scroller and nothing above it. */
+function AddressCase() {
+  const [target, setTarget] = useState<string | null>(null);
+  const { scroller, hold } = useReveal(target, (box, n) => box.querySelector<HTMLElement>(`article[data-kit-entry="${n}"]`));
+  const entries = Array.from({ length: 12 }, (_, i) => String(i + 1));
+  const href = (n: string) => `/kit?entry=${n}#lists`;
+  return (
+    <Case label="Объект в списке: номер — ссылка на его адрес, меню копирует адрес; одна остановка Tab, ссылки записи — по Tab изнутри; переход двигает только список">
+      <div className="flex max-w-xl flex-col gap-2">
+        <div className="flex gap-2">
+          {["7", "12"].map((n) => (
+            <Button key={n} variant="outline" size="sm" onClick={() => setTarget(n)}>
+              Открыть #{n}
+            </Button>
+          ))}
+        </div>
+        <div ref={scroller} className={`${SCROLLER} h-48 rounded-lg border`}>
+          <FlatList label="Решения" gate>
+            {entries.map((n) => (
+              <AddressMenu key={n} kind="entry" href={href(n)} header={{ text: `#${n} · Какой путь выбрать?` }}>
+                <article
+                  tabIndex={-1}
+                  data-kit-entry={n}
+                  {...flatItem(n)}
+                  {...markProps({ target: n === target }, "flex flex-col gap-0.5 rounded-md px-3 py-2 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset")}
+                >
+                  <p className="m-0 text-xs text-muted-foreground">
+                    <AddressLink
+                      kind="entry"
+                      id={n}
+                      href={href(n)}
+                      onOpen={() => {
+                        hold(n);
+                        setTarget(n);
+                      }}
+                    />{" "}
+                    · проход 1 · карта
+                  </p>
+                  <span>Какой путь выбрать?</span>
+                </article>
+              </AddressMenu>
+            ))}
+          </FlatList>
+        </div>
+      </div>
+    </Case>
   );
 }
 

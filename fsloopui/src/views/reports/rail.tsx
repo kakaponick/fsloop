@@ -11,7 +11,7 @@ import { Link } from "react-router-dom";
 import type { Finding } from "../../../shared/model.ts";
 import { num } from "../../../shared/text.ts";
 import { cn } from "@/lib/utils";
-import { copyItem, Dot, flatItem, FlatList, markProps, Menu, OutOfFilter } from "@/ui";
+import { copyItem, Dot, flatItem, FlatList, markProps, Menu, OutOfFilter, revealIn } from "@/ui";
 import { commonKind, groupsOf, groupTitle, itemState, type HeldItem } from "./model.ts";
 
 export interface RailProps {
@@ -45,11 +45,13 @@ const ITEM_CLASS = "rounded-md px-2 outline-none hover:bg-muted focus-visible:ri
 
 export function Rail({ items, findings, current, outside, arrived, hrefOf, overviewHref, pathOf, empty, now }: RailProps) {
   const root = useRef<HTMLDivElement>(null);
-  // The open report is in view when the rail opens on it, or a link elsewhere changes it.
+  // The open report is in view when the rail opens on it, or a link elsewhere changes it — the rail's own scroller
+  // moves, and nothing above it (`@/ui` → revealIn; Strict 1, craft-1).
   useLayoutEffect(() => {
     if (!current) return;
     const el = [...(root.current?.querySelectorAll<HTMLElement>("[data-flat-item]") ?? [])].find((e) => e.dataset.flatItem === current);
-    el?.scrollIntoView({ block: "nearest" });
+    const scroller = root.current?.closest<HTMLElement>("[data-slot=rail-scroll]");
+    if (el && scroller) revealIn(scroller, el, { nearest: true, focus: false });
   }, [current]);
   const groups = groupsOf(items.map((h) => h.item));
   const ended = new Set(items.filter((h) => h.ended).map((h) => h.item.id));

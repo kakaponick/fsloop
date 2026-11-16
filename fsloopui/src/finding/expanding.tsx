@@ -28,10 +28,14 @@ export interface ExpandingFindingsProps {
   now: number;
   /** The list's own slot: «report-findings», «unit-closes». */
   slot: string;
-  /** A hairline between rows, a hover and an open ground — a list on the page's paper; off for one that already sits
-   * on the muted ground (a unit's detail). */
+  /** A hairline between rows, a muted hover and an open ground — a list on the page's paper; off for one that already
+   * sits on the muted ground (a unit's detail), where the row's hover and the chevron's grounds are ink over muted. */
   ruled?: boolean;
 }
+
+/** The chevron's hover and open grounds on the muted ground of a unit's detail: the ghost button's own are that same
+ * muted and would show nothing there, so ink over it takes their place — a step off muted in both themes (craft-6). */
+const ON_MUTED = "hover:bg-foreground/8 dark:hover:bg-foreground/8 aria-expanded:bg-foreground/8";
 
 /** A click on a row's own text toggles it; a link or a button inside the row keeps its own action. */
 const ownClick = (e: MouseEvent<HTMLElement>) => !(e.target as HTMLElement).closest("a, button");
@@ -72,10 +76,19 @@ export function ExpandingFindings({ run, items, label, now, slot, ruled = true }
                 data-slot="finding-line"
                 data-state={isOpen ? "open" : "closed"}
                 onClick={(e) => ownClick(e) && toggle(f.id)}
-                className={cn("grid cursor-default grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-x-1", ruled && "pr-2 hover:bg-muted data-[state=open]:bg-muted/40")}
+                className={cn("grid cursor-default grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-x-1", ruled ? "pr-2 hover:bg-muted data-[state=open]:bg-muted/40" : "hover:bg-foreground/4")}
               >
                 <Hint label={name}>
-                  <Button variant="ghost" size="icon-xs" {...flatItem(f.id)} aria-expanded={isOpen} aria-controls={isOpen ? panel : undefined} aria-label={name} onClick={() => toggle(f.id)}>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    {...flatItem(f.id)}
+                    aria-expanded={isOpen}
+                    aria-controls={isOpen ? panel : undefined}
+                    aria-label={name}
+                    onClick={() => toggle(f.id)}
+                    className={cn(!ruled && ON_MUTED)}
+                  >
                     <ChevronRightIcon aria-hidden="true" className={cn("transition-transform motion-reduce:transition-none", isOpen && "rotate-90")} />
                   </Button>
                 </Hint>

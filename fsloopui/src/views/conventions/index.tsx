@@ -7,18 +7,23 @@
 // parser could not split keeps its text whole. A report or a run folder that cannot be read fails in its own place
 // (rules/ui → Conventions 14). Read-only.
 //
+// The conventions are one flat list (ui → Keyboard; DESIGN.md → Flat List): one Tab stop, ↑/↓ between them, a
+// convention's own links and places take Tab only while focus is in it.
+//
 // A convention's address is `?view=conventions&convention=<n>` (the design check: an object's address is a query
-// key): the view scrolls to it, marks it with the target mark and moves focus to it; hidden by the search it shows
-// anyway, «вне фильтра».
+// key), in the one form of an object on its list (`@/ui` → AddressLink, AddressMenu, useReveal): the ordinal is a
+// link to it and its menu copies it; the view brings it to the top of the list's own scroller — nothing above the
+// list moves — marks it with the target mark and moves focus to it; hidden by the search it shows anyway, «вне
+// фильтра»; an address the run lacks reads the shared «не найдено» line with the numbers it holds and «Закрыть».
 import { CopyIcon } from "lucide-react";
-import { useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { Convention, Launch } from "../../../shared/model.ts";
 import { STAGE_WORDS, stageOf } from "../../../shared/states.ts";
 import { count, NOUNS, type Forms } from "../../../shared/text.ts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { baseName, copyLabel, copyText, EmptyState, emptyWhen, FactList, fileFailure, folderFailure, Hint, markProps, NotFound, NotRecorded, OutOfFilter, PartFailed, RunningText, TOAST_MAX_TITLE, type Fact, type Resolve } from "@/ui";
+import { AddressLink, AddressMenu, baseName, copyLabel, copyText, EmptyState, emptyWhen, FactList, fileFailure, flatItem, FlatList, folderFailure, Hint, markProps, MissingLine, NotRecorded, OutOfFilter, PartFailed, PLACE_WHAT, RunningText, SCROLLER, TOAST_MAX_TITLE, useReveal, type Fact, type Resolve } from "@/ui";
 import { AdaptiveToolbar, filterSummary, Highlight, pushHistory, runQuery, SearchBox, StatusBar, tokens, useRunView, useTableView, type SearchDef, type ToolbarItem } from "@/table";
 import { useNow } from "../../app/clock.tsx";
 import { LINK_CLASS, resolverFor, routerLink } from "../../app/links.tsx";
@@ -34,14 +39,10 @@ export const DESIGN_CHECK_NOUN: Forms = ["проверка дизайна", "п�
 export const NEVER_DESCRIPTION = `Проверку дизайна прогон запускает на этапе «${STAGE_WORDS.decompose}», когда интерфейс в этом проходе делают два юнита или больше.`;
 /** A convention's labelled rows. */
 export const LABELS = { example: "Пример", rule: "Правило" } as const;
-/** What a place's button copies: «Скопировать место», as a finding's place (finding/article.tsx). */
-export const PLACE_WHAT = "место";
 /** The whole list, when the run folder could not be read. */
 export const CONVENTIONS_PART = "Список соглашений";
 /** The view's id for its persisted search (view state, never the URL: rules/ui → Conventions 12). */
 export const CONVENTIONS_VIEW = "conventions";
-/** What follows the shared «Соглашение <n> не найдено» for a `convention=` the run does not hold: why, what to do. */
-export const MISSING_NEXT = ": в этом прогоне его нет — проверьте ссылку";
 
 /** The search looks in every part of a convention; the places and the launch match as identifiers (table #12). */
 export const SEARCH: SearchDef<Convention> = {
@@ -128,10 +129,13 @@ function reportFailure(run: LoadedRun, launch: string): { file: string; cause: s
   return error ? { file: baseName(file), cause: error.cause } : null;
 }
 
+/** A convention's article in the list's scroller, by its number. */
+const findConvention = (list: HTMLElement, n: string) => list.querySelector<HTMLElement>(`li[data-convention="${n}"] > article`);
+
 export function ConventionsView({ run }: ViewProps) {
   const now = useNow();
   const updated = useUpdatedAt();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const groups = useMemo(() => groupsOf(run), [run]);
   const resolve = useMemo(() => resolverFor(run), [run]);
   const total = run.conventions.length;
@@ -147,20 +151,21 @@ export function ConventionsView({ run }: ViewProps) {
   const searching = toks.length > 0;
   const shownGroups = searching ? groups.filter((g) => g.conventions.some((c) => kept.has(c.n))) : groups;
 
-  // The convention a link names is scrolled to and takes focus, once per link; the ordinal the user clicked stays
-  // where it is (Strict 1: a click never pushes what was clicked).
-  const scroller = useRef<HTMLDivElement>(null);
-  const clicked = useRef<string | null>(null);
-  useLayoutEffect(() => {
-    if (!target) return;
-    if (clicked.current === target) {
-      clicked.current = null;
-      return;
-    }
-    const el = scroller.current?.querySelector<HTMLElement>(`li[data-convention="${target}"] > article`);
-    el?.scrollIntoView({ block: "start" });
-    el?.focus({ preventScroll: true });
-  }, [target]);
+  // The convention a link names is brought to the top of the list's own scroller and takes focus, once per link —
+  // nothing above the list moves; the ordinal the user clicked stays where it is (Strict 1: a click never pushes
+  // what was clicked).
+  const { scroller, hold } = useReveal(target, findConvention);
+  const setConvention = (n: string | null) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (n === null) next.delete("convention");
+        else next.set("convention", n);
+        return next;
+      },
+      { replace: true },
+    );
+  const range: [string, string] | null = total ? [String(run.conventions[0].n), String(run.conventions[total - 1].n)] : null;
 
   const toolbar: ToolbarItem[] = [
     { id: "search", kind: "pinned", flex: true, node: <SearchBox value={prefs.search} onChange={(v) => setPrefs({ search: v })} placeholder={SEARCH.placeholder} history={table.history} onCommit={(term) => setTable({ history: pushHistory(table.history, term) })} /> },
@@ -170,7 +175,7 @@ export function ConventionsView({ run }: ViewProps) {
   return (
     <div data-slot="conventions-view" className="absolute inset-0 flex flex-col gap-2 px-5 pt-3 pb-1">
       {total > 0 && !failed && <AdaptiveToolbar items={toolbar} label="Поиск по соглашениям" />}
-      <div ref={scroller} data-slot="conventions-scroll" className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+      <div ref={scroller} data-slot="conventions-scroll" className={cn(SCROLLER, "flex-1")}>
         {failed ? (
           <PartFailed what={CONVENTIONS_PART} cause={failed.cause} className="mt-4" />
         ) : groups.length === 0 ? (
@@ -184,69 +189,79 @@ export function ConventionsView({ run }: ViewProps) {
             <div data-slot="conventions-intro" className="flex flex-col gap-1">
               <RunningText text={INTRO} measure={false} className="text-xs text-muted-foreground" />
               {wanted !== null && !target && (
-                <p role="status" data-slot="convention-missing" className="m-0">
-                  <NotFound kind="convention" id={wanted} start />
-                  {MISSING_NEXT}
-                </p>
+                <MissingLine
+                  kind="convention"
+                  id={wanted}
+                  range={range}
+                  slot="convention-missing"
+                  onClose={() => {
+                    setConvention(null);
+                    // the button goes with the line: focus lands on the list's Tab stop
+                    scroller.current?.querySelector<HTMLElement>('[data-slot=flat-list] article[tabindex="0"]')?.focus({ preventScroll: true });
+                  }}
+                />
               )}
             </div>
             {searching && q.rows.length === 0 ? (
               <EmptyState form="filtered" noun={NOUNS.convention} filters={filterSummary([], prefs.filters, prefs.search)} onReset={() => setPrefs({ filters: {}, search: "" })} className="py-16" />
             ) : (
-              shownGroups.map((g) => {
-                const s = stageOf(g.stage);
-                const href = run.launches.some((l) => l.id === g.launch) ? runPath(run.key, { view: "reports", report: g.launch }) : null;
-                const title = `${DESIGN_CHECK}${s.pass !== null ? `, проход ${s.pass}` : ""}`;
-                const failure = reportFailure(run, g.launch);
-                const rows = g.conventions.filter((c) => kept.has(c.n));
-                return (
-                  <section key={g.launch} data-launch={g.launch} aria-labelledby={`conv-${g.launch}`} className="flex flex-col gap-2">
-                    <header className="flex flex-col gap-0.5">
-                      <h2 id={`conv-${g.launch}`} className="m-0 text-base font-semibold">
-                        {href ? (
-                          <Link to={href} className={LINK_CLASS}>
-                            {title}
-                          </Link>
-                        ) : (
-                          title
-                        )}
-                      </h2>
-                      <p className="m-0 flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground tabular-nums">
-                        <span className="font-mono">{hl(g.launch)}</span>
-                        {!failure && (
-                          <>
-                            <span aria-hidden="true">·</span>
-                            <span>{count(g.conventions.length, NOUNS.convention)}</span>
-                          </>
-                        )}
-                      </p>
-                    </header>
-                    {failure ? (
-                      <PartFailed what={`Отчёт ${failure.file}`} cause={failure.cause} />
-                    ) : rows.length ? (
-                      <ol data-slot="convention-list" role="list" aria-label={title} className="-mx-3 flex list-none flex-col divide-y p-0">
-                        {rows.map((c) => (
-                          <li key={c.n} id={`convention-${c.n}`} data-convention={c.n}>
-                            <ConventionItem
-                              convention={c}
-                              runKey={run.key}
-                              resolve={resolve}
-                              toks={toks}
-                              target={String(c.n) === target}
-                              outside={q.outside.has(String(c.n))}
-                              onOrdinal={() => {
-                                clicked.current = String(c.n);
-                              }}
-                            />
-                          </li>
-                        ))}
-                      </ol>
-                    ) : (
-                      <p className="m-0 text-muted-foreground">{NONE_WRITTEN}</p>
-                    )}
-                  </section>
-                );
-              })
+              <FlatList label={CONVENTIONS_PART} gate className="gap-6">
+                {shownGroups.map((g) => {
+                  const s = stageOf(g.stage);
+                  const href = run.launches.some((l) => l.id === g.launch) ? runPath(run.key, { view: "reports", report: g.launch }) : null;
+                  const title = `${DESIGN_CHECK}${s.pass !== null ? `, проход ${s.pass}` : ""}`;
+                  const failure = reportFailure(run, g.launch);
+                  const rows = g.conventions.filter((c) => kept.has(c.n));
+                  return (
+                    <section key={g.launch} data-launch={g.launch} aria-labelledby={`conv-${g.launch}`} className="flex flex-col gap-2">
+                      <header className="flex flex-col gap-0.5">
+                        <h2 id={`conv-${g.launch}`} className="m-0 text-base font-semibold">
+                          {href ? (
+                            <Link to={href} className={LINK_CLASS}>
+                              {title}
+                            </Link>
+                          ) : (
+                            title
+                          )}
+                        </h2>
+                        <p className="m-0 flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground tabular-nums">
+                          <span className="font-mono">{hl(g.launch)}</span>
+                          {!failure && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span>{count(g.conventions.length, NOUNS.convention)}</span>
+                            </>
+                          )}
+                        </p>
+                      </header>
+                      {failure ? (
+                        <PartFailed what={`Отчёт ${failure.file}`} cause={failure.cause} />
+                      ) : rows.length ? (
+                        <ol data-slot="convention-list" role="list" aria-label={title} className="-mx-3 flex list-none flex-col divide-y p-0">
+                          {rows.map((c) => (
+                            <li key={c.n} id={`convention-${c.n}`} data-convention={c.n}>
+                              <ConventionItem
+                                convention={c}
+                                runKey={run.key}
+                                resolve={resolve}
+                                toks={toks}
+                                target={String(c.n) === target}
+                                outside={q.outside.has(String(c.n))}
+                                onOwn={() => {
+                                  hold(String(c.n));
+                                  setConvention(String(c.n));
+                                }}
+                              />
+                            </li>
+                          ))}
+                        </ol>
+                      ) : (
+                        <p className="m-0 text-muted-foreground">{NONE_WRITTEN}</p>
+                      )}
+                    </section>
+                  );
+                })}
+              </FlatList>
             )}
           </div>
         )}
@@ -263,13 +278,16 @@ interface ItemProps {
   toks: readonly string[];
   target: boolean;
   outside: boolean;
-  onOrdinal: () => void;
+  /** Opens the convention's own address in place, the convention left where it stands. */
+  onOwn: () => void;
 }
 
 /** One convention: the ordinal and the pattern, then the solution, «Пример» and «Правило» — beside them from 56 rem of
  * the view (the pattern in a hanging 17 rem column), under them, aligned past the ordinal, below it. The search's hits
- * wear the table's one mark in all the text the search looks in (table #12). */
-function ConventionItem({ convention: c, runKey, resolve, toks, target, outside, onOrdinal }: ItemProps) {
+ * wear the table's one mark in all the text the search looks in (table #12). An item of the list's one Tab stop, its
+ * own links and places reached by Tab once focus is in it; its address has the one form of an object on its list
+ * (craft-4): the ordinal a link to it, and its menu copies it. */
+function ConventionItem({ convention: c, runKey, resolve, toks, target, outside, onOwn }: ItemProps) {
   const parts = partsOf(c);
   const marks = markProps({ target });
   const hl = (text: string) => <Highlight text={text} tokens={toks} />;
@@ -280,39 +298,46 @@ function ConventionItem({ convention: c, runKey, resolve, toks, target, outside,
         { label: LABELS.rule, value: parts.rule ? text(parts.rule) : <NotRecorded /> },
       ]
     : [];
+  const href = conventionPath(runKey, c.n);
+  const id = String(c.n);
+  const lead = parts ? parts.pattern : c.text;
   return (
-    <article
-      tabIndex={-1}
-      aria-label={`Соглашение ${c.n}`}
-      data-target={marks["data-target"]}
-      className={cn("grid scroll-mt-2 gap-x-6 gap-y-1 rounded-md px-3 py-2.5 outline-none @min-[56rem]/view:grid-cols-[17rem_minmax(0,1fr)]", marks.className)}
-    >
-      <div className={cn("flex min-w-0 items-baseline gap-2", !parts && "@min-[56rem]/view:col-span-2")}>
-        <span className="w-[3ch] shrink-0 text-right text-muted-foreground tabular-nums">
-          <Link to={conventionPath(runKey, c.n)} replace aria-label={`Ссылка на соглашение ${c.n}`} className={LINK_CLASS} onClick={onOrdinal}>
-            {c.n}
-          </Link>
-        </span>
-        {parts ? (
-          <p data-slot="convention-pattern" className="m-0 min-w-0 font-semibold text-pretty break-words">
-            {hl(parts.pattern)}
-          </p>
-        ) : (
-          <div data-slot="convention-text" className="min-w-0 max-w-measure">
-            {text(c.text)}
+    <AddressMenu kind="convention" href={href} header={{ text: `${id} · ${lead}`, title: lead }}>
+      <article
+        tabIndex={-1}
+        {...flatItem(id)}
+        aria-label={`Соглашение ${c.n}`}
+        data-target={marks["data-target"]}
+        className={cn(
+          "grid gap-x-6 gap-y-1 rounded-md px-3 py-2.5 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset @min-[56rem]/view:grid-cols-[17rem_minmax(0,1fr)]",
+          marks.className,
+        )}
+      >
+        <div className={cn("flex min-w-0 items-baseline gap-2", !parts && "@min-[56rem]/view:col-span-2")}>
+          <span className="w-[3ch] shrink-0 text-right text-muted-foreground tabular-nums">
+            <AddressLink kind="convention" id={id} href={href} onOpen={onOwn} />
+          </span>
+          {parts ? (
+            <p data-slot="convention-pattern" className="m-0 min-w-0 font-semibold text-pretty break-words">
+              {hl(parts.pattern)}
+            </p>
+          ) : (
+            <div data-slot="convention-text" className="min-w-0 max-w-measure">
+              {text(c.text)}
+            </div>
+          )}
+          {outside && <OutOfFilter className="ml-auto shrink-0" />}
+        </div>
+        {parts && (
+          <div className="flex min-w-0 flex-col gap-1 pl-[calc(3ch+0.5rem)] @min-[56rem]/view:pl-0">
+            <div data-slot="convention-solution" className="max-w-measure">
+              {text(parts.solution)}
+            </div>
+            <FactList facts={facts} className="grid-cols-1 gap-y-0.5 text-xs @min-[40rem]/view:grid-cols-[5.5rem_minmax(0,1fr)]" />
           </div>
         )}
-        {outside && <OutOfFilter className="ml-auto shrink-0" />}
-      </div>
-      {parts && (
-        <div className="flex min-w-0 flex-col gap-1 pl-[calc(3ch+0.5rem)] @min-[56rem]/view:pl-0">
-          <div data-slot="convention-solution" className="max-w-measure">
-            {text(parts.solution)}
-          </div>
-          <FactList facts={facts} className="grid-cols-1 gap-y-0.5 text-xs @min-[40rem]/view:grid-cols-[5.5rem_minmax(0,1fr)]" />
-        </div>
-      )}
-    </article>
+      </article>
+    </AddressMenu>
   );
 }
 

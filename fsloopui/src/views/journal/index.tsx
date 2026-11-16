@@ -7,21 +7,23 @@
 //
 // Volume (ux 6; f16): from 52 rem of the view a rail beside the list names the stages of the entries shown, each
 // with its count, the one in view marked, each opening its first entry; then «Последнее решение» and a field that
-// opens an entry by its number. The list is one flat list (ui → Keyboard): one Tab stop, ↑/↓ between entries, and
-// an entry's links take Tab only while focus is in it. An entry's menu copies its address.
+// opens an entry by its number — a number the journal lacks keeps the field and says so on a line reserved under it.
+// The list is one flat list (ui → Keyboard): one Tab stop, ↑/↓ between entries, and an entry's links take Tab only
+// while focus is in it.
 //
-// An entry's address is `?view=journal&entry=<n>` (the design check): the view scrolls to it, marks it with the
-// target mark and moves focus to it; hidden by the filters it shows anyway, «вне фильтра»; still held in the strip,
-// it is placed at once.
-import { memo, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type ReactNode, type RefObject } from "react";
+// An entry's address is `?view=journal&entry=<n>` (the design check), in the one form of an object on its list
+// (`@/ui` → AddressLink, AddressMenu, useReveal): «#n» is a link to it and its menu copies it; the view brings it to
+// the top of the list's own scroller — nothing above the list moves — marks it with the target mark and moves focus
+// to it; hidden by the filters it shows anyway, «вне фильтра»; still held in the strip, it is placed at once; an
+// address the journal lacks reads the shared «не найдено» line with the numbers it holds and «Закрыть».
+import { memo, useCallback, useId, useLayoutEffect, useMemo, useState, type ReactNode, type RefObject } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { JournalEntry } from "../../../shared/model.ts";
 import { stageOf, type Step } from "../../../shared/states.ts";
 import { count, NOUNS, num } from "../../../shared/text.ts";
-import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@/components/ui/input-group";
 import { cn } from "@/lib/utils";
-import { copyItem, Dash, EmptyState, emptyWhen, FactList, fileFailure, flatItem, FlatList, folderFailure, HeldStrip, markProps, Menu, NotFound, OutOfFilter, PartFailed, RunningText, type Fact, type HeldNoun } from "@/ui";
+import { AddressLink, AddressMenu, Dash, EmptyState, emptyWhen, FactList, fileFailure, flatItem, FlatList, folderFailure, HeldStrip, markProps, MissingLine, numberRange, numberText, OutOfFilter, PartFailed, RunningText, SCROLLER, useReveal, type Fact, type HeldNoun } from "@/ui";
 import { AdaptiveToolbar, filterSummary, FilterControl, Highlight, pushHistory, runQuery, SearchBox, StatusBar, tokens, useRunView, useTableView, type FilterDef, type SearchDef, type ToolbarItem } from "@/table";
 import { useNow } from "../../app/clock.tsx";
 import { resolverFor, routerLink } from "../../app/links.tsx";
@@ -42,9 +44,6 @@ export const RAIL_HEAD = "Этапы";
 export const LATEST = "Последнее решение";
 export const GOTO_TEXT = "Перейти к #";
 export const GOTO_LABEL = "Перейти к решению: номер";
-export const CLOSE = "Закрыть";
-/** «Скопировать адрес решения» / «Скопировано: адрес решения»: one form for both, as the copy helper needs. */
-export const COPY_ADDRESS = "адрес решения";
 
 /** «#12 · проход 1 · карта». */
 export const entryHead = (e: Pick<JournalEntry, "n" | "stage">): string => `#${e.n} · ${e.stage ? stageOf(e.stage).full : "этап не записан"}`;
@@ -80,13 +79,12 @@ export function entriesInView(view: { top: number; bottom: number }, boxes: read
 /** «на экране #40–#42», «на экране #7»; nothing in view — empty, its box kept. */
 export const inViewText = (range: readonly [string, string] | null): string => (!range ? "" : range[0] === range[1] ? `на экране #${range[0]}` : `на экране #${range[0]}–#${range[1]}`);
 
-/** What the run holds, after an unknown entry's «не найдена»: «: в этом прогоне решения #1–#143» (cand-21). */
-export function entryRangeText(entries: readonly Pick<JournalEntry, "n">[]): string {
-  if (!entries.length) return "";
-  const first = entries[0].n;
-  const last = entries[entries.length - 1].n;
-  return first === last ? `: в этом прогоне решение #${first}` : `: в этом прогоне решения #${first}–#${last}`;
-}
+/** The first and the last number of the entries; null — there are none. */
+const rangeOf = (entries: readonly Pick<JournalEntry, "n">[]): [string, string] | null => (entries.length ? [entries[0].n, entries[entries.length - 1].n] : null);
+
+/** The answer under «Перейти к #» to a number the journal does not hold, and the numbers it does: «Решения #999 нет:
+ * #1–#143» — one line in the 14 rem rail, so the range is the numbers alone (craft-6). */
+export const gotoMissText = (n: string, range: readonly [string, string]): string => `Решения ${numberText("entry", n)} нет: ${numberRange("entry", range[0], range[1])}`;
 
 /** A stage of the rail: its word, the first and the last entry it holds among the rows, and how many. */
 export interface RailStage {
@@ -118,21 +116,8 @@ export const stageAt = (range: readonly [string, string] | null, rows: readonly 
   return e ? (e.stage ?? "") : null;
 };
 
-/** The links and scroll boxes inside an entry take Tab only while focus is in that entry (cand-19). */
-const INNER = "a[href], button, input, [tabindex]";
-function gateEntries(root: HTMLElement, active: Element | null) {
-  for (const item of root.querySelectorAll<HTMLElement>("article[data-entry]")) {
-    const open = active !== null && item.contains(active);
-    for (const el of item.querySelectorAll<HTMLElement>(INNER)) el.tabIndex = open ? 0 : -1;
-  }
-}
-
-/** The entry scrolled to the list's top and focused, its own scroll suppressed. */
-function revealIn(root: HTMLElement | null, n: string) {
-  const el = root?.querySelector<HTMLElement>(`[data-entry="${n}"]`);
-  el?.scrollIntoView({ block: "start" });
-  el?.focus({ preventScroll: true });
-}
+/** An entry in the list's scroller, by its number. */
+const findEntry = (list: HTMLElement, n: string) => list.querySelector<HTMLElement>(`article[data-entry="${n}"]`);
 
 export function JournalView({ run }: ViewProps) {
   return <Journal key={run.key} run={run} />;
@@ -145,6 +130,9 @@ function Journal({ run }: { run: LoadedRun }) {
   const [placed, setPlaced] = useState(() => new Set(run.journal.map((e) => e.n)));
   const [arrived, setArrived] = useState<ReadonlySet<string>>(new Set());
   const [goto, setGoto] = useState("");
+  // the number «Перейти к #» could not open, until the field changes (craft-6)
+  const [miss, setMiss] = useState<string | null>(null);
+  const gotoStatus = useId();
   const entry = params.get("entry");
   // An entry a link names that still waits in the strip is placed at once (Conventions 12: a link shows its object).
   if (entry !== null && !placed.has(entry) && run.journal.some((e) => e.n === entry)) setPlaced(new Set([...placed, entry]));
@@ -160,16 +148,9 @@ function Journal({ run }: { run: LoadedRun }) {
   const toks = useMemo(() => tokens(prefs.search), [prefs.search]);
   const failure = fileFailure(run, "journal.md") ?? (run.journal.length === 0 ? folderFailure(run) : null);
 
-  const list = useRef<HTMLDivElement>(null);
-  const reveal = (n: string) => revealIn(list.current, n);
-  // The entry a link names is scrolled to and takes focus, once per link.
-  useLayoutEffect(() => {
-    if (target) revealIn(list.current, target);
-  }, [target]);
-  // After every render the entries' inner stops follow the focus (a live update may add links).
-  useLayoutEffect(() => {
-    if (list.current) gateEntries(list.current, document.activeElement);
-  });
+  // The entry a link names is scrolled to the top of the list's own scroller and takes focus, once per link; the
+  // entry whose «#n» the user clicked stays where it stands (Strict 1).
+  const { scroller: list, reveal, hold } = useReveal(target, findEntry);
 
   const go = (n: string, how: { replace: boolean }) => {
     const next = new URLSearchParams(params);
@@ -182,6 +163,35 @@ function Journal({ run }: { run: LoadedRun }) {
     if (n === target) reveal(n);
     else go(n, { replace: true });
   };
+  // An entry's own «#n»: its address in place, the entry left where the user clicked it (craft-4).
+  const openOwn = useCallback(
+    (n: string) => {
+      hold(n);
+      setParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("entry", n);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [hold, setParams],
+  );
+  // «Перейти к #»: a number the journal holds opens it and clears the field; any other keeps the field, marks it
+  // invalid and answers on the line under it, the address left as it is (craft-6).
+  const jump = () => {
+    const n = goto.trim().replace(/^[#j]/i, "");
+    if (!n) return;
+    if (!run.journal.some((e) => e.n === n)) {
+      setMiss(n);
+      return;
+    }
+    setGoto("");
+    setMiss(null);
+    open(n);
+  };
+  const shownRange = rangeOf(shown);
 
   const rowsKey = q.rows.map((e) => e.n).join(",");
   const range = useEntriesInView(list, `${run.version}:${rowsKey}`);
@@ -207,48 +217,35 @@ function Journal({ run }: { run: LoadedRun }) {
     <div data-slot="journal-view" className="absolute inset-0 flex flex-col gap-2 px-5 pt-3 pb-1">
       <AdaptiveToolbar items={toolbar} label="Фильтры журнала" />
       <div data-slot="journal-body" className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] gap-x-6 border-t @min-[52rem]/view:grid-cols-[minmax(0,calc(var(--container-measure)+9.5rem))_14rem]">
-        <div
-          ref={list}
-          data-slot="journal-scroll"
-          className="min-h-0 overflow-y-auto [scrollbar-gutter:stable]"
-          onFocus={(event: FocusEvent<HTMLDivElement>) => list.current && gateEntries(list.current, event.target)}
-          onBlur={(event: FocusEvent<HTMLDivElement>) => {
-            if (list.current && !list.current.contains(event.relatedTarget as Node | null)) gateEntries(list.current, null);
-          }}
-        >
+        <div ref={list} data-slot="journal-scroll" className={SCROLLER}>
           {failure ? (
             <PartFailed what={JOURNAL_PART} cause={failure.cause} className="mt-4" />
           ) : (
             <>
               {missing && (
-                <p role="status" data-slot="entry-missing" className="m-0 flex max-w-measure flex-wrap items-baseline gap-x-2 pt-4">
-                  <span>
-                    <NotFound kind="entry" id={missing} start />
-                    {entryRangeText(shown)}.
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    onClick={() => {
-                      go("", { replace: true });
-                      // the button goes with the line: focus lands on the list's Tab stop
-                      list.current?.querySelector<HTMLElement>('article[data-entry][tabindex="0"]')?.focus({ preventScroll: true });
-                    }}
-                  >
-                    {CLOSE}
-                  </Button>
-                </p>
+                <MissingLine
+                  kind="entry"
+                  id={missing}
+                  range={shownRange}
+                  slot="entry-missing"
+                  className="pt-4"
+                  onClose={() => {
+                    go("", { replace: true });
+                    // the button goes with the line: focus lands on the list's Tab stop
+                    list.current?.querySelector<HTMLElement>('article[data-entry][tabindex="0"]')?.focus({ preventScroll: true });
+                  }}
+                />
               )}
               {run.journal.length === 0 ? (
                 never ? <EmptyState form="never" noun={DECISION_NOUN} className="py-16" /> : <EmptyState form="not-yet" noun={DECISION_NOUN} step={FIRST} className="py-16" />
               ) : q.rows.length === 0 ? (
                 <EmptyState form="filtered" noun={DECISION_NOUN} filters={filterSummary([filter], prefs.filters, prefs.search)} onReset={() => setPrefs({ filters: {}, search: "" })} className="py-16" />
               ) : (
-                <FlatList label={JOURNAL_PART}>
+                <FlatList label={JOURNAL_PART} gate>
                   <ol className="m-0 flex max-w-[calc(var(--container-measure)+8.5rem)] list-none flex-col p-0 py-2">
                     {q.rows.map((e) => (
                       <li key={e.n} className="border-b last:border-b-0">
-                        <Entry entry={e} run={run} resolve={resolve} toks={toks} target={e.n === target} edge={arrived.has(e.n)} outside={q.outside.has(e.n)} />
+                        <Entry entry={e} run={run} resolve={resolve} toks={toks} target={e.n === target} edge={arrived.has(e.n)} outside={q.outside.has(e.n)} onOwn={openOwn} />
                       </li>
                     ))}
                   </ol>
@@ -257,7 +254,7 @@ function Journal({ run }: { run: LoadedRun }) {
             </>
           )}
         </div>
-        <nav aria-label={RAIL_LABEL} data-slot="journal-rail" className="hidden min-h-0 flex-col gap-3 overflow-y-auto py-2 [scrollbar-gutter:stable] @min-[52rem]/view:flex">
+        <nav aria-label={RAIL_LABEL} data-slot="journal-rail" className={cn(SCROLLER, "hidden flex-col gap-3 py-2 @min-[52rem]/view:flex")}>
           {!failure && run.journal.length > 0 && (
             <>
               {stages.length > 0 && latest && (
@@ -279,26 +276,34 @@ function Journal({ run }: { run: LoadedRun }) {
                   </FlatList>
                 </div>
               )}
-              <InputGroup className="h-7 w-full shrink-0">
-                <InputGroupAddon align="inline-start">
-                  <InputGroupText>{GOTO_TEXT}</InputGroupText>
-                </InputGroupAddon>
-                <InputGroupInput
-                  aria-label={GOTO_LABEL}
-                  inputMode="numeric"
-                  autoComplete="off"
-                  value={goto}
-                  onChange={(event) => setGoto(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key !== "Enter") return;
-                    const n = goto.trim().replace(/^[#j]/i, "");
-                    if (!n) return;
-                    event.preventDefault();
-                    setGoto("");
-                    open(n);
-                  }}
-                />
-              </InputGroup>
+              <div className="flex shrink-0 flex-col gap-1">
+                <InputGroup className="h-7 w-full">
+                  <InputGroupAddon align="inline-start">
+                    <InputGroupText>{GOTO_TEXT}</InputGroupText>
+                  </InputGroupAddon>
+                  <InputGroupInput
+                    aria-label={GOTO_LABEL}
+                    aria-invalid={miss !== null || undefined}
+                    aria-describedby={gotoStatus}
+                    inputMode="numeric"
+                    autoComplete="off"
+                    value={goto}
+                    onChange={(event) => {
+                      setGoto(event.target.value);
+                      setMiss(null);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") return;
+                      event.preventDefault();
+                      jump();
+                    }}
+                  />
+                </InputGroup>
+                {/* the answer's line, reserved from the first paint (Strict 1); its whole text in its title */}
+                <p id={gotoStatus} data-slot="goto-status" aria-live="polite" title={miss && shownRange ? gotoMissText(miss, shownRange) : undefined} className="m-0 h-4 truncate px-2 text-xs/4">
+                  {miss && shownRange ? gotoMissText(miss, shownRange) : ""}
+                </p>
+              </div>
             </>
           )}
         </nav>
@@ -346,13 +351,16 @@ interface EntryProps {
   target: boolean;
   edge: boolean;
   outside: boolean;
+  /** Opens the entry's own address in place, the entry left where it stands. */
+  onOwn: (n: string) => void;
 }
 
 /** One decision: its head, its question, then «Решение» leading, «Почему», «Ссылки» — a ref each line with its fact,
  * «—» when the decision names none. The search's hits wear the table's one mark (`Highlight`) in all the text the
  * search looks in — the head («#n» and the stage), the question, the decision, the why and the refs' ids — and
- * nowhere else: never a label (table #12). Its menu copies its address. */
-const Entry = memo(function Entry({ entry: e, run, resolve, toks, target, edge, outside }: EntryProps) {
+ * nowhere else: never a label (table #12). Its address has the one form of an object on its list (craft-4): «#n» a
+ * link to it, and its menu copies it. */
+const Entry = memo(function Entry({ entry: e, run, resolve, toks, target, edge, outside, onOwn }: EntryProps) {
   const refs = e.refs.filter(isRef);
   const marks = markProps({ target, edge });
   const hl = (text: string) => <Highlight text={text} tokens={toks} />;
@@ -374,9 +382,10 @@ const Entry = memo(function Entry({ entry: e, run, resolve, toks, target, edge, 
       ),
     },
   ];
-  const address = new URL(runPath(run.key, { view: JOURNAL_VIEW, entry: e.n }), window.location.origin).href;
+  const href = runPath(run.key, { view: JOURNAL_VIEW, entry: e.n });
+  const own = `#${e.n}`;
   return (
-    <Menu kind="context" groups={[[copyItem(COPY_ADDRESS, address)]]} header={{ text: `#${e.n} · ${e.question}`, title: e.question }} label={`Решение #${e.n}`}>
+    <AddressMenu kind="entry" href={href} header={{ text: `${own} · ${e.question}`, title: e.question }}>
       <article
         id={`j${e.n}`}
         tabIndex={-1}
@@ -385,10 +394,15 @@ const Entry = memo(function Entry({ entry: e, run, resolve, toks, target, edge, 
         aria-labelledby={`j${e.n}-q`}
         data-target={marks["data-target"]}
         data-edge={marks["data-edge"]}
-        className={`flex scroll-mt-2 flex-col gap-1 rounded-md px-4 py-3 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset ${marks.className}`}
+        className={cn("flex flex-col gap-1 rounded-md px-4 py-3 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset", marks.className)}
       >
         <p className="m-0 flex items-baseline gap-2 text-xs text-muted-foreground tabular-nums">
-          <span>{hl(entryHead(e))}</span>
+          <span>
+            <AddressLink kind="entry" id={e.n} href={href} onOpen={() => onOwn(e.n)}>
+              {hl(own)}
+            </AddressLink>
+            {hl(entryHead(e).slice(own.length))}
+          </span>
           {outside && <OutOfFilter className="ml-auto" />}
         </p>
         <h3 id={`j${e.n}-q`} className="m-0 text-base font-semibold text-balance break-words">
@@ -396,7 +410,7 @@ const Entry = memo(function Entry({ entry: e, run, resolve, toks, target, edge, 
         </h3>
         <FactList facts={facts} className="mt-1 grid-cols-1 gap-y-0.5 @min-[40rem]/view:grid-cols-[5.5rem_minmax(0,1fr)] @min-[40rem]/view:gap-y-1.5" />
       </article>
-    </Menu>
+    </AddressMenu>
   );
 });
 

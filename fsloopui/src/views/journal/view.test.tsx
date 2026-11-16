@@ -13,7 +13,7 @@ import type { JournalEntry } from "../../../shared/model.ts";
 import { writePref } from "@/ui";
 import { runPath } from "../../app/routes.ts";
 import { fixtureApp, keyOf, loadedRun, renderOver, renderView } from "../reports/testing.tsx";
-import { entriesInView, entryHead, entryRangeText, inViewText, JournalView, LABELS, railStages, SEARCH, stageAt, stageFilter } from "./index.tsx";
+import { entriesInView, entryHead, gotoMissText, inViewText, JournalView, LABELS, railStages, SEARCH, stageAt, stageFilter } from "./index.tsx";
 import { refObject } from "./ref-link.tsx";
 
 const N = 40; // 143 entries
@@ -206,36 +206,73 @@ describe("search, «Этап», and a link to an entry", () => {
   });
 
   test("`entry=` scrolls to the entry, marks it and focuses it (craft-32); hidden by the filter it shows anyway, «вне фильтра»; unknown is named", async () => {
-    const scroll = vi.spyOn(window.HTMLElement.prototype, "scrollIntoView");
     writePref(`table:journal:run:${KEY}`, { filters: { stage: ["p1-map"] }, search: "" });
     const view = renderView(fx, KEY, path({ entry: "120" }), JournalView);
     await loaded(60);
     expect(article(120)).toHaveAttribute("data-target");
     expect(article(120)).toHaveClass("shadow-target");
     expect(within(article(120)).getByText("вне фильтра")).toBeInTheDocument();
-    await waitFor(() => expect(scroll.mock.contexts).toContain(article(120)));
     // focused, it holds the list's one Tab stop (cand-19)
+    await waitFor(() => expect(document.activeElement).toBe(article(120)));
     expect(article(120)).toHaveAttribute("tabindex", "0");
-    expect(document.activeElement).toBe(article(120));
     expect(new URLSearchParams(view.probe.location?.search).get("entry")).toBe("120");
     view.unmount();
     renderView(fx, KEY, path({ entry: "999" }), JournalView);
     await loaded(59);
-    expect(document.querySelector("[data-slot=entry-missing]")).toHaveTextContent("Решение 999 не найдено: в этом прогоне решения #1–#143");
-    scroll.mockRestore();
+    expect(document.querySelector("[data-slot=entry-missing]")).toHaveTextContent("Решение #999 не найдено: в этом прогоне решения #1–#143.");
   });
 
-  test("cand-21: an unknown entry says once what is missing and what the run holds, and «Закрыть» drops the address", async () => {
+  test("p2-verdict-critic-craft-verdict-3#craft-1: `entry=` and a rail link move the list's own scroller and nothing above it — never scrollIntoView, the toolbar stays in view", async () => {
+    const user = userEvent.setup({ delay: null });
+    const into = vi.spyOn(window.HTMLElement.prototype, "scrollIntoView");
+    // jsdom lays nothing out: the list's box stands 100 px down, each entry 150 px under the one before it
+    const listBox = () => document.querySelector("[data-slot=journal-scroll]") as HTMLElement;
+    const rects = vi.spyOn(window.HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const top = this.dataset.slot === "journal-scroll" ? 100 : this.dataset.entry ? 100 + Number(this.dataset.entry) * 150 - listBox().scrollTop : 0;
+      return { top, bottom: top + 150, left: 0, right: 0, width: 0, height: 150, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+    });
+    renderView(fx, KEY, path({ entry: "40" }), JournalView);
+    await loaded();
+    const body = document.querySelector("[data-slot=view-body]") as HTMLElement;
+    const rail = screen.getByRole("navigation", { name: "Этапы журнала" });
+    // #40 stands 8 px under the list's top: 40 × 150 − 8
+    await waitFor(() => expect(listBox().scrollTop).toBe(5992));
+    expect(document.activeElement).toBe(article(40));
+    await user.click(within(rail).getByRole("link", { name: /^проход 1 · ревью/ }));
+    await waitFor(() => expect(listBox().scrollTop).toBe(8992));
+    expect(document.activeElement).toBe(article(60));
+    // nothing above the list moved: the page's body, the rail the user clicked, the toolbar still first in the view
+    expect(body.scrollTop).toBe(0);
+    expect(rail.scrollTop).toBe(0);
+    expect(document.querySelector("[data-slot=journal-view]")?.firstElementChild).toHaveAttribute("data-slot", "adaptive-toolbar");
+    expect(into).not.toHaveBeenCalled();
+    rects.mockRestore();
+    into.mockRestore();
+  });
+
+  test("p2-verdict-critic-craft-verdict-3#craft-1: the list and the rail are the containing blocks of everything in them — no sr-only «нет значения» hangs below the view to give the page's body an overflow", async () => {
+    renderView(fx, KEY, path(), JournalView);
+    await loaded();
+    const list = document.querySelector("[data-slot=journal-scroll]") as HTMLElement;
+    const rail = document.querySelector("[data-slot=journal-rail]") as HTMLElement;
+    expect(list).toHaveClass("relative", "overflow-y-auto");
+    expect(rail).toHaveClass("relative", "overflow-y-auto");
+    const hidden = [...list.querySelectorAll<HTMLElement>(".sr-only"), ...rail.querySelectorAll<HTMLElement>(".sr-only")];
+    // «—» of every entry without refs carries one (f16, cand-22): the cause of the 48 px displacement
+    expect(hidden.length).toBeGreaterThan(0);
+    for (const el of hidden) {
+      const block = el.parentElement?.closest(".relative, .absolute, .fixed, .sticky");
+      expect(block && (list.contains(block) || rail.contains(block))).toBe(true);
+    }
+  });
+
+  test("cand-21, p2-verdict-critic-craft-verdict-3#craft-5: an unknown entry says once what is missing and what the run holds, and «Закрыть» drops the address", async () => {
     const user = userEvent.setup({ delay: null });
     const view = renderView(fx, KEY, path({ entry: "999" }), JournalView);
     await loaded();
-    expect(entryRangeText(run.journal)).toBe(": в этом прогоне решения #1–#143");
-    expect(entryRangeText(run.journal).trim().split(/\s+/)).toHaveLength(6);
-    expect(entryRangeText(run.journal.slice(0, 1))).toBe(": в этом прогоне решение #1");
-    expect(entryRangeText([])).toBe("");
     const line = document.querySelector("[data-slot=entry-missing]") as HTMLElement;
-    // gap 11 (f16; ux 1): the journal's one noun, «решение», in the shared «не найден» too
-    expect(line).toHaveTextContent(/^Решение 999 не найдено: в этом прогоне решения #1–#143\.\s*Закрыть$/);
+    // gap 11 (f16; ux 1): the journal's one noun, «решение», in the shared «не найдено» line too, its number with «#»
+    expect(line).toHaveTextContent(/^Решение #999 не найдено: в этом прогоне решения #1–#143\.\s*Закрыть$/);
     await user.click(within(line).getByRole("button", { name: "Закрыть" }));
     expect(document.querySelector("[data-slot=entry-missing]")).toBeNull();
     // the button it closed is gone: focus lands on the list's Tab stop, not the page's body
@@ -272,7 +309,7 @@ describe("live and empty", () => {
 
   test("craft-31: a link to an entry still held in the strip places that entry at once, marked; the others keep waiting", () => {
     const view = renderOver(fx, run, path({ entry: "146" }), JournalView);
-    expect(document.querySelector("[data-slot=entry-missing]")).toHaveTextContent("Решение 146 не найдено");
+    expect(document.querySelector("[data-slot=entry-missing]")).toHaveTextContent("Решение #146 не найдено");
     const more = [144, 145, 146].map((n) => ({ n: String(n), stage: "p2-assess", question: `Question ${n}?`, decision: `way ${n}`, why: `because ${n}`, refs: [] }));
     view.again({ ...run, version: 2, journal: [...run.journal, ...more] });
     expect(articles()).toHaveLength(144);
@@ -345,8 +382,56 @@ describe("pass 2 (f16): volume, keyboard, the entry's address", () => {
     await user.type(go, "#120{Enter}");
     expect(new URLSearchParams(view.probe.location?.search).get("entry")).toBe("120");
     await waitFor(() => expect(document.activeElement).toBe(article(120)));
-    await user.type(within(rail).getByRole("textbox", { name: "Перейти к решению: номер" }), "999{Enter}");
-    expect(await screen.findByText(/в этом прогоне решения #1–#143/)).toBeInTheDocument();
+    // a known number clears the field
+    expect(within(rail).getByRole("textbox", { name: "Перейти к решению: номер" })).toHaveValue("");
+  });
+
+  test("p2-verdict-critic-craft-verdict-3#craft-6: an unknown number in «Перейти к #» keeps the field, marks it invalid and answers on a line reserved under it; the address stays", async () => {
+    const user = userEvent.setup({ delay: null });
+    expect(gotoMissText("999", ["1", "143"])).toBe("Решения #999 нет: #1–#143");
+    expect(gotoMissText("999", ["1", "143"]).split(/\s+/)).toHaveLength(4);
+    expect(gotoMissText("7", ["1", "1"])).toBe("Решения #7 нет: #1");
+    const view = renderView(fx, KEY, path({ entry: "40" }), JournalView);
+    await loaded();
+    const rail = screen.getByRole("navigation", { name: "Этапы журнала" });
+    const field = within(rail).getByRole("textbox", { name: "Перейти к решению: номер" });
+    // Strict 1: the answer's line is there, empty, from the first paint — one line high, so nothing under it moves
+    const status = rail.querySelector("[data-slot=goto-status]") as HTMLElement;
+    expect(status).toHaveClass("h-4", "truncate");
+    expect(status).toHaveTextContent(/^$/);
+    expect(status).toHaveAttribute("aria-live", "polite");
+    expect(field).toHaveAttribute("aria-describedby", status.id);
+    await user.type(field, "999{Enter}");
+    expect(field).toHaveValue("999");
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    expect(status).toHaveTextContent(/^Решения #999 нет: #1–#143$/);
+    expect(new URLSearchParams(view.probe.location?.search).get("entry")).toBe("40");
+    // typing again takes the answer back
+    await user.type(field, "{Backspace}{Backspace}{Backspace}41");
+    expect(field).not.toHaveAttribute("aria-invalid", "true");
+    expect(status).toHaveTextContent(/^$/);
+    await user.keyboard("{Enter}");
+    expect(field).toHaveValue("");
+    expect(new URLSearchParams(view.probe.location?.search).get("entry")).toBe("41");
+  });
+
+  test("p2-verdict-critic-craft-verdict-3#craft-4: an entry's «#n» is a link to its own address; a click on it opens it in place and moves nothing", async () => {
+    const user = userEvent.setup({ delay: null });
+    const view = renderView(fx, KEY, path(), JournalView);
+    await loaded();
+    const link = within(article(41)).getByRole("link", { name: "Ссылка на решение #41" });
+    expect(link).toHaveTextContent(/^#41$/);
+    expect(link).toHaveAttribute("href", runPath(KEY, { view: "journal", entry: "41" }));
+    // its head reads as before: «#41 · проход 1 · карта»
+    expect(link.closest("p")).toHaveTextContent(/^#41 · проход 1 · карта$/);
+    const list = document.querySelector("[data-slot=journal-scroll]") as HTMLElement;
+    list.scrollTop = 300;
+    article(41).focus();
+    await user.click(link);
+    expect(new URLSearchParams(view.probe.location?.search).get("entry")).toBe("41");
+    expect(article(41)).toHaveAttribute("data-target");
+    // Strict 1: the entry the user clicked stays where it stood
+    expect(list.scrollTop).toBe(300);
   });
 
   test("cand-18: the rail's stages over the rows in view, and the stage the list shows first", () => {
@@ -368,11 +453,14 @@ describe("pass 2 (f16): volume, keyboard, the entry's address", () => {
     const stops = () => [...list.querySelectorAll<HTMLElement>("a[href], button, input, [tabindex]")].filter((el) => el.tabIndex >= 0);
     expect(stops()).toEqual([article(1)]);
     article(5).focus();
-    expect(stops()).toEqual([article(5), within(article(5)).getByRole("link", { name: "p1-review-critic-code#code-6" })]);
+    // the entry's own «#5» (craft-4), then its ref
+    expect(stops()).toEqual([article(5), within(article(5)).getByRole("link", { name: "Ссылка на решение #5" }), within(article(5)).getByRole("link", { name: "p1-review-critic-code#code-6" })]);
     await user.keyboard("{ArrowDown}");
     expect(document.activeElement).toBe(article(6));
     await user.keyboard("{ArrowUp}");
     expect(document.activeElement).toBe(article(5));
+    await user.tab();
+    expect(document.activeElement).toBe(within(article(5)).getByRole("link", { name: "Ссылка на решение #5" }));
     await user.tab();
     expect(document.activeElement).toBe(within(article(5)).getByRole("link", { name: "p1-review-critic-code#code-6" }));
     await user.keyboard("{Enter}");

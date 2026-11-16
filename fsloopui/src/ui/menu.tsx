@@ -34,6 +34,10 @@ export type MenuItem = MenuAction | MenuChoice;
 /** Groups of items, separated by a rule. */
 export type MenuGroups = readonly (readonly MenuItem[])[];
 
+/** What a place's copy names — a finding's place and a convention's example alike: «Скопировать место», «Скопировано:
+ * место». One word for one concept (ux 1), written once here beside the builder. */
+export const PLACE_WHAT = "место";
+
 /** The one label of a copy: «Скопировать <что>». */
 export const copyLabel = (what: string): string => `Скопировать ${what}`;
 

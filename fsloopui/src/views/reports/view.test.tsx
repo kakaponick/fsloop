@@ -5,7 +5,7 @@
 import "../../ui/test-setup.ts";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterAll, describe, expect, test } from "vitest";
+import { afterAll, describe, expect, test, vi } from "vitest";
 import type { Launch } from "../../../shared/model.ts";
 import { readPref } from "@/ui";
 import { isSelectFilter, type FilterDef } from "@/table";
@@ -382,7 +382,10 @@ describe("cand-4: the narrow view's «Отчёт» picker", () => {
     const user = userEvent.setup({ delay: null });
     renderView(fx, KEY, reportsPath({ report: "p1-map-craft-accounts" }), ReportsView);
     await loaded();
-    const picker = screen.getByRole("combobox", { name: "Отчёт: craft accounts · карта, проход 1 · 3 critical · 6 major · 9 minor" });
+    // p2-verdict-critic-craft-verdict#craft-4: the trigger names the report alone — its stage and state are the
+    // reader's, right under it (ux 2); the options keep them
+    const picker = screen.getByRole("combobox", { name: "Отчёт: craft accounts" });
+    expect(picker).toHaveTextContent(/^Отчёт:craft accounts$/);
     await user.click(picker);
     const options = (await screen.findAllByRole("option")).map((o) => o.textContent);
     expect(options).toHaveLength(98);
@@ -390,6 +393,15 @@ describe("cand-4: the narrow view's «Отчёт» picker", () => {
     expect(options).toContain("u1 implement · юниты в работе, проход 1 · итог: done · 1 находка");
     expect(options).toContain("critic code verdict · проверка исправлений, проход 1 · 1 resolved · 1 partial · 0 unresolved");
     expect(options.at(-1)).toBe("u30 implement · приёмка, проход 2 · работает · 12 мин");
+  });
+
+  test("p2-verdict-critic-craft-verdict#craft-5: with no report open the trigger reads once, plainly — «Отчёт: обзор», one colon", async () => {
+    renderView(fx, KEY, reportsPath(), ReportsView);
+    await loaded();
+    const picker = within(document.querySelector("[data-toolbar-item=report-picker]") as HTMLElement).getByRole("combobox");
+    expect(picker).toHaveAccessibleName("Отчёт: обзор");
+    expect(picker).toHaveTextContent(/^Отчёт:обзор$/);
+    expect(picker.textContent?.split(":")).toHaveLength(2);
   });
 });
 
@@ -436,6 +448,40 @@ describe("u6-shape cand-1: tokens by stage and by agent kind in the overview", (
     // it follows the surfaces, which the overview leads with
     const surfaces = document.querySelector("[data-slot=reports-overview]") as HTMLElement;
     expect(surfaces.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test("p2-verdict-critic-craft-verdict-3#craft-1 («Отчёты»): a report opened low in the rail moves the rail's own scroller and nothing above it; both scrollers hold everything in them", () => {
+    const first = renderOver(fx, run, reportsPath(), ReportsView);
+    const last = railLinks().at(-1)?.dataset.flatItem as string;
+    first.unmount();
+    const into = vi.spyOn(HTMLElement.prototype, "scrollIntoView");
+    const box = () => document.querySelector("[data-slot=rail-scroll]") as HTMLElement;
+    // jsdom lays nothing out: the rail's box stands 100 px down, 400 px high, each item 32 px under the one before it
+    const rects = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const items = [...document.querySelectorAll<HTMLElement>("[data-slot=report-rail] [data-flat-item]")];
+      const at = items.indexOf(this);
+      const top = this.dataset.slot === "rail-scroll" ? 100 : at >= 0 ? 100 + at * 32 - box().scrollTop : 0;
+      const height = this.dataset.slot === "rail-scroll" ? 400 : 32;
+      return { top, bottom: top + height, left: 0, right: 0, width: 0, height, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+    });
+    try {
+      renderOver(fx, run, reportsPath({ report: last }), ReportsView);
+      const at = [...document.querySelectorAll<HTMLElement>("[data-slot=report-rail] [data-flat-item]")].findIndex((el) => el.dataset.flatItem === last);
+      expect(at).toBeGreaterThan(20);
+      // its bottom 8 px above the rail's bottom: (100 + at × 32 + 32) − 500 + 8
+      expect(box().scrollTop).toBe(at * 32 - 360);
+      expect((document.querySelector("[data-slot=view-body]") as HTMLElement).scrollTop).toBe(0);
+      expect(into).not.toHaveBeenCalled();
+      // the cause of the journal's 48 px: a scroller that is not the containing block of an sr-only deep in it
+      for (const slot of ["rail-scroll", "report-reader-scroll"]) {
+        const scroller = document.querySelector(`[data-slot=${slot}]`) as HTMLElement;
+        expect(scroller).toHaveClass("relative", "overflow-y-auto");
+        for (const el of scroller.querySelectorAll<HTMLElement>(".sr-only")) expect(scroller.contains(el.parentElement?.closest(".relative, .absolute, .fixed, .sticky") ?? null)).toBe(true);
+      }
+    } finally {
+      rects.mockRestore();
+      into.mockRestore();
+    }
   });
 
   test("u6-shape cand-1: a run whose launches recorded no tokens says so, never a zero", () => {

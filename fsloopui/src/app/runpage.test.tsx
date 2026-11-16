@@ -389,7 +389,7 @@ describe("the run page's frame", () => {
     );
     expect(screen.getByRole("link", { name: "u23" })).toHaveAttribute("href", "/r/admin/a5b5ec85?view=units&unit=u23");
     expect(screen.getByText((_, el) => el?.getAttribute("data-slot") === "not-found" && el.textContent === "юнит u99 не найден")).toBeInTheDocument();
-    expect(screen.getByText((_, el) => el?.getAttribute("data-slot") === "not-found" && el.textContent === "решение 999 не найдено")).toBeInTheDocument();
+    expect(screen.getByText((_, el) => el?.getAttribute("data-slot") === "not-found" && el.textContent === "решение #999 не найдено")).toBeInTheDocument();
   });
 
   test("reserved boxes: each tab's count before the run loads; the loading body at the region's size", async () => {

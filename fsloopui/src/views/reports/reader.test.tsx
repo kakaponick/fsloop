@@ -455,6 +455,23 @@ describe("cand-3 (u6 shape): a craft report against the surface's earlier one", 
     expect(groups[2].querySelectorAll("[data-slot=finding-row]")).toHaveLength(16);
   });
 
+  test("p2-verdict-critic-craft-verdict#craft-3: «Сравнение» lists each group through the shared expanding rows — a chevron, one Tab stop, Enter opens the finding in place", async () => {
+    const user = userEvent.setup({ delay: null });
+    open(later.id, { tab: "compare" }, over);
+    const panel = within(reader()).getByRole("tabpanel");
+    const lists = ["compare-new", "compare-kept", "compare-gone"].map((slot) => panel.querySelector<HTMLElement>(`ol[data-slot=${slot}]`) as HTMLElement);
+    expect(lists.map((l) => l.querySelectorAll(":scope > li").length)).toEqual([1, 2, 16]);
+    const gone = lists[2];
+    const chevrons = [...gone.querySelectorAll<HTMLElement>("button[aria-expanded]")];
+    expect(chevrons).toHaveLength(16);
+    // one Tab stop for the group: the first chevron; the ids' links leave the Tab order, as in «Находки» of a report
+    expect([...gone.querySelectorAll<HTMLElement>("a[href], button")].filter((el) => el.tabIndex >= 0)).toEqual([chevrons[0]]);
+    chevrons[0].focus();
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(chevrons[1]).toHaveAttribute("aria-expanded", "true");
+    expect(gone.querySelector("[data-slot=finding-detail]")).not.toBeNull();
+  });
+
   test("cand-3 (u6 shape): the earliest report of a surface has nothing to compare with — no «Сравнение»", () => {
     open(earlier.id, {}, over);
     expect(tabNames()).not.toContain("Сравнение");
@@ -521,22 +538,29 @@ describe("cand-6 (p1 review): moving between reports, the file's outline, a retr
     expect(at(view.probe)).toBe("p1-map-map");
   });
 
-  test("cand-6: a long «Файл отчёта» opens with its outline — each heading a button that brings it into view", async () => {
+  test("cand-6, p2-verdict-critic-craft-verdict-3#craft-1: a long «Файл отчёта» opens with its outline — each heading a button that brings it into view in the reader's own scroller, under the sticky strip, nothing above it moving", async () => {
     const user = userEvent.setup({ delay: null });
-    const scrolled: Element[] = [];
-    const spy = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(function (this: Element) {
-      scrolled.push(this);
+    const into = vi.spyOn(HTMLElement.prototype, "scrollIntoView");
+    const box = () => document.querySelector("[data-slot=report-reader-scroll]") as HTMLElement;
+    // jsdom lays nothing out: the reader's box stands 100 px down; «3. Parser gaps» 1 300 px into its text
+    const rects = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const top = this.dataset.slot === "report-reader-scroll" ? 100 : this.textContent === "3. Parser gaps" && /^H[34]$/.test(this.tagName) ? 1300 - box().scrollTop : 0;
+      return { top, bottom: top + 20, left: 0, right: 0, width: 0, height: 20, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
     });
     try {
       open("p1-map-map");
-      const file = await loadedFile();
+      await loadedFile();
       const outline = within(reader()).getByRole("navigation", { name: "Содержание отчёта" });
       const items = within(outline).getAllByRole("button");
       expect(items.map((b) => b.textContent)).toEqual(["Map of the project", "1. Functions", "2. Server", "3. Parser gaps", "4. fsl.mjs computes", "5. Production shape", "6. Building blocks", "7. Tokens", "8. Components"]);
       await user.click(items[3]);
-      expect(scrolled.at(-1)).toBe(within(file).getByRole("heading", { name: "3. Parser gaps" }));
+      // 48 px under the reader's top — the 40 px sticky strip and 8 px: 1 300 − 100 − 48
+      expect(box().scrollTop).toBe(1152);
+      expect((document.querySelector("[data-slot=view-body]") as HTMLElement).scrollTop).toBe(0);
+      expect(into).not.toHaveBeenCalled();
     } finally {
-      spy.mockRestore();
+      rects.mockRestore();
+      into.mockRestore();
     }
   });
 

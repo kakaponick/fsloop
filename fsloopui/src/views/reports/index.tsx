@@ -10,7 +10,8 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { NOUNS } from "../../../shared/text.ts";
-import { CountCombobox, EmptyState, emptyWhen, HeldStrip, NotFound, type HeldNoun } from "@/ui";
+import { cn } from "@/lib/utils";
+import { CountCombobox, EmptyState, emptyWhen, HeldStrip, NotFound, SCROLLER, type HeldNoun } from "@/ui";
 import { AdaptiveToolbar, FilterControl, filterSummary, pushHistory, runQuery, SearchBox, StatusBar, useRunView, useTableView, type FilterDef, type ToolbarItem } from "@/table";
 import { useNow } from "../../app/clock.tsx";
 import { useUpdatedAt } from "../../app/live.tsx";
@@ -18,11 +19,13 @@ import { runPath } from "../../app/routes.ts";
 import type { LoadedRun, ViewProps } from "../index.ts";
 import { filtersFor, groupsOf, heldItems, itemState, pickerLabel, placeItems, railItems, REPORTS_VIEW, resolveItem, SEARCH, type RailItem } from "./model.ts";
 import { Overview, Spend } from "./overview.tsx";
-import { OVERVIEW_ITEM, Rail, RAIL_LABEL } from "./rail.tsx";
+import { Rail, RAIL_LABEL } from "./rail.tsx";
 import { Reader, reportPath } from "./reader.tsx";
 
 const NOUN: HeldNoun = { forms: NOUNS.report, gender: "m" };
 export const REPORT_PICKER = "Отчёт";
+/** The picker's no-choice word, the overview the reader then shows: «Отчёт: обзор» — one colon, read once (craft-5). */
+export const PICKER_OVERVIEW = "обзор";
 export const REPORT_NOT_FOUND_NEXT = ": в этом прогоне нет такого запуска — выберите отчёт в списке";
 
 /** Where the reader stood per run, report and tab: Back returns there (rules/ui → Layout 2). */
@@ -134,9 +137,10 @@ function Reports({ run }: { run: LoadedRun }) {
           single
           value={item ? [item.id] : []}
           onValueChange={(v) => navigate(v[0] ? hrefOf(v[0]) : runPath(run.key, { view: "reports" }))}
-          options={groupsOf(railShown.map((s) => s.item)).flatMap((g) => g.items.map((i) => ({ value: i.id, label: pickerLabel(i, itemState(i, run.findings, now, { ended: ended.has(i.id) })) })))}
+          // the closed trigger names the report alone; its stage and state are the reader's, right under it (craft-4)
+          options={groupsOf(railShown.map((s) => s.item)).flatMap((g) => g.items.map((i) => ({ value: i.id, label: pickerLabel(i, itemState(i, run.findings, now, { ended: ended.has(i.id) })), short: i.description })))}
           placeholder="Найти отчёт"
-          anyLabel={OVERVIEW_ITEM.toLowerCase()}
+          anyLabel={PICKER_OVERVIEW}
           className="@min-[52rem]/reports:hidden"
         />
       ),
@@ -152,7 +156,9 @@ function Reports({ run }: { run: LoadedRun }) {
       <AdaptiveToolbar items={toolbar} label="Фильтры отчётов" />
       <div className="flex min-h-0 flex-1 border-t">
         <nav aria-label={RAIL_LABEL} data-slot="report-rail" className="hidden w-60 shrink-0 flex-col border-r @min-[52rem]/reports:flex">
-          <div data-slot="rail-scroll" className="min-h-0 flex-1 overflow-y-auto py-1 pr-1 [scrollbar-gutter:stable]">
+          {/* each scroller is the containing block of everything in it (`SCROLLER`): a finding row's sr-only never
+              hangs below the view to give the page's body an overflow (craft-1) */}
+          <div data-slot="rail-scroll" className={cn(SCROLLER, "flex-1 py-1 pr-1")}>
             <Rail
               items={railShown}
               outside={q.outside}
@@ -173,7 +179,7 @@ function Reports({ run }: { run: LoadedRun }) {
             ref={reader}
             data-slot="report-reader-scroll"
             onScroll={(e) => scrolls.set(place, e.currentTarget.scrollTop)}
-            className="min-h-0 flex-1 overflow-y-auto py-4 pl-6 [scrollbar-gutter:stable] @max-[52rem]/reports:pl-0"
+            className={cn(SCROLLER, "flex-1 py-4 pl-6 @max-[52rem]/reports:pl-0")}
           >
             {empty ? (
               emptyFor(run) === "never" ? (

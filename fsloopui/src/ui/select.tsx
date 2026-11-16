@@ -16,6 +16,10 @@ export interface CountOption {
   label: string;
   /** Rows this option keeps, over the unfiltered set; absent where a count says nothing. */
   count?: number;
+  /** What the closed trigger shows of this option, when its label carries more than the trigger should repeat — the
+   * report picker's option names the stage and the state the reader shows under it, its trigger the report alone
+   * (ux 2). The label by default. */
+  short?: string;
 }
 
 /** An option's count in its reserved slot. */
@@ -79,10 +83,11 @@ export interface CountComboboxProps {
   className?: string;
 }
 
-/** «u3», «u3 и ещё 2» or «все»: the trigger's value. */
+/** «u3», «u3 и ещё 2» or «все»: the trigger's value — each option by its `short` form where it has one. */
 export function comboboxValueText(value: readonly string[], options: readonly CountOption[], anyLabel = "все"): string {
   if (!value.length) return anyLabel;
-  const first = options.find((o) => o.value === value[0])?.label ?? value[0];
+  const option = options.find((o) => o.value === value[0]);
+  const first = option?.short ?? option?.label ?? value[0];
   return value.length === 1 ? first : `${first} и ещё ${value.length - 1}`;
 }
 

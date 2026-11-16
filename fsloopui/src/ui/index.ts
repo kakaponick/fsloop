@@ -1,6 +1,7 @@
 // fsloopUI's shared components (DESIGN.md → Components): every presentational part a view builds from, over the
 // shadcn library in src/components/ui. A view imports from here, never a second copy of a part.
-export { Dash, NotFound, NotRecorded, notFoundText, OBJECT_WORDS, type ObjectKind } from "./absent.tsx";
+export { CLOSE, Dash, MissingLine, missingText, NotFound, NotRecorded, notFoundText, NUMBERED, numberRange, numberText, OBJECT_WORDS, type NumberedKind, type ObjectKind } from "./absent.tsx";
+export { AddressLink, addressLabel, AddressMenu, addressWhat, type AddressLinkProps } from "./address.tsx";
 export { Clamp, COLLAPSE, EXPAND, type ClampProps } from "./clamp.tsx";
 export { CountLink, type CountLinkProps } from "./count-link.tsx";
 export { CountTabs, CountTabsContent, TabCount, type CountTab, type CountTabsProps } from "./count-tabs.tsx";
@@ -14,12 +15,13 @@ export { HeldStrip, heldStripText, heldVerb, type HeldCounts, type HeldLeftKind,
 export { keyLabel, Keys } from "./kbd.tsx";
 export { Loading, LOADING_WORD } from "./loading.tsx";
 export { EDGE_MARK, EDGE_MS, markProps, OUT_OF_FILTER, OutOfFilter, TARGET_MARK, useEdgeMarks, type MarkState } from "./marks.tsx";
-export { copyItem, copyLabel, Menu, type MenuAction, type MenuChoice, type MenuGroups, type MenuHeader, type MenuItem } from "./menu.tsx";
+export { copyItem, copyLabel, Menu, PLACE_WHAT, type MenuAction, type MenuChoice, type MenuGroups, type MenuHeader, type MenuItem } from "./menu.tsx";
 export { PartFailed, partFailedText, RETRY, type Gender } from "./part-failed.tsx";
 export { UiProvider } from "./provider.tsx";
 export { RunningText, parseBlocks, type Paint, type RenderCode, type Resolve, type RunningTextProps } from "./running-text.tsx";
 export { comboboxValueText, CountCombobox, CountSelect, OptionCount, SELECT_MAX_OPTIONS, type CountOption } from "./select.tsx";
 export { Dot, StatusDot, stateWord, type DotState, type StatusDotProps } from "./status-dot.tsx";
+export { REVEAL_GAP, revealIn, SCROLLER, useReveal, type RevealOptions } from "./reveal.ts";
 export { readPref, usePref, writePref } from "./storage.ts";
 export { AppToaster, copyText, notify, TOAST_MAX_TITLE, toastTitle, type ToastAction } from "./toast.tsx";
 export { GlossaryTooltip, glossaryFrom, glossaryLines, GLOSSARY_MAX_ENTRIES, GLOSSARY_MAX_LINE, Hint, type GlossaryEntry } from "./tooltip.tsx";

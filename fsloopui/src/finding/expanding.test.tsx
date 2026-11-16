@@ -95,4 +95,21 @@ describe("gap 3: the shared expanding finding rows", () => {
     // the row's box is one fixed line either way
     for (const r of plain.container.querySelectorAll("[data-slot=finding-row]")) expect(r).toHaveClass("h-8");
   });
+
+  test("p2-verdict-critic-craft-verdict#craft-6: plain, the row's hover and the chevron's hover and open ground step off the muted ground — ink over it, never muted on muted", async () => {
+    const user = userEvent.setup();
+    const plain = show(five, false);
+    const line = plain.container.querySelector("[data-slot=finding-line]") as HTMLElement;
+    expect(line).toHaveClass("hover:bg-foreground/4");
+    const chevron = within(line).getByRole("button", { name: `Развернуть находку ${five[0].local}` });
+    expect(chevron).toHaveClass("hover:bg-foreground/8", "dark:hover:bg-foreground/8", "aria-expanded:bg-foreground/8");
+    // the ghost button's own grounds are the detail's own muted: they would show nothing there
+    for (const muted of ["hover:bg-muted", "aria-expanded:bg-muted", "dark:hover:bg-muted/50"]) expect(chevron).not.toHaveClass(muted);
+    await user.click(chevron);
+    expect(chevron).toHaveAttribute("aria-expanded", "true");
+    plain.unmount();
+    // ruled, on the page's paper, the ghost's muted ground shows, and stays
+    const ruled = show(five);
+    expect(within(ruled.container.querySelector("[data-slot=finding-line]") as HTMLElement).getByRole("button", { name: `Развернуть находку ${five[0].local}` })).toHaveClass("hover:bg-muted");
+  });
 });

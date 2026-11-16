@@ -29,6 +29,7 @@ import {
   NotRecorded,
   parseBlocks,
   PartFailed,
+  revealIn,
   RunningText,
   StatusDot,
   usePref,
@@ -38,7 +39,6 @@ import {
 } from "@/ui";
 // From the files, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
 import { ExpandingFindings } from "@/finding/expanding.tsx";
-import { FindingRow } from "@/finding/row.tsx";
 import { openFindings } from "@/finding/open.ts";
 import { LINK_CLASS, ObjectLink, resolverFor, routerLink } from "../../app/links.tsx";
 import { runPath } from "../../app/routes.ts";
@@ -433,7 +433,7 @@ function Body({ run, launch: l, tab, findings, earlier, frames, framesTitle, now
         <FrameStrip frames={frames} limit={16} />
       </section>
     );
-  if (body.kind === "compare") return earlier ? <CompareBody run={run} launch={l} earlier={earlier} findings={findings} /> : null;
+  if (body.kind === "compare") return earlier ? <CompareBody run={run} launch={l} earlier={earlier} findings={findings} now={now} /> : null;
   // cand-7: a critic's part says what it holds before what it holds — also when the critic wrote nothing into it
   const lead = body.kind === "items" && reportKind(l) === "critic" ? SECTION_LEADS[body.section] : undefined;
   // a design check's conventions, in the run's order: the ones its CONVENTIONS lines are
@@ -526,15 +526,17 @@ const Lead = ({ children }: { children: ReactNode }) => (
 );
 
 /** «Сравнение» (u6 shape, cand-3): this craft report against the one that scored the surface before it — each part
- * counted then and now, then the findings new, repeated and not repeated, as the run recorded them. */
-function CompareBody({ run, launch: l, earlier, findings }: { run: LoadedRun; launch: Launch; earlier: Launch; findings: Finding[] }) {
+ * counted then and now, then the findings new, repeated and not repeated, as the run recorded them — each group the
+ * shared rows that expand in place (`@/finding` → ExpandingFindings), as «Находки» of the same reader (craft-3). */
+function CompareBody({ run, launch: l, earlier, findings, now }: { run: LoadedRun; launch: Launch; earlier: Launch; findings: Finding[]; now: number }) {
   const before = reportFindings(run.findings, earlier.id);
   const { fresh, kept, gone } = compareFindings(before, findings);
   const counts = partCounts(reportTabs(earlier, before.length), reportTabs(l, findings.length));
-  const groups: { title: string; rows: Finding[] }[] = [
-    { title: "Новые", rows: fresh },
-    { title: "Повторились", rows: kept },
-    { title: "Не повторились", rows: gone },
+  // `label` names each list for a screen reader as a phrase of its own
+  const groups: { key: string; title: string; label: string; rows: Finding[] }[] = [
+    { key: "new", title: "Новые", label: "Новые находки", rows: fresh },
+    { key: "kept", title: "Повторились", label: "Находки, которые повторились", rows: kept },
+    { key: "gone", title: "Не повторились", label: "Находки, которые не повторились", rows: gone },
   ];
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -545,19 +547,11 @@ function CompareBody({ run, launch: l, earlier, findings }: { run: LoadedRun; la
         {counts}
       </p>
       {groups.map((g) => (
-        <section key={g.title} data-slot="compare-group" aria-label={g.title} className="flex min-w-0 flex-col gap-1">
+        <section key={g.key} data-slot="compare-group" aria-label={g.title} className="flex min-w-0 flex-col gap-1">
           <h3 className="m-0 text-xs font-normal text-muted-foreground">
             {g.title} — {count(g.rows.length, NOUNS.finding)}
           </h3>
-          {g.rows.length > 0 && (
-            <ol className="m-0 flex list-none flex-col border-t p-0">
-              {g.rows.map((f) => (
-                <li key={f.id} className="border-b pr-2">
-                  <FindingRow run={run} finding={f} />
-                </li>
-              ))}
-            </ol>
-          )}
+          {g.rows.length > 0 && <ExpandingFindings run={run} items={g.rows} label={g.label} now={now} slot={`compare-${g.key}`} />}
         </section>
       ))}
     </div>
@@ -580,6 +574,9 @@ function outlineOf(text: string): { text: string; index: number }[] {
   return outline.length >= 3 ? outline : [];
 }
 
+/** Where a heading the outline brings into view stands: under the 40 px sticky strip of the report's parts, 8 px clear. */
+const UNDER_STRIP = 48;
+
 function ReportFile({ run, file }: { run: LoadedRun; file: string }) {
   const r = useReportText(run.key, file, run.version);
   const box = useRef<HTMLDivElement>(null);
@@ -592,7 +589,13 @@ function ReportFile({ run, file }: { run: LoadedRun; file: string }) {
   // a read that failed may pass on the next try (a file being written): «Повторить» reads it again (p1-review cand-6)
   if (r.status === "error") return <PartFailed what={`Отчёт ${file}`} cause={r.cause} onRetry={r.retry} />;
   const outline = outlineOf(r.text);
-  const go = (index: number) => box.current?.querySelectorAll("h3, h4")[index]?.scrollIntoView({ block: "start" });
+  // the heading comes to the top of the reader's own scroller, under its 40 px sticky strip — nothing above the reader
+  // moves (`@/ui` → revealIn; Strict 1, craft-1)
+  const go = (index: number) => {
+    const heading = box.current?.querySelectorAll<HTMLElement>("h3, h4")[index];
+    const scroller = box.current?.closest<HTMLElement>("[data-slot=report-reader-scroll]");
+    if (heading && scroller) revealIn(scroller, heading, { gap: UNDER_STRIP, focus: false });
+  };
   return (
     <div className="flex min-w-0 flex-col gap-4">
       {outline.length > 0 && (
@@ -609,8 +612,7 @@ function ReportFile({ run, file }: { run: LoadedRun; file: string }) {
           </ol>
         </nav>
       )}
-      {/* a heading the outline brings into view lands under the sticky strip, not behind it */}
-      <div ref={box} data-slot="report-file" className="min-w-0 [&_h3]:scroll-mt-12 [&_h4]:scroll-mt-12">
+      <div ref={box} data-slot="report-file" className="min-w-0">
         <RunningText text={r.text} resolve={resolverFor(run)} renderLink={routerLink} />
       </div>
     </div>

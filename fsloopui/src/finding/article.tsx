@@ -10,7 +10,7 @@ import { DECISION, FINDING_STATUS, stageOf, UNIT_STATE } from "../../shared/stat
 import { frameSrc } from "@/api";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { copyLabel, copyText, FrameStrip, Hint, NotRecorded, RunningText, StatusDot, type Frame } from "@/ui";
+import { copyLabel, copyText, FrameStrip, Hint, NotRecorded, PLACE_WHAT, RunningText, StatusDot, type Frame } from "@/ui";
 import { ObjectLink, resolverFor, routerLink } from "../app/links.tsx";
 import { SeverityCell } from "./cells.tsx";
 import { CAUSE, CONFIDENCE, enumFact, FACT, reportWord, SECTION, verdictValue } from "./words.ts";
@@ -54,9 +54,6 @@ function Section({ title, children, id }: { title: string; children: ReactNode; 
   );
 }
 
-/** What the place's button copies: «Скопировать место», «Скопировано: место» (one builder, `copyLabel`). */
-const LOCATION_WHAT = "место";
-
 const Sep = () => (
   <span aria-hidden="true" className="text-muted-foreground">
     ·
@@ -99,8 +96,8 @@ function FactLine({ run, finding: f, inRow }: { run: ArticleRun; finding: Findin
     node: f.location ? (
       <span className="inline-flex min-w-0 items-center gap-1">
         {label(FACT.location)} <span className="min-w-0 font-mono text-xs break-all">{f.location}</span>
-        <Hint label={copyLabel(LOCATION_WHAT)}>
-          <Button variant="ghost" size="icon-xs" aria-label={copyLabel(LOCATION_WHAT)} onClick={() => void copyText(f.location ?? "", LOCATION_WHAT)}>
+        <Hint label={copyLabel(PLACE_WHAT)}>
+          <Button variant="ghost" size="icon-xs" aria-label={copyLabel(PLACE_WHAT)} onClick={() => void copyText(f.location ?? "", PLACE_WHAT)}>
             <CopyIcon />
           </Button>
         </Hint>

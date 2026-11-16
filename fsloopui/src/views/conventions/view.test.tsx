@@ -7,7 +7,7 @@
 // (cand-11, cand-5), the one-line intro (cand-12), «не записано» for a missing part (cand-13), the copied place named
 // in the toast (cand-14), the list's role (cand-16), search (cand-5).
 import "../../ui/test-setup.ts";
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, describe, expect, test, vi } from "vitest";
 import type { Convention } from "../../../shared/model.ts";
@@ -198,28 +198,88 @@ describe("f15: the list's shape, the address and search", () => {
     expect(list).toHaveAttribute("role", "list");
   });
 
-  test("cand-5: `convention=` scrolls to the convention, marks it and focuses it; the ordinal's click puts the address in the URL; unknown is named", async () => {
+  test("cand-5: `convention=` scrolls to the convention, marks it and focuses it; the ordinal's click puts the address in the URL", async () => {
     const user = userEvent.setup({ delay: null });
-    const scroll = vi.spyOn(window.HTMLElement.prototype, "scrollIntoView");
     const view = renderOver(fx, run, at("12"), ConventionsView);
     expect(article(12)).toHaveAttribute("data-target");
     expect(article(12)).toHaveClass("shadow-target");
-    expect(article(12)).toHaveAttribute("tabindex", "-1");
-    await waitFor(() => expect(scroll.mock.contexts).toContain(article(12)));
-    expect(document.activeElement).toBe(article(12));
+    await waitFor(() => expect(document.activeElement).toBe(article(12)));
+    // focused, it holds the list's one Tab stop (craft-3)
+    expect(article(12)).toHaveAttribute("tabindex", "0");
     expect(article(3)).not.toHaveAttribute("data-target");
     await user.click(within(article(3)).getByRole("link", { name: "Ссылка на соглашение 3" }));
     expect(new URLSearchParams(view.probe.location?.search).get("convention")).toBe("3");
     expect(article(3)).toHaveAttribute("data-target");
-    view.unmount();
-    renderOver(fx, run, at("99"), ConventionsView);
-    // gap 8 (f15): the shared «не найден» with the convention's own word, and the address through the app's key
-    const missing = document.querySelector("[data-slot=convention-missing]") as HTMLElement;
-    expect(missing).toHaveTextContent(/^Соглашение 99 не найдено: в этом прогоне его нет — проверьте ссылку$/);
-    expect(missing.querySelector("[data-slot=not-found]")).toHaveTextContent(/^Соглашение 99 не найдено$/);
     expect(conventionPath(KEY, 12)).toBe(runPath(KEY, { view: "conventions", convention: "12" }));
+  });
+
+  test("p2-verdict-critic-craft-verdict-3#craft-1: `convention=` moves the list's own scroller and nothing above it — never scrollIntoView, the search stays in view", async () => {
+    const into = vi.spyOn(window.HTMLElement.prototype, "scrollIntoView");
+    const box = () => document.querySelector("[data-slot=conventions-scroll]") as HTMLElement;
+    // jsdom lays nothing out: the list's box stands 100 px down, each convention 90 px under the one before it
+    const rects = vi.spyOn(window.HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const n = this.tagName === "ARTICLE" ? this.parentElement?.dataset.convention : undefined;
+      const top = this.dataset.slot === "conventions-scroll" ? 100 : n ? 100 + Number(n) * 90 - box().scrollTop : 0;
+      return { top, bottom: top + 90, left: 0, right: 0, width: 0, height: 90, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+    });
+    renderOver(fx, run, at("12"), ConventionsView);
+    // #12 stands 8 px under the list's top: 12 × 90 − 8
+    await waitFor(() => expect(box().scrollTop).toBe(1072));
+    expect(document.activeElement).toBe(article(12));
+    expect((document.querySelector("[data-slot=view-body]") as HTMLElement).scrollTop).toBe(0);
+    expect(document.querySelector("[data-slot=conventions-view]")?.firstElementChild).toHaveAttribute("data-slot", "adaptive-toolbar");
+    expect(into).not.toHaveBeenCalled();
+    // the list is the containing block of everything in it (the journal's 48 px came from a list that was not)
+    expect(box()).toHaveClass("relative", "overflow-y-auto");
+    for (const el of box().querySelectorAll<HTMLElement>(".sr-only")) expect(box().contains(el.parentElement?.closest(".relative, .absolute, .fixed, .sticky") ?? null)).toBe(true);
+    rects.mockRestore();
+    into.mockRestore();
+  });
+
+  test("p2-verdict-critic-craft-verdict-3#craft-3: the conventions are one flat list — one Tab stop, ↑/↓ between them, a convention's own links and places take Tab only while focus is in it", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderOver(fx, run, PATH, ConventionsView);
+    const list = document.querySelector("[data-slot=conventions-scroll] [data-slot=flat-list]") as HTMLElement;
+    const stops = () => [...list.querySelectorAll<HTMLElement>("article, article a[href], article button")].filter((el) => el.tabIndex >= 0);
+    // 26 conventions, each an ordinal and a place: one stop, not 53
+    expect(stops()).toEqual([article(1)]);
+    article(1).focus();
+    expect(stops()).toEqual([article(1), within(article(1)).getByRole("link"), within(article(1)).getByRole("button")]);
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(article(2));
+    expect(stops()).toEqual([article(2), within(article(2)).getByRole("link"), within(article(2)).getByRole("button")]);
+    await user.keyboard("{End}");
+    expect(document.activeElement).toBe(article(26));
+    // the focused convention wears the journal's ring
+    expect(article(26)).toHaveClass("focus-visible:ring-3", "focus-visible:ring-ring/50", "focus-visible:ring-inset");
+  });
+
+  test("p2-verdict-critic-craft-verdict-3#craft-4: a convention's menu copies its address, as a decision's does", async () => {
+    const user = userEvent.setup({ delay: null });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    renderOver(fx, run, PATH, ConventionsView);
+    const ordinal = within(article(3)).getByRole("link", { name: "Ссылка на соглашение 3" });
+    expect(ordinal).toHaveAttribute("href", conventionPath(KEY, 3));
+    fireEvent.contextMenu(article(3));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByText("3 · Pattern 3")).toBeInTheDocument();
+    await user.click(within(menu).getByRole("menuitem", { name: "Скопировать адрес соглашения" }));
+    expect(writeText).toHaveBeenCalledWith(`${window.location.origin}${conventionPath(KEY, 3)}`);
+  });
+
+  test("p2-verdict-critic-craft-verdict-3#craft-5: an unknown convention says what the run holds, and «Закрыть» drops the address and lands on the list", async () => {
+    const user = userEvent.setup({ delay: null });
+    const view = renderOver(fx, run, at("99"), ConventionsView);
+    const missing = document.querySelector("[data-slot=convention-missing]") as HTMLElement;
+    expect(missing).toHaveTextContent(/^Соглашение 99 не найдено: в этом прогоне соглашения 1–26\.\s*Закрыть$/);
+    expect(missing.querySelector("[data-slot=not-found]")).toHaveTextContent(/^Соглашение 99 не найдено$/);
     expect(items()).toHaveLength(26);
-    scroll.mockRestore();
+    await user.click(within(missing).getByRole("button", { name: "Закрыть" }));
+    expect(document.querySelector("[data-slot=convention-missing]")).toBeNull();
+    expect(new URLSearchParams(view.probe.location?.search).get("convention")).toBeNull();
+    expect(new URLSearchParams(view.probe.location?.search).get("view")).toBe("conventions");
+    expect(document.activeElement).toBe(article(1));
   });
 
   test("cand-5: search keeps the conventions it names and marks the hits; «1 из 26 соглашений»; a group with none left is hidden", () => {
