@@ -2,7 +2,8 @@
 // journal entry and a goal keep their form — paragraphs, line breaks, bullet and numbered lists, headings, inline
 // code and bold — at a capped reading measure. A markdown table or a code block scrolls sideways in its own
 // bounded container. Ids become links only through the resolver the caller gives. The text is parsed into React
-// elements, never into HTML: a tag in the text is shown as text.
+// elements, never into HTML: a tag in the text is shown as text. A view that searches the text passes the search's
+// hit painter (`highlight`), so its hits wear the table's one mark; punctuation right after inline code keeps to it.
 import { Fragment, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
@@ -16,8 +17,13 @@ export interface RunningTextProps {
   renderLink?: (href: string, children: ReactNode, token: string) => ReactNode;
   /** Off where the container already caps the measure. */
   measure?: boolean;
+  /** Paints the search's hits in a run of the text: the table's `Highlight`, the one hit painter (table #12). */
+  highlight?: Paint;
   className?: string;
 }
+
+/** Renders a run of plain text, its hits marked. */
+export type Paint = (text: string) => ReactNode;
 
 type Inline = string;
 type ListItem = { depth: number; lines: Inline[] };
@@ -103,6 +109,10 @@ export function parseBlocks(text: string): Block[] {
 
 const ID_TOKEN = /[A-Za-z0-9][A-Za-z0-9_./:-]*(?:#[A-Za-z0-9_.-]+)?/g;
 const MARKS = /(`[^`]+`)|(\*\*[^*]+\*\*)/g;
+/** Punctuation that closes on the word before it: right after inline code it keeps to the code, with no gap. */
+const CLOSING = /^[.,;:!?)\]»…]+/;
+
+type InlineOpts = { resolve?: Resolve; renderLink: NonNullable<RunningTextProps["renderLink"]>; paint: Paint };
 
 const defaultLink = (href: string, children: ReactNode) => (
   <a href={href} className="underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
@@ -110,41 +120,60 @@ const defaultLink = (href: string, children: ReactNode) => (
   </a>
 );
 
-function Inline({ text, resolve, renderLink }: { text: string; resolve?: Resolve; renderLink: NonNullable<RunningTextProps["renderLink"]> }) {
+function Inline({ text, resolve, renderLink, paint }: { text: string } & InlineOpts) {
   const linked = (plain: string, key: string): ReactNode => {
-    if (!resolve) return plain;
+    if (!resolve) return paint(plain);
     const out: ReactNode[] = [];
     let at = 0;
     for (const m of plain.matchAll(ID_TOKEN)) {
       const token = m[0].replace(/[.:]+$/, "");
       const href = resolve(token);
       if (!href) continue;
-      out.push(plain.slice(at, m.index));
-      out.push(<Fragment key={`${key}-${m.index}`}>{renderLink(href, token, token)}</Fragment>);
+      out.push(<Fragment key={`${key}-p${at}`}>{paint(plain.slice(at, m.index))}</Fragment>);
+      out.push(<Fragment key={`${key}-${m.index}`}>{renderLink(href, paint(token), token)}</Fragment>);
       at = m.index + token.length;
     }
-    out.push(plain.slice(at));
+    out.push(<Fragment key={`${key}-p${at}`}>{paint(plain.slice(at))}</Fragment>);
     return out;
   };
   const parts: ReactNode[] = [];
   let at = 0;
   for (const m of text.matchAll(MARKS)) {
     parts.push(<Fragment key={`t${at}`}>{linked(text.slice(at, m.index), `t${at}`)}</Fragment>);
+    at = m.index + m[0].length;
     if (m[1]) {
       const body = m[1].slice(1, -1);
       const href = resolve?.(body) ?? null;
-      const code = <code className="rounded-sm bg-code px-1 font-mono text-xs">{body}</code>;
-      parts.push(<Fragment key={`c${m.index}`}>{href ? renderLink(href, code, body) : code}</Fragment>);
+      // punctuation that closes on the code keeps to it: no right padding, no line break between them (cand-15)
+      const closing = CLOSING.exec(text.slice(at))?.[0] ?? "";
+      const code = (
+        <code data-slot="inline-code" className={cn("rounded-sm bg-code font-mono text-xs", closing ? "pr-0 pl-1" : "px-1")}>
+          {paint(body)}
+        </code>
+      );
+      const linkedCode = href ? renderLink(href, code, body) : code;
+      parts.push(
+        closing ? (
+          <span key={`c${m.index}`} className="whitespace-nowrap">
+            {linkedCode}
+            {paint(closing)}
+          </span>
+        ) : (
+          <Fragment key={`c${m.index}`}>{linkedCode}</Fragment>
+        ),
+      );
+      at += closing.length;
     } else {
       parts.push(<strong key={`b${m.index}`} className="font-semibold">{linked(m[2].slice(2, -2), `b${m.index}`)}</strong>);
     }
-    at = m.index + m[0].length;
   }
   parts.push(<Fragment key={`t${at}`}>{linked(text.slice(at), `t${at}`)}</Fragment>);
   return <>{parts}</>;
 }
 
-function Lines({ lines, ...rest }: { lines: string[]; resolve?: Resolve; renderLink: NonNullable<RunningTextProps["renderLink"]> }) {
+const plainText: Paint = (text) => text;
+
+function Lines({ lines, ...rest }: { lines: string[] } & InlineOpts) {
   return (
     <>
       {lines.map((line, n) => (
@@ -159,9 +188,9 @@ function Lines({ lines, ...rest }: { lines: string[]; resolve?: Resolve; renderL
 
 const INDENT = ["", "ml-5", "ml-10", "ml-15"];
 
-export function RunningText({ text, resolve, renderLink = defaultLink, measure = true, className }: RunningTextProps) {
+export function RunningText({ text, resolve, renderLink = defaultLink, measure = true, highlight = plainText, className }: RunningTextProps) {
   const blocks = parseBlocks(text ?? "");
-  const inline = { resolve, renderLink };
+  const inline: InlineOpts = { resolve, renderLink, paint: highlight };
   return (
     <div data-slot="running-text" className={cn("flex min-w-0 flex-col gap-2 text-sm break-words", measure && "max-w-measure", className)}>
       {blocks.map((block, n) => {

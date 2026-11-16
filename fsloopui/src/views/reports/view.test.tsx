@@ -348,9 +348,9 @@ describe("the strict rules (rules/ui → Strict)", () => {
     expect(bar()).toHaveClass("h-8", "shrink-0");
     for (const c of document.querySelectorAll("[data-slot=report-sections] [data-slot=tab-count]")) expect(c).toHaveClass("min-w-count", "tabular-nums");
     const agent = document.querySelector("[data-toolbar-item=filter-agent]") as HTMLElement;
-    expect(agent.style.minWidth).toMatch(/^calc\(/);
+    expect(agent.querySelector("[data-slot=toolbar-sizer]")).not.toBeNull();
     // the report's sections: a sticky strip, each finding one 32 px row (craft-13)
-    expect(document.querySelector("[data-slot=report-sections] > [data-slot=tabs]")).toHaveClass("[&>[role=tablist]]:sticky", "[&>[role=tablist]]:top-0");
+    expect(document.querySelector("[data-slot=report-sections] [role=tablist]")).toHaveClass("sticky", "top-0", "group-data-horizontal/tabs:h-10");
     for (const r of document.querySelectorAll("[data-slot=report-findings] [data-slot=finding-row]")) expect(r).toHaveClass("h-8");
     // the fold: the rail's region and the picker's line both exist, the container decides which shows
     expect(document.querySelector("[data-slot=report-rail]")).toHaveClass("hidden", "@min-[52rem]/reports:flex", "w-60");

@@ -16,6 +16,7 @@ import {
   CountLink,
   CountSelect,
   CountTabs,
+  CountTabsContent,
   Dash,
   EmptyState,
   FactList,
@@ -40,6 +41,7 @@ import {
   copyText,
   type HeldCounts,
 } from "@/ui";
+import { Highlight } from "@/table";
 import { FINDING_TEXT, frames, GOAL, REPORT_TEXT, RUNS } from "./fixtures.ts";
 import { TableSection } from "./table.tsx";
 
@@ -138,6 +140,17 @@ function CountsSection() {
   return (
     <Section id="counts" title="Счётчики и вкладки" rule="Ссылка — только выше нуля и когда список покажет то же число; ноль — приглушённый «0» (Conventions 7, Layout 4)">
       <CountTabs value={view} onValueChange={setView} tabs={tabs} label="Разделы прогона" />
+      <Case label="Закреплённая полоса вкладок: при прокрутке разделов остаётся вверху на фоне страницы; если вкладки не помещаются, полоса листается вбок">
+        <div className="h-48 max-w-md overflow-y-auto rounded-lg border [scrollbar-gutter:stable]">
+          <CountTabs sticky value={view} onValueChange={setView} tabs={tabs} label="Разделы прогона — закреплённая полоса" className="px-3">
+            {tabs.map((t) => (
+              <CountTabsContent key={t.value} value={t.value} className="px-3 pt-3">
+                <RunningText text={REPORT_TEXT} />
+              </CountTabsContent>
+            ))}
+          </CountTabs>
+        </div>
+      </Case>
       <div className="flex flex-wrap items-center gap-6">
         <CountLink count={2} tone="danger" suffix="critical" href="#counts" onOpen={() => notify.success("Открыты находки: critical")} />
         <CountLink count={205} tone="warning" suffix="major" href="#counts" onOpen={() => notify.success("Открыты находки: major")} />
@@ -151,7 +164,7 @@ function CountsSection() {
 
 function FactsSection() {
   return (
-    <Section id="facts" title="Список фактов" rule="Сначала исход, потом факты, редкие — под «Подробнее», которое помнит своё состояние (ux 9, Layout 3)">
+    <Section id="facts" title="Список фактов" rule="Сначала исход, потом факты, редкие — под «Подробнее», которое помнит своё состояние; столбец подписей не сдвигается, когда оно открыто; пояснение термина — у подписи, а не у значения (ux 9, Layout 3, ui → Glossary)">
       <FactList
         foldKey="kit"
         label="Прогон tga · a098a7d4"
@@ -159,7 +172,7 @@ function FactsSection() {
         facts={[
           { label: "Режим", value: "worktree" },
           { label: "Этап", value: <StatusDot state={{ tone: "neutral", label: "проход 1 · юниты в работе" }} detail="с 03:04 МСК" />, outcome: true },
-          { label: "Активность", value: <StatusDot state={LIVENESS.working} />, outcome: true },
+          { label: "Активность", glossary: glossaryFrom(LIVENESS, ["working", "quiet", "silent"]), value: <StatusDot state={LIVENESS.working} />, outcome: true },
           { label: "Гейт", value: <StatusDot state={{ tone: "warning", label: "красный гейт: типы" }} detail="u7 — tsc упал на fsloopui/src/app" />, outcome: true },
           { label: "Юниты", value: "2 из 20 закоммичено · 3 пишутся", outcome: true },
           { label: "Модели", value: "claude-opus-5-5" },
@@ -197,6 +210,9 @@ function TextSection() {
       </div>
       <Case label="Находка, 1 920 символов, со ссылками на id">
         <RunningText text={FINDING_TEXT} resolve={resolve} />
+      </Case>
+      <Case label="Знак препинания сразу после встроенного кода — без зазора; найденное поиском отмечено той же отметкой, что в таблицах">
+        <RunningText text={"Правило: `ux 1`, impeccable critique; см. `.claude/rules/ui.md`. Решение u3 принято через 40 минут."} resolve={resolve} highlight={(t) => <Highlight text={t} tokens={["40", "rules"]} />} />
       </Case>
       <Case label="Файл отчёта с таблицей">
         <RunningText text={REPORT_TEXT} resolve={resolve} />
@@ -243,6 +259,9 @@ function ListsSection() {
               <HeldStrip className="rounded-md border" counts={{ fresh: 1, moved: 2, left: 1 }} noun={{ forms: NOUNS.finding, gender: "f" }} onApply={() => {}} />
               <HeldStrip className="rounded-md border" counts={{ fresh: 0, moved: 0, left: 0 }} noun={{ forms: NOUNS.finding, gender: "f" }} onApply={() => {}} />
             </div>
+          </Case>
+          <Case label="Список без фильтра называет строку, исчезнувшую из данных, своим словом: «прогон пропал»">
+            <HeldStrip className="max-w-xl rounded-md border" counts={{ fresh: 0, moved: 0, left: 1 }} noun={{ forms: NOUNS.run, gender: "m" }} leftKind="gone" onApply={() => {}} />
           </Case>
           <Case label="Метки строк">
             <div className="flex max-w-xl flex-col">

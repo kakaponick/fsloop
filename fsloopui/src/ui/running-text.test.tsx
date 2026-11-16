@@ -24,6 +24,32 @@ const SAMPLE = [
   "See p1-review-critic-craft#craft-4 and u3.",
 ].join("\n");
 
+describe("running text: inline code and the search's hits", () => {
+  test("cand-15: punctuation right after inline code keeps to it — no gap, no line break between them", () => {
+    const { container } = render(<RunningText text={"Правило: `ux 1`, impeccable critique; см. `ui.md`. И `код` дальше."} />);
+    const codes = [...container.querySelectorAll("code")];
+    expect(codes.map((c) => c.textContent)).toEqual(["ux 1", "ui.md", "код"]);
+    expect(codes[0]).toHaveClass("pl-1", "pr-0");
+    expect(codes[1]).toHaveClass("pl-1", "pr-0");
+    expect(codes[2]).toHaveClass("px-1");
+    expect(codes[2]).not.toHaveClass("pr-0");
+    expect(codes[0].parentElement).toHaveClass("whitespace-nowrap");
+    expect(codes[0].parentElement).toHaveTextContent(/^ux 1,$/);
+    expect(codes[1].parentElement).toHaveTextContent(/^ui\.md\.$/);
+    expect(container.textContent).toBe("Правило: ux 1, impeccable critique; см. ui.md. И код дальше.");
+  });
+
+  test("verdict-5: the caller's hit painter marks the searched words wherever the text holds them — a paragraph, bold, a list item, code", () => {
+    const paint = (s: string) => s.split(/(40)/).map((part, i) => (part === "40" ? <mark key={i} data-slot="hit">{part}</mark> : part));
+    const { container } = render(<RunningText text={"Решили через 40 минут, **40**\n\n- пункт 40\n\n`id-40`"} highlight={paint} />);
+    expect([...container.querySelectorAll("mark[data-slot=hit]")].map((m) => m.parentElement?.tagName)).toEqual(["P", "STRONG", "LI", "CODE"]);
+    expect(container.textContent).toBe("Решили через 40 минут, 40пункт 40id-40");
+    // without a painter the text has no marks
+    const plain = render(<RunningText text="через 40 минут" />);
+    expect(plain.container.querySelector("mark")).toBeNull();
+  });
+});
+
 describe("running text", () => {
   test("paragraphs keep their line breaks; inline code and bold are marked", () => {
     const { container } = render(<RunningText text={SAMPLE} />);

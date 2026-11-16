@@ -11,9 +11,8 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { UNIT_STATE, type UnitState } from "../../../shared/states.ts";
 import { NOUNS } from "../../../shared/text.ts";
-import { cn } from "@/lib/utils";
 import { CountLink, Dot, NotFound, type HeldNoun } from "@/ui";
-import { copyAction, DataTable, type RowAction } from "@/table";
+import { copyAction, DataTable, type BarOrder, type RowAction } from "@/table";
 // From the files, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
 import { countFindings, type FindingFilter } from "@/finding/facets.ts";
 import { openFindings } from "@/finding/open.ts";
@@ -84,9 +83,8 @@ function ToolbarFacts({ run }: { run: LoadedRun }) {
 
 /** The status bar's order on this view (rules/ui → Strict 1): «N юнитов» first and the counts strip after it, so a
  * state a live change brings appends at the strip's end and moves nothing; the selection's reserved place and the
- * data's age stay packed at the right end, apart from the strip's width. The slots are the status bar's own. */
-export const BAR_ORDER =
-  "[&_[data-slot=status-bar]>[data-slot=counts-strip]]:order-1 [&_[data-slot=status-bar]>[data-slot=selected]]:order-2 [&_[data-slot=status-bar]>[data-slot=selected]]:ml-auto [&_[data-slot=status-bar]>[data-slot=age]]:order-3 [&_[data-slot=status-bar]>[data-slot=age]]:ml-0";
+ * data's age stay packed at the right end, apart from the strip's width. */
+export const BAR_ORDER: BarOrder = { start: ["shown", "paging"], end: ["selected", "age"] };
 
 /** The counts strip (table #8): a dot, the state and its count for every state the run's units have been in since
  * the view opened, each count in a three-digit box; a state the filters or a live change leave empty reads a muted
@@ -175,7 +173,7 @@ function Units({ run }: { run: LoadedRun }) {
   const missing = param !== null && !holds(param) ? param : null;
 
   return (
-    <div data-slot="units-view" className={cn("absolute inset-0 flex flex-col gap-2 px-5 pt-3 pb-1", BAR_ORDER)}>
+    <div data-slot="units-view" className="absolute inset-0 flex flex-col gap-2 px-5 pt-3 pb-1">
       {missing && (
         <p role="status" data-slot="unit-missing" className="m-0 shrink-0">
           <NotFound kind="unit" id={missing} start />
@@ -200,6 +198,7 @@ function Units({ run }: { run: LoadedRun }) {
         defaultPaged={false}
         empty={empty}
         counts={(kept) => <UnitCounts rows={kept} states={states} />}
+        barOrder={BAR_ORDER}
         toolbarEnd={<ToolbarFacts run={run} />}
         open={open}
         onOpenChange={onOpenChange}

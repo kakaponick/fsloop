@@ -9,6 +9,7 @@ import { UiProvider } from "../ui/provider.tsx";
 import { DataTable, type DataTableProps, type TableColumn } from "./data-table.tsx";
 import type { FilterDef, Preset, SearchDef } from "./query.ts";
 import { copyAction, type RowAction } from "./row-menu.tsx";
+import { StatusBar, StripCount } from "./status-bar.tsx";
 
 interface F {
   id: string;
@@ -121,15 +122,32 @@ describe("states (rules/ui → Tables 2, Strict 1–2; Conventions 14, 15)", () 
     const strip = container.querySelector("[data-slot=held-strip]");
     expect(bar).toHaveClass("h-8", "shrink-0");
     expect(strip).toHaveClass("h-strip", "shrink-0");
-    // a select keeps the box of its longest value — the value alone, no count (table #11) — and its trigger fills it
-    const preset = () => (container.querySelector('[data-toolbar-item="preset"]') as HTMLElement).style.minWidth;
-    const severity = () => (container.querySelector('[data-toolbar-item="filter-severity"]') as HTMLElement).style.minWidth;
-    // «Вид: В исправление», 18 characters: 19.8ch; «Серьёзность: critical», 21: 23.1ch
-    expect(preset()).toBe("calc(19.8ch + 2.75rem)");
-    expect(severity()).toBe("calc(23.1ch + 2.75rem)");
-    expect(container.querySelector('[data-toolbar-item="preset"]')).toHaveClass("[&>*]:w-full");
+    // craft-7: a filter's trigger hugs its value (table #11, ui → Widths) — no box estimated from its letters
+    const item = (id: string) => container.querySelector(`[data-toolbar-item="${id}"]`) as HTMLElement;
+    for (const id of ["filter-severity", "filter-status", "filter-unit"]) {
+      expect(item(id).style.minWidth).toBe("");
+      expect(item(id).querySelector("[data-slot=toolbar-sizer]")).toBeNull();
+      expect(item(id)).not.toHaveClass("[&>*]:w-full");
+    }
+    // «Вид» alone keeps a reserve, because a filter changed by hand turns it «Свой набор» and would push the filter
+    // clicked: the measured box of its widest value — each value an invisible sizer in the trigger's chrome, drawn as
+    // generated content — and the trigger fills it
+    const sizers = () => [...item("preset").querySelectorAll<HTMLElement>("[data-slot=toolbar-sizer]")];
+    expect(sizers().map((s) => [s.dataset.field, s.dataset.value])).toEqual([
+      ["Вид:", "Все"],
+      ["Вид:", "В исправление"],
+      ["Вид:", "Кандидаты"],
+      ["Вид:", "Свой набор"],
+    ]);
+    for (const s of sizers()) {
+      expect(s).toHaveClass("invisible", "pl-2.5", "pr-2", "gap-1.5", "border", "text-sm");
+      expect(s).toHaveAttribute("aria-hidden", "true");
+      expect(s.textContent).toBe("");
+    }
+    expect(item("preset").style.minWidth).toBe("");
+    expect(item("preset")).toHaveClass("grid", "[&>*]:[grid-area:1/1]", "[&>*]:w-full");
     rerender(view());
-    expect(preset()).toBe("calc(19.8ch + 2.75rem)");
+    expect(sizers()).toHaveLength(4);
     // the loaded table lands in the same boxes
     expect(container.querySelector("[data-slot=status-bar]")).toHaveClass("h-8");
     expect(screen.queryByText("Загрузка…")).toBeNull();
@@ -395,6 +413,80 @@ describe("rows expand in place (rules/ui → Tables 3, Live data 3)", () => {
     expect(screen.getByText("Деталь f-001")).toBeInTheDocument();
     expect(screen.getByText("Деталь f-003")).toBeInTheDocument();
   });
+
+  test("cand-6: a row that expands says so — a chevron before its name turns as it opens, a click on it opens; the row's cursor is the pointer", async () => {
+    const user = userEvent.setup();
+    renderUi(view());
+    const chevron = (id: string) => row(id).querySelector("[data-slot=row-expand]") as HTMLElement;
+    expect(chevron("f-001")).toHaveAttribute("aria-hidden", "true");
+    expect(chevron("f-001").closest("td")).toHaveAttribute("data-col", "summary");
+    expect(chevron("f-001")).not.toHaveClass("rotate-90");
+    expect(row("f-001")).toHaveClass("cursor-pointer");
+    await user.click(chevron("f-002"));
+    expect(screen.getByText("Деталь f-002")).toBeInTheDocument();
+    expect(chevron("f-002")).toHaveClass("rotate-90");
+  });
+
+  test("cand-6: rows with no detail draw no chevron", () => {
+    renderUi(view({ detail: undefined }));
+    expect(document.querySelector("[data-slot=row-expand]")).toBeNull();
+  });
+
+  test("cand-11: the detail sits on the full muted ground, told from the table's paper in both themes", async () => {
+    renderUi(view({ open: ["f-001"] }));
+    const cell = document.querySelector('tr[data-detail-for="f-001"] > td') as HTMLElement;
+    expect(cell).toHaveClass("bg-muted");
+    expect(cell.className).not.toMatch(/bg-muted\//);
+  });
+});
+
+describe("a row brought into view (craft-1; rules/ui → Conventions 12)", () => {
+  // The box at 100 px, 450 px inside, its sticky header 32 px; rows lay out under the header, 32 px each, a detail 240.
+  const layout = () => {
+    const scrollBy = vi.fn();
+    (HTMLElement.prototype as unknown as { scrollBy: unknown }).scrollBy = scrollBy;
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.slot === "table-scroll" ? 450 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const rect = (top: number, height: number) => ({ top, bottom: top + height, height, width: 0, x: 0, y: top, left: 0, right: 0, toJSON: () => ({}) }) as DOMRect;
+      if (this.dataset.slot === "table-scroll") return rect(100, 450);
+      if (this.tagName === "THEAD") return rect(100, 32);
+      if (this.tagName === "TR" && this.parentElement?.tagName === "TBODY") {
+        let top = 132;
+        for (const tr of this.parentElement.children) {
+          if (tr === this) break;
+          top += (tr as HTMLElement).dataset.detailFor ? 240 : 32;
+        }
+        return rect(top, this.dataset.detailFor ? 240 : 32);
+      }
+      return rect(0, 0);
+    });
+    return scrollBy;
+  };
+  afterEach(() => {
+    delete (HTMLElement.prototype as unknown as { scrollBy?: unknown }).scrollBy;
+  });
+
+  test("a link's row is scrolled to the top of the box, under the sticky header, so its detail is in view", () => {
+    const scrollBy = layout();
+    renderUi(view({ target: "f-011", open: ["f-011"] }));
+    expect(row("f-011")).toHaveAttribute("data-target");
+    // f-011 is the 11th row: 132 + 10 × 32 = 452, the header's bottom at 132 → 320 px down
+    expect(scrollBy).toHaveBeenCalledWith({ top: 320 });
+  });
+
+  test("a row the user expands near the box's end is scrolled to the top; one whose detail fits stays where it is", async () => {
+    const scrollBy = layout();
+    const user = userEvent.setup();
+    renderUi(view());
+    await user.click(within(row("f-001")).getByText("f-001"));
+    // f-001's detail ends at 132 + 32 + 240 = 404, inside the box's 550: nothing moves
+    expect(scrollBy).not.toHaveBeenCalled();
+    await user.click(within(row("f-007")).getByText("f-007"));
+    // f-007 under f-001's detail: 132 + 32 + 240 + 5 × 32 = 564, its detail past the box's end → 432 px down
+    expect(scrollBy).toHaveBeenCalledWith({ top: 432 });
+  });
 });
 
 describe("keyboard (ui → Keyboard; rules/ui → Conventions 11)", () => {
@@ -614,6 +706,49 @@ describe("the status bar (table #8; the design check)", () => {
     expect(screen.queryByRole("navigation", { name: "Страницы" })).toBeNull();
     expect(screen.getByText("60 в счёте")).toBeInTheDocument();
     expect(pageIds()).toHaveLength(60);
+  });
+
+  const UNIT = { forms: NOUNS.unit, gender: "m" as const };
+  const AGE = { updatedAt: "2026-11-16T04:00:00Z", now: "2026-11-16T04:05:00Z" };
+  const slots = (bar: HTMLElement) => [...bar.children].map((c) => (c as HTMLElement).dataset.slot);
+
+  test("craft-3: the order is the caller's prop — the total first, the strip after it, the selection and the age packed at the right end", () => {
+    const { container } = renderUi(<StatusBar noun={NOUNS.unit} shown={42} total={42} counts={<span>полоса</span>} selected={{ count: 0, noun: UNIT }} {...AGE} order={{ start: ["shown", "paging"], end: ["selected", "age"] }} />);
+    const bar = container.querySelector("[data-slot=status-bar]") as HTMLElement;
+    expect(slots(bar)).toEqual(["shown", "counts-strip", "selected", "age"]);
+    // the end group opens at the right end; the strip's width moves neither of them
+    expect(bar.querySelector("[data-slot=selected]")).toHaveClass("ml-auto", "shrink-0");
+    expect(bar.querySelector("[data-slot=age]")).not.toHaveClass("ml-auto");
+    // the age never shrinks; the strip clips in its own box and never paints over a neighbour
+    expect(bar.querySelector("[data-slot=age]")).toHaveClass("shrink-0");
+    expect(bar.querySelector("[data-slot=shown]")).toHaveClass("shrink-0");
+    expect(bar.querySelector("[data-slot=counts-strip]")).toHaveClass("min-w-0", "overflow-hidden");
+    expect(bar).toHaveClass("@container/bar", "h-8");
+  });
+
+  test("craft-3: by default paging leads and the age alone is at the right end; a list that does not select reserves no selection", () => {
+    const { container } = renderUi(<StatusBar noun={NOUNS.decision} shown={44} total={143} counts={<span>на экране</span>} {...AGE} />);
+    const bar = container.querySelector("[data-slot=status-bar]") as HTMLElement;
+    expect(slots(bar)).toEqual(["counts-strip", "shown", "age"]);
+    expect(bar.querySelector("[data-slot=age]")).toHaveClass("ml-auto", "shrink-0");
+  });
+
+  test("craft-3: a strip entry goes compact in a narrow bar — its dot and count stay, its word goes to the title and the screen reader", () => {
+    const { container } = renderUi(
+      <>
+        <StripCount tone="success" label="закоммичен" count={30} />
+        <StripCount tone="warning" label="заблокирован" count={0} />
+      </>,
+    );
+    const [done, blocked] = [...container.querySelectorAll<HTMLElement>("[data-slot=state-count]")];
+    expect(done).toHaveAttribute("title", "закоммичен 30");
+    expect(done).toHaveTextContent(/^закоммичен30$/);
+    expect(done.querySelector("[data-slot=strip-label]")).toHaveClass("@max-5xl/bar:sr-only");
+    expect(done.querySelector("[data-slot=strip-count]")).toHaveClass("min-w-count", "tabular-nums", "text-foreground");
+    expect(done.querySelector("[data-slot=dot]")).toHaveAttribute("data-tone", "success");
+    // a state the filters empty keeps its slot: a neutral dot and a muted 0
+    expect(blocked.querySelector("[data-slot=dot]")).toHaveAttribute("data-tone", "neutral");
+    expect(blocked.querySelector("[data-slot=strip-count]")).not.toHaveClass("text-foreground");
   });
 });
 

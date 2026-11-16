@@ -136,12 +136,9 @@ function Goal({ goal, run }: { goal: string | null; run: LoadedRun | null }) {
 
 function ViewTabs({ run, view, onView }: { run: LoadedRun | null; view: ViewId; onView: (view: string) => void }) {
   const tabs = VIEWS.map((v) => ({ value: v.id, label: v.label, count: run ? v.count(run) : null }));
-  // Sticky: where the shell scrolls the page as one, the strip stays at the top once the header has scrolled away.
-  return (
-    <div data-slot="view-tabs" className="@container/tabs sticky top-0 z-10 flex h-10 shrink-0 items-end gap-4 border-b bg-background px-5">
-      <CountTabs value={view} onValueChange={onView} tabs={tabs} label="Разделы прогона" className="shrink-0" />
-    </div>
-  );
+  // Sticky: where the shell scrolls the page as one, the strip stays at the top once the header has scrolled away —
+  // the tabs' own sticky form, 40 px high (the shell's page height under it counts on it).
+  return <CountTabs sticky value={view} onValueChange={onView} tabs={tabs} label="Разделы прогона" className="px-5" />;
 }
 
 /** A frame's message in the page's place: what happened, then what is left to do. */

@@ -287,13 +287,7 @@ function Sections({ run, launch: l, findings, frames, framesTitle, tab, onTab, n
   const active = tabs.find((t) => t.id === tab) ?? tabs[0];
   return (
     <section data-slot="report-sections" aria-label={SECTIONS_LABEL} className="flex min-w-0 flex-col">
-      <CountTabs
-        value={active.id}
-        onValueChange={onTab}
-        label={SECTIONS_LABEL}
-        tabs={tabs.map((t) => ({ value: t.id, label: t.label, count: t.id === FILE_TAB ? null : t.count }))}
-        className="min-w-0 [&>[role=tablist]]:sticky [&>[role=tablist]]:top-0 [&>[role=tablist]]:z-10 [&>[role=tablist]]:max-w-full [&>[role=tablist]]:overflow-x-auto [&>[role=tablist]]:border-b [&>[role=tablist]]:bg-background"
-      >
+      <CountTabs sticky value={active.id} onValueChange={onTab} label={SECTIONS_LABEL} tabs={tabs.map((t) => ({ value: t.id, label: t.label, count: t.id === FILE_TAB ? null : t.count }))}>
         {tabs.map((t) => (
           <CountTabsContent key={t.id} value={t.id} className="pt-4">
             <Body run={run} launch={l} tab={t} findings={findings} frames={frames} framesTitle={framesTitle} now={now} />

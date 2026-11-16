@@ -98,10 +98,10 @@ describe("a critic's report", () => {
 
   test("craft-13: the section tabs stay in view while the report scrolls — sticky on the page's ground, the frames a tab of their own", () => {
     open("p1-map-craft-accounts");
-    // the strip is the shared tabs' list: its root pins it to the reader's top on the page's ground
-    const tabs = reader().querySelector("[data-slot=report-sections] > [data-slot=tabs]") as HTMLElement;
-    expect(within(tabs).getByRole("tablist", { name: "Разделы отчёта" }).parentElement).toBe(tabs);
-    expect(tabs).toHaveClass("[&>[role=tablist]]:sticky", "[&>[role=tablist]]:top-0", "[&>[role=tablist]]:z-10", "[&>[role=tablist]]:bg-background");
+    // the strip is the shared tabs' own sticky form (verdict-4): pinned to the reader's top on the page's ground
+    const list = within(reader()).getByRole("tablist", { name: "Разделы отчёта" });
+    expect(list).toHaveAttribute("data-sticky", "");
+    expect(list).toHaveClass("sticky", "top-0", "z-10", "bg-background");
     // the frames no longer stand between the facts and the tabs
     expect(reader().querySelector("[data-slot=frame-strip]")).toBeNull();
     expect(accountsFrames).toBeGreaterThan(0);

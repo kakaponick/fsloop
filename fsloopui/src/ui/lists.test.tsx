@@ -11,6 +11,7 @@ import { FactList } from "./fact-list.tsx";
 import { flatItem, FlatList } from "./flat-list.tsx";
 import { HeldStrip, heldStripText } from "./held-strip.tsx";
 import { resetPrefsMemory } from "./storage.ts";
+import { renderUi } from "./test-utils.tsx";
 
 describe("fact list", () => {
   const facts = [
@@ -47,6 +48,38 @@ describe("fact list", () => {
     expect(screen.getByRole("button", { name: "Подробнее" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("Версия")).toBeInTheDocument();
   });
+
+  test("craft-8: a label may carry its glossary — the term dotted on the label, the value plain", () => {
+    const { container } = renderUi(
+      <FactList
+        facts={[
+          { label: "Активность", glossary: [{ value: "работает", meaning: "в папке прогона была запись за последние 5 минут" }], value: "работает", outcome: true },
+          { label: "Режим", value: "worktree" },
+        ]}
+      />,
+    );
+    const [first, second] = [...container.querySelectorAll<HTMLElement>("dt")];
+    expect(within(first).getByRole("button", { name: "Активность" })).toHaveAttribute("data-slot", "glossary-term");
+    expect(second.querySelector("[data-slot=glossary-term]")).toBeNull();
+    expect(container.querySelector("dd [data-slot=glossary-term]")).toBeNull();
+    expect([...container.querySelectorAll("dt")].map((dt) => dt.textContent)).toEqual(["Активность", "Режим"]);
+  });
+
+  test("cand-9: the label column is as wide as every label, the folded ones included — opening «Подробнее» moves no value", async () => {
+    const { container } = render(<FactList facts={facts} more={more} foldKey="columns" />);
+    const sizers = () => [...container.querySelectorAll<HTMLElement>("[data-slot=label-sizer]")];
+    // the folded labels hold their room in the first label's cell, drawn as generated content: no text anyone reads
+    expect(sizers().map((s) => s.dataset.text)).toEqual(["Рабочая копия", "Версия"]);
+    for (const s of sizers()) {
+      expect(s).toHaveClass("invisible", "h-0");
+      expect(s).toHaveAttribute("aria-hidden", "true");
+      expect(s.textContent).toBe("");
+      expect(s.closest("dt")).toBe(container.querySelector("dt"));
+    }
+    await userEvent.setup().click(screen.getByRole("button", { name: "Подробнее" }));
+    expect(sizers()).toHaveLength(2);
+    expect([...container.querySelectorAll("dt")].map((dt) => dt.textContent)).toEqual(["Этап", "Активность", "Режим", "Модели", "Рабочая копия", "Версия"]);
+  });
 });
 
 describe("held-order strip", () => {
@@ -80,6 +113,19 @@ describe("held-order strip", () => {
     expect(strip).toHaveClass("h-strip");
     await user.click(screen.getByRole("button", { name: "2 новых прогона · 1 прогон сместился · показать" }));
     expect(onApply).toHaveBeenCalledOnce();
+  });
+
+  test("craft-6: the host names what became of a row that left — a list with no filter says «пропал», agreed; «вне фильтра» by default", () => {
+    const gone = heldStripText({ fresh: 0, moved: 0, left: 1 }, run, { leftKind: "gone" });
+    expect(gone).toBe("1 прогон пропал · убрать");
+    expect(gone?.split(" ")).toHaveLength(5);
+    expect(heldStripText({ fresh: 0, moved: 0, left: 3 }, run, { leftKind: "gone" })).toBe("3 прогона пропали · убрать");
+    expect(heldStripText({ fresh: 0, moved: 0, left: 21 }, run, { leftKind: "gone" })).toBe("21 прогон пропал · убрать");
+    expect(heldStripText({ fresh: 1, moved: 0, left: 1 }, finding, { leftKind: "gone" })).toBe("1 новая находка · 1 находка пропала · обновить список");
+    expect(heldStripText({ fresh: 0, moved: 0, left: 12 }, run, { leftKind: "gone", compact: true })).toBe("12 пропали · убрать");
+    expect(heldStripText({ fresh: 0, moved: 0, left: 1 }, run)).toBe("1 прогон вне фильтра · убрать");
+    renderUi(<HeldStrip counts={{ fresh: 0, moved: 0, left: 1 }} noun={run} leftKind="gone" onApply={() => {}} />);
+    expect(screen.getByRole("button", { name: "1 прогон пропал · убрать" })).toBeInTheDocument();
   });
 });
 
@@ -191,6 +237,18 @@ describe("tabs with counts", () => {
     expect(onValueChange).toHaveBeenLastCalledWith("reports");
     await user.keyboard("{ArrowLeft}");
     expect(onValueChange).toHaveBeenLastCalledWith("units");
+  });
+
+  test("verdict-4: the sticky strip is the tabs' own form — on the page's ground, at the top of what scrolls, its height reserved, sideways when narrow", () => {
+    const { container } = render(<CountTabs sticky value="findings" onValueChange={() => {}} tabs={tabs} label="Разделы прогона" className="px-5" />);
+    const list = screen.getByRole("tablist", { name: "Разделы прогона" });
+    expect(list).toHaveAttribute("data-sticky", "");
+    expect(list).toHaveClass("sticky", "top-0", "z-10", "w-full", "shrink-0", "border-b", "bg-background", "overflow-x-auto", "overflow-y-hidden", "group-data-horizontal/tabs:h-10", "px-5");
+    // the root draws no box: the strip sticks within the region that scrolls its panels, or the page's
+    expect(container.querySelector("[data-slot=tabs]")).toHaveClass("contents");
+    render(<CountTabs value="findings" onValueChange={() => {}} tabs={tabs} label="Разделы отчёта" />);
+    expect(screen.getByRole("tablist", { name: "Разделы отчёта" })).not.toHaveAttribute("data-sticky");
+    expect(screen.getByRole("tablist", { name: "Разделы отчёта" })).not.toHaveClass("sticky");
   });
 });
 

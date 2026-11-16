@@ -6,7 +6,7 @@
 // Built on the library's table with @tanstack/react-table as the column model (the shadcn data-table recipe);
 // sorting, filtering, searching and paging stay in query.ts, never in the table model.
 import { getCoreRowModel, useReactTable, type ColumnDef, type VisibilityState } from "@tanstack/react-table";
-import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, ChevronRightIcon } from "lucide-react";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent as ReactWheelEvent } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -14,11 +14,11 @@ import { cn } from "@/lib/utils";
 import { EmptyState, GlossaryTooltip, HeldStrip, Loading, markProps, OutOfFilter, PartFailed, WHEEL_GESTURE_GAP, type EmptyWhen, type Gender, type GlossaryEntry, type HeldNoun, type MarkState } from "@/ui";
 import { clampWidth, mergeWidths, placeColumns, RESIZE_STEP, SELECT_WIDTH, sameColumns, sameWidths, tableMinWidth, type ColumnLayout } from "./columns.ts";
 import { ColumnsMenu } from "./columns-menu.tsx";
-import { ANY_LABEL, CUSTOM_LABEL, FilterControl, filterSummary, isSelectFilter, PRESET_LABEL, PresetSelect } from "./filters.tsx";
+import { CUSTOM_LABEL, FilterControl, filterSummary, PRESET_LABEL, PresetSelect } from "./filters.tsx";
 import { FILL_ROWS, nextSort, pageOf, pageOfIndex, runQuery, tokens as toTokens, type FilterDef, type Preset, type Rank, type RowsPerPage, type SearchDef, type SortSpec } from "./query.ts";
 import { OPEN_ACTION, pinnable, RowMenu, type RowAction } from "./row-menu.tsx";
 import { Highlight, SearchBox } from "./search.tsx";
-import { StatusBar } from "./status-bar.tsx";
+import { StatusBar, type BarOrder } from "./status-bar.tsx";
 import { AdaptiveToolbar, type ToolbarItem } from "./toolbar.tsx";
 import { pushHistory, useRunView, useTableView } from "./view-state.ts";
 
@@ -80,6 +80,8 @@ export interface DataTableProps<R> {
   empty: EmptyWhen;
   /** The counts strip of the status bar when the list is not split: dots with counts over the kept rows. */
   counts?: (rows: readonly R[]) => ReactNode;
+  /** The status bar's order, when the view's differs from the bar's own (a module-level constant). */
+  barOrder?: BarOrder;
   /** Toolbar facts, at the right end. */
   toolbarEnd?: ReactNode;
   /** The page from the URL; changes are reported to `onPageChange` for the URL (Conventions 12). */
@@ -122,7 +124,7 @@ const ownClick = (target: EventTarget | null, row: HTMLElement): boolean => {
 };
 
 export function DataTable<R>(props: DataTableProps<R>) {
-  const { id, runKey, label, rows, failed, rowId, rowTitle, noun, columns, filters = [], presets = [], search, actions = [], detail, defaultSort = null, defaultPaged = true, empty, counts, toolbarEnd, marks, updatedAt, now, searchShortcut = true, className } = props;
+  const { id, runKey, label, rows, failed, rowId, rowTitle, noun, columns, filters = [], presets = [], search, actions = [], detail, defaultSort = null, defaultPaged = true, empty, counts, barOrder, toolbarEnd, marks, updatedAt, now, searchShortcut = true, className } = props;
   const [tprefs, setT] = useTableView(id, { sort: defaultSort, paged: defaultPaged });
   const [rprefs, setR] = useRunView(id, runKey);
   const target = props.target ?? null;
@@ -238,7 +240,13 @@ export function DataTable<R>(props: DataTableProps<R>) {
     setOpenState(ids);
     props.onOpenChange?.(ids);
   };
-  const toggleOpen = (rid: string) => setOpen(openSet.has(rid) ? openState.filter((x) => x !== rid) : [...openState, rid]);
+  /** A row the user just expanded: once its detail renders, brought to the box's top if the detail runs past its end. */
+  const expanded = useRef<string | null>(null);
+  const toggleOpen = (rid: string) => {
+    const opening = !openSet.has(rid);
+    expanded.current = opening ? rid : null;
+    setOpen(opening ? [...openState, rid] : openState.filter((x) => x !== rid));
+  };
 
   // ── row actions and the pin (table #13, rules/ui → Tables 4) ─────────────────────────────────
   const allActions: RowAction<R>[] = detail
@@ -421,7 +429,7 @@ export function DataTable<R>(props: DataTableProps<R>) {
       id: `filter-${f.id}`,
       kind: "ordinary",
       active: Boolean(rprefs.filters[f.id]?.length),
-      values: isSelectFilter(f as FilterDef<unknown>) ? [ANY_LABEL, ...f.options.map((o) => o.label)].map((v) => `${f.label}: ${v}`) : undefined,
+      // a filter's trigger hugs the value the user picked (table #11): no reserve
       node: <FilterControl def={f} value={rprefs.filters[f.id] ?? []} counts={result?.counts[f.id]} onChange={(v) => setQuery({ filters: { ...rprefs.filters, [f.id]: v } })} />,
     });
   if (toolbarEnd) items.push({ id: "facts", kind: "pinned", end: true, node: toolbarEnd });
@@ -502,11 +510,30 @@ export function DataTable<R>(props: DataTableProps<R>) {
     setFocusId(rid);
   };
 
-  // ── scroll to the row a link asked for ─────────────────────────────────────────────────────
+  // ── a row brought into view: to the top of the box, under the sticky header, so its detail shows (craft-1) ──
+  // Only the table's own box scrolls: the page around it and the header above it stay where the user left them.
+  const scrollToTop = (rid: string) => {
+    const box = scroller.current;
+    const tr = rowEls.current.get(rid);
+    const head = box?.querySelector("thead");
+    if (!box || !tr || !head) return;
+    const by = tr.getBoundingClientRect().top - head.getBoundingClientRect().bottom;
+    if (by) box.scrollBy?.({ top: by });
+  };
   const targetOnPage = target !== null && pageIds.includes(target);
-  useEffect(() => {
-    if (targetOnPage && target) rowEls.current.get(target)?.scrollIntoView?.({ block: "center" });
+  useLayoutEffect(() => {
+    // once per link: the row it names, on its page
+    if (targetOnPage && target) scrollToTop(target);
   }, [targetOnPage, target]);
+  useLayoutEffect(() => {
+    const rid = expanded.current;
+    expanded.current = null;
+    const box = scroller.current;
+    const detailRow = rid && box ? [...box.querySelectorAll<HTMLElement>("tr[data-detail-for]")].find((tr) => tr.dataset.detailFor === rid) : null;
+    if (!rid || !box || !detailRow) return;
+    const end = box.getBoundingClientRect().top + box.clientTop + box.clientHeight;
+    if (detailRow.getBoundingClientRect().bottom > end) scrollToTop(rid);
+  });
 
   // ── the body ───────────────────────────────────────────────────────────────────────────────
   let body: ReactNode;
@@ -589,7 +616,7 @@ export function DataTable<R>(props: DataTableProps<R>) {
                       onClick={(e) => onRowClick(e, row)}
                       onFocus={(e) => e.target === e.currentTarget && setFocusId(rid)}
                       onContextMenu={() => onContextMenu(rid)}
-                      className={cn("h-8 cursor-default outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset data-[menu]:bg-muted", mp.className)}
+                      className={cn("h-8 outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset data-[menu]:bg-muted", pin ? "cursor-pointer" : "cursor-default", mp.className)}
                     >
                       <TableCell
                         className="border-b px-2 py-0"
@@ -613,12 +640,13 @@ export function DataTable<R>(props: DataTableProps<R>) {
                         const full = c.text?.(row) ?? undefined;
                         return (
                           <TableCell key={c.id} data-col={c.id} className={cn("border-b px-2 py-0", c.numeric && "text-right tabular-nums")}>
-                            {c === slack && outside ? (
-                              <div className="flex min-w-0 items-baseline gap-2">
+                            {c === slack && (outside || detail) ? (
+                              <div className="flex min-w-0 items-center gap-1.5">
+                                {detail && <ExpandMark open={isOpen} onToggle={() => toggleOpen(rid)} />}
                                 <div className="min-w-0 flex-1 truncate" title={full ?? undefined}>
                                   {c.cell(row, ctx)}
                                 </div>
-                                <OutOfFilter className="shrink-0" />
+                                {outside && <OutOfFilter className="shrink-0" />}
                               </div>
                             ) : (
                               <div className="truncate" title={full ?? undefined}>
@@ -628,11 +656,20 @@ export function DataTable<R>(props: DataTableProps<R>) {
                           </TableCell>
                         );
                       })}
-                      {!slack && <TableCell className="border-b p-0">{outside && <OutOfFilter className="px-2" />}</TableCell>}
+                      {!slack && (
+                        <TableCell className="border-b p-0">
+                          {(outside || detail) && (
+                            <div className="flex items-center justify-end gap-1.5 px-2">
+                              {outside && <OutOfFilter />}
+                              {detail && <ExpandMark open={isOpen} onToggle={() => toggleOpen(rid)} />}
+                            </div>
+                          )}
+                        </TableCell>
+                      )}
                     </TableRow>
                     {isOpen && detail && (
                       <TableRow data-detail-for={rid} className="hover:bg-transparent">
-                        <TableCell colSpan={ordered.length + (slack ? 1 : 2)} className="border-b bg-muted/40 p-0 whitespace-normal">
+                        <TableCell colSpan={ordered.length + (slack ? 1 : 2)} className="border-b bg-muted p-0 whitespace-normal">
                           <div className="px-4 py-3">{detail(row)}</div>
                         </TableCell>
                       </TableRow>
@@ -662,8 +699,26 @@ export function DataTable<R>(props: DataTableProps<R>) {
         selected={{ count: selectedCount, noun }}
         updatedAt={updatedAt}
         now={now}
+        order={barOrder}
       />
     </div>
+  );
+}
+
+/** The mark of a row that expands (ux 0: the row carries its own meaning): a chevron before the row's name that
+ * turns as the detail opens. The row itself is the control — its click, Enter and «Открыть» in its menu; a click on
+ * the mark opens the detail whatever action is pinned. */
+function ExpandMark({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  return (
+    <span
+      aria-hidden="true"
+      data-slot="row-expand"
+      data-no-row-click=""
+      onClick={onToggle}
+      className={cn("flex size-4 shrink-0 items-center justify-center text-muted-foreground transition-transform motion-reduce:transition-none [&_svg]:size-3.5", open && "rotate-90")}
+    >
+      <ChevronRightIcon />
+    </span>
   );
 }
 

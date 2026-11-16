@@ -7,8 +7,8 @@ import type { Finding, Unit } from "../../shared/model.ts";
 import { FINDING_STATUS, SEVERITY, UNIT_STATE, VERDICT, type FindingStatus, type UnitState } from "../../shared/states.ts";
 import { NOUNS } from "../../shared/text.ts";
 import { Button } from "@/components/ui/button";
-import { Dash, Dot, glossaryFrom, notify, RunningText, StatusDot } from "@/ui";
-import { copyAction, DataTable, type FilterDef, type Preset, type RowAction, type SearchDef, type TableColumn } from "@/table";
+import { Dash, glossaryFrom, notify, RunningText, StatusDot } from "@/ui";
+import { copyAction, DataTable, StripCount, type BarOrder, type FilterDef, type Preset, type RowAction, type SearchDef, type TableColumn } from "@/table";
 
 const NOW = "2026-11-16T07:00:00Z";
 const UPDATED = "2026-11-16T06:57:00Z";
@@ -178,14 +178,11 @@ function UnitCounts({ rows }: { rows: readonly KitUnit[] }): ReactNode {
   for (const r of rows) by.set(r.state, (by.get(r.state) ?? 0) + 1);
   return (Object.keys(UNIT_STATE) as UnitState[])
     .filter((s) => by.has(s))
-    .map((s) => (
-      <span key={s} className="inline-flex items-center gap-1.5">
-        <Dot tone={UNIT_STATE[s].tone} />
-        {UNIT_STATE[s].compact}
-        <span className="text-foreground tabular-nums">{by.get(s)}</span>
-      </span>
-    ));
+    .map((s) => <StripCount key={s} tone={UNIT_STATE[s].tone} label={UNIT_STATE[s].compact} count={by.get(s) ?? 0} />);
 }
+
+/** The units view's order: «42 юнита» first, the strip after it, the selection and the age at the right end. */
+const UNIT_BAR_ORDER: BarOrder = { start: ["shown", "paging"], end: ["selected", "age"] };
 
 function Heading({ title, rule }: { title: string; rule: string }) {
   return (
@@ -260,6 +257,7 @@ export function TableSection() {
             defaultPaged={false}
             empty={{ form: "not-yet", step: "decompose" }}
             counts={(rows) => <UnitCounts rows={rows} />}
+            barOrder={UNIT_BAR_ORDER}
             updatedAt={UPDATED}
             now={NOW}
             searchShortcut={false}

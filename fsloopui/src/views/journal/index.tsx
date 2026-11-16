@@ -14,7 +14,7 @@ import type { JournalEntry } from "../../../shared/model.ts";
 import { stageOf, type Step } from "../../../shared/states.ts";
 import { NOUNS } from "../../../shared/text.ts";
 import { EmptyState, emptyWhen, FactList, HeldStrip, markProps, NotFound, OutOfFilter, PartFailed, RunningText, type Fact, type HeldNoun } from "@/ui";
-import { AdaptiveToolbar, ANY_LABEL, FilterControl, filterSummary, Highlight, hitRanges, isSelectFilter, pushHistory, runQuery, SearchBox, StatusBar, tokens, useRunView, useTableView, type FilterDef, type SearchDef, type ToolbarItem } from "@/table";
+import { AdaptiveToolbar, ANY_LABEL, FilterControl, filterSummary, Highlight, isSelectFilter, pushHistory, runQuery, SearchBox, StatusBar, tokens, useRunView, useTableView, type FilterDef, type SearchDef, type ToolbarItem } from "@/table";
 import { useNow } from "../../app/clock.tsx";
 import { resolverFor, routerLink } from "../../app/links.tsx";
 import { useUpdatedAt } from "../../app/live.tsx";
@@ -30,8 +30,6 @@ export const LABELS = { decision: "Решение", why: "Почему", refs: "
 export const ENTRY_NOT_FOUND_NEXT = ": в журнале этого прогона её нет — проверьте ссылку";
 /** What failed, when the journal cannot be read: «Журнал решений не прочитан: <причина>». */
 export const JOURNAL_PART = "Журнал решений";
-/** The CSS highlight the search's hits in running text are painted with (the list's `::highlight` rule). */
-const HIT = "journal-hit";
 
 /** «#12 · проход 1 · карта». */
 export const entryHead = (e: Pick<JournalEntry, "n" | "stage">): string => `#${e.n} · ${e.stage ? stageOf(e.stage).full : "этап не записан"}`;
@@ -64,25 +62,6 @@ export function entriesInView(view: { top: number; bottom: number }, boxes: read
 
 /** «на экране #40–#42», «на экране #7»; nothing in view — empty, its box kept. */
 export const inViewText = (range: readonly [string, string] | null): string => (!range ? "" : range[0] === range[1] ? `на экране #${range[0]}` : `на экране #${range[0]}–#${range[1]}`);
-
-/** The search's hits in the text under `root` — each a DOM range, for the CSS highlight; the kit's own marks
- * (the question's `Highlight`) are left to themselves. */
-export function hitRangesIn(root: Node, toks: readonly string[]): Range[] {
-  if (!toks.length) return [];
-  const out: Range[] = [];
-  const doc = root.ownerDocument ?? document;
-  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    if (node.parentElement?.closest("mark[data-slot=hit]")) continue;
-    for (const [start, end] of hitRanges(node.textContent ?? "", toks)) {
-      const range = doc.createRange();
-      range.setStart(node, start);
-      range.setEnd(node, end);
-      out.push(range);
-    }
-  }
-  return out;
-}
 
 export function JournalView({ run }: ViewProps) {
   return <Journal key={run.key} run={run} />;
@@ -118,18 +97,7 @@ function Journal({ run }: { run: LoadedRun }) {
     el?.focus({ preventScroll: true });
   }, [target]);
 
-  // The search's hits in the running text, painted by the CSS highlight: the markup stays as it is, so nothing moves.
   const rowsKey = q.rows.map((e) => e.n).join(",");
-  useLayoutEffect(() => {
-    const registry = typeof CSS !== "undefined" ? CSS.highlights : undefined;
-    if (!registry || !list.current) return;
-    if (!toks.length) {
-      registry.delete(HIT);
-      return;
-    }
-    registry.set(HIT, new window.Highlight(...hitRangesIn(list.current, toks)));
-    return () => void registry.delete(HIT);
-  }, [toks, rowsKey, run]);
 
   const toolbar: ToolbarItem[] = [
     { id: "search", kind: "pinned", flex: true, node: <SearchBox value={prefs.search} onChange={(v) => setPrefs({ search: v })} placeholder={SEARCH.placeholder} history={table.history} onCommit={(term) => setTable({ history: pushHistory(table.history, term) })} /> },
@@ -164,10 +132,7 @@ function Journal({ run }: { run: LoadedRun }) {
             ) : q.rows.length === 0 ? (
               <EmptyState form="filtered" noun={DECISION_NOUN} filters={filterSummary([filter], prefs.filters, prefs.search)} onReset={() => setPrefs({ filters: {}, search: "" })} className="py-16" />
             ) : (
-              <ol
-                aria-label="Журнал решений"
-                className="m-0 flex max-w-[calc(var(--container-measure)+8.5rem)] list-none flex-col p-0 py-2 [&_*::highlight(journal-hit)]:bg-muted [&_*::highlight(journal-hit)]:text-foreground [&_*::highlight(journal-hit)]:underline [&_*::highlight(journal-hit)]:decoration-muted-foreground"
-              >
+              <ol aria-label="Журнал решений" className="m-0 flex max-w-[calc(var(--container-measure)+8.5rem)] list-none flex-col p-0 py-2">
                 {q.rows.map((e) => (
                   <li key={e.n} className="border-b last:border-b-0">
                     <Entry entry={e} run={run} resolve={resolve} toks={toks} target={e.n === target} edge={arrived.has(e.n)} outside={q.outside.has(e.n)} />
@@ -201,13 +166,16 @@ interface EntryProps {
   outside: boolean;
 }
 
-/** One decision: its head, its question, then «Решение» leading, «Почему», «Ссылки» — a ref each line with its fact. */
+/** One decision: its head, its question, then «Решение» leading, «Почему», «Ссылки» — a ref each line with its fact.
+ * The search's hits wear the table's one mark (`Highlight`) in all the text the search looks in — the head («#n» and
+ * the stage), the question, the decision and the why — and nowhere else: never a label (table #12). */
 function Entry({ entry: e, run, resolve, toks, target, edge, outside }: EntryProps) {
   const refs = e.refs.filter(isRef);
   const marks = markProps({ target, edge });
+  const hl = (text: string) => <Highlight text={text} tokens={toks} />;
   const facts: Fact[] = [
-    { label: LABELS.decision, value: <RunningText text={e.decision} resolve={resolve} renderLink={routerLink} measure={false} className="font-medium text-foreground" /> },
-    { label: LABELS.why, value: <RunningText text={e.why} resolve={resolve} renderLink={routerLink} measure={false} /> },
+    { label: LABELS.decision, value: <RunningText text={e.decision} resolve={resolve} renderLink={routerLink} measure={false} highlight={hl} className="font-medium text-foreground" /> },
+    { label: LABELS.why, value: <RunningText text={e.why} resolve={resolve} renderLink={routerLink} measure={false} highlight={hl} /> },
   ];
   if (refs.length)
     facts.push({
@@ -225,7 +193,7 @@ function Entry({ entry: e, run, resolve, toks, target, edge, outside }: EntryPro
   return (
     <article id={`j${e.n}`} tabIndex={-1} data-entry={e.n} aria-labelledby={`j${e.n}-q`} data-target={marks["data-target"]} data-edge={marks["data-edge"]} className={`flex scroll-mt-2 flex-col gap-1 rounded-md px-4 py-3 outline-none ${marks.className}`}>
       <p className="m-0 flex items-baseline gap-2 text-xs text-muted-foreground tabular-nums">
-        <span>{entryHead(e)}</span>
+        <span>{hl(entryHead(e))}</span>
         {outside && <OutOfFilter className="ml-auto" />}
       </p>
       <h3 id={`j${e.n}-q`} className="m-0 text-base font-semibold text-balance break-words">

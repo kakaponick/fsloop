@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import "./test-setup.ts";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SearchIcon } from "lucide-react";
@@ -217,6 +219,27 @@ describe("menu", () => {
     expect(copyLabel("путь к отчёту")).toBe("Скопировать путь к отчёту");
     expect(copyLabel("путь к отчёту").split(" ")).toHaveLength(4);
     expect(copyItem("id", "u3").label).toBe("Скопировать id");
+  });
+
+  test("code-3: no «Скопировать …» is written by hand — the builder is the one place the word lives (a walk over src/)", () => {
+    const src = resolve(__dirname, "..");
+    const written = new Set<string>();
+    let files = 0;
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (statSync(p).isDirectory()) {
+          if (relative(src, p).replace(/\\/g, "/") !== "components/ui") walk(p);
+        } else if (/\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name)) {
+          files++;
+          // a string or JSX text that opens with the word; a comment quoting it in «…» is not a label
+          if (/(["'`]|>\s*)Скопировать\s/.test(readFileSync(p, "utf8"))) written.add(relative(src, p).replace(/\\/g, "/"));
+        }
+      }
+    };
+    walk(src);
+    expect(files).toBeGreaterThan(50);
+    expect([...written]).toEqual(["ui/menu.tsx"]);
   });
 
   test("a context menu with a header, an item's id, shortcut and blocked reason, and a choice in a submenu", async () => {

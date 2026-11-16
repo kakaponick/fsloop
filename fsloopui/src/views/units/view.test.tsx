@@ -331,18 +331,11 @@ describe("the empty states and the production shape (done-criteria 4, 6)", () =>
     const view = renderRun(fx, run, runPath(KEY, { view: "units" }));
     const bar = () => document.querySelector("[data-slot=status-bar]") as HTMLElement;
     const strip = () => [...bar().querySelectorAll("[data-slot=state-count]")].map((s) => s.textContent);
-    // the order is the view's, over the status bar's own slots: the total, the strip, then the selection and the age
-    // packed at the right end, so the strip's width moves neither
-    const root = document.querySelector("[data-slot=units-view]") as HTMLElement;
-    expect(root.className).toContain(BAR_ORDER);
-    expect(BAR_ORDER.split(" ")).toEqual([
-      "[&_[data-slot=status-bar]>[data-slot=counts-strip]]:order-1",
-      "[&_[data-slot=status-bar]>[data-slot=selected]]:order-2",
-      "[&_[data-slot=status-bar]>[data-slot=selected]]:ml-auto",
-      "[&_[data-slot=status-bar]>[data-slot=age]]:order-3",
-      "[&_[data-slot=status-bar]>[data-slot=age]]:ml-0",
-    ]);
-    expect([...bar().children].map((c) => (c as HTMLElement).dataset.slot)).toEqual(["counts-strip", "shown", "selected"]);
+    // the order is the view's, passed to the status bar as its prop (craft-3): the total, the strip, then the selection
+    // and the age packed at the right end, so the strip's width moves neither
+    expect(BAR_ORDER).toEqual({ start: ["shown", "paging"], end: ["selected", "age"] });
+    expect([...bar().children].map((c) => (c as HTMLElement).dataset.slot)).toEqual(["shown", "counts-strip", "selected"]);
+    expect(bar().querySelector("[data-slot=selected]")).toHaveClass("ml-auto");
     expect(within(bar()).getByText("42 юнита")).toHaveAttribute("data-slot", "shown");
     expect(strip()).toEqual(["заблокирован1", "проверяется1", "пишется1", "готов к работе5", "черновик4", "закоммичен30"]);
 

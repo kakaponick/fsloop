@@ -9,14 +9,14 @@ export { EmptyState, emptyStateText, emptyWhen, RESET_FILTERS, STEPS, type Empty
 export { FactList, MORE, type Fact, type FactListProps } from "./fact-list.tsx";
 export { flatItem, FlatList, type FlatListProps } from "./flat-list.tsx";
 export { FrameStrip, FrameThumb, FrameViewer, THUMB, WHEEL_GESTURE_GAP, type Frame } from "./frames.tsx";
-export { HeldStrip, heldStripText, heldVerb, type HeldCounts, type HeldNoun, type HeldVerb } from "./held-strip.tsx";
+export { HeldStrip, heldStripText, heldVerb, type HeldCounts, type HeldLeftKind, type HeldNoun, type HeldVerb } from "./held-strip.tsx";
 export { keyLabel, Keys } from "./kbd.tsx";
 export { Loading, LOADING_WORD } from "./loading.tsx";
 export { EDGE_MARK, EDGE_MS, markProps, OUT_OF_FILTER, OutOfFilter, TARGET_MARK, useEdgeMarks, type MarkState } from "./marks.tsx";
 export { copyItem, copyLabel, Menu, type MenuAction, type MenuChoice, type MenuGroups, type MenuHeader, type MenuItem } from "./menu.tsx";
 export { PartFailed, partFailedText, RETRY, type Gender } from "./part-failed.tsx";
 export { UiProvider } from "./provider.tsx";
-export { RunningText, parseBlocks, type Resolve, type RunningTextProps } from "./running-text.tsx";
+export { RunningText, parseBlocks, type Paint, type Resolve, type RunningTextProps } from "./running-text.tsx";
 export { comboboxValueText, CountCombobox, CountSelect, OptionCount, SELECT_MAX_OPTIONS, type CountOption } from "./select.tsx";
 export { Dot, StatusDot, stateWord, type DotState, type StatusDotProps } from "./status-dot.tsx";
 export { readPref, usePref, writePref } from "./storage.ts";

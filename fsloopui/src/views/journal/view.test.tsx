@@ -13,7 +13,7 @@ import type { JournalEntry } from "../../../shared/model.ts";
 import { writePref } from "@/ui";
 import { runPath } from "../../app/routes.ts";
 import { fixtureApp, keyOf, loadedRun, renderOver, renderView } from "../reports/testing.tsx";
-import { entriesInView, entryHead, hitRangesIn, inViewText, JournalView, LABELS, stageFilter } from "./index.tsx";
+import { entriesInView, entryHead, inViewText, JournalView, LABELS, stageFilter } from "./index.tsx";
 import { refObject } from "./ref-link.tsx";
 
 const N = 40; // 143 entries
@@ -148,18 +148,32 @@ describe("search, «Этап», and a link to an entry", () => {
     await loaded();
   });
 
-  test("craft-31: the search's hits are marked in the entries — the question by the kit's mark, the running text by a highlight", async () => {
+  test("verdict-5: the search's hits wear the kit's one mark in all the searched text — the head, the question, «Решение», «Почему»", async () => {
     const user = userEvent.setup({ delay: null });
     renderView(fx, KEY, path(), JournalView);
     await loaded();
     await user.click(screen.getByRole("searchbox"));
     await user.paste("40");
     await loaded(2); // #40 and #140
-    expect([...within(article(40)).getByRole("heading", { level: 3 }).querySelectorAll("mark[data-slot=hit]")].map((m) => m.textContent)).toEqual(["40"]);
-    const ranges = hitRangesIn(article(40), ["40"]);
-    expect(ranges.map((r) => r.toString())).toEqual(["40", "40", "40"]); // «#40», «way 40», «because 40 …»; the question has its own mark
-    expect(article(40).closest("ol")).toHaveClass("[&_*::highlight(journal-hit)]:bg-muted");
-    expect(hitRangesIn(article(40), [])).toEqual([]);
+    const marks = [...article(40).querySelectorAll("mark[data-slot=hit]")];
+    // «#40 · …», the question, «way 40», «because 40 …»: one painter, the table's `Highlight`
+    expect(marks.map((m) => m.textContent)).toEqual(["40", "40", "40", "40"]);
+    expect(marks[0].closest("p")?.textContent).toMatch(/^#40 · /);
+    expect(within(article(40)).getByRole("heading", { level: 3 }).querySelector("mark[data-slot=hit]")).toHaveTextContent("40");
+    // no second painter: no CSS highlight rule on the list
+    expect(article(40).closest("ol")?.className).not.toMatch(/highlight/);
+  });
+
+  test("verdict-6: a word only the labels hold is never painted — «ре» marks the stage «ревью», not «Решение»", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderView(fx, KEY, path(), JournalView);
+    await loaded();
+    await user.click(screen.getByRole("searchbox"));
+    await user.paste("ре");
+    await waitFor(() => expect(articles().length).toBeLessThan(143), { timeout: 4000 });
+    const first = articles()[0];
+    expect(first.querySelector("p mark[data-slot=hit]")).toHaveTextContent("ре");
+    for (const a of articles()) expect(a.querySelector("dt mark")).toBeNull();
   });
 
   test("«Этап» keeps one stage, its count over the run; the filter is the view's state in the browser", async () => {
@@ -257,7 +271,7 @@ describe("live and empty", () => {
     renderView(fx, KEY, path(), JournalView);
     await loaded();
     expect(document.querySelector("[data-slot=adaptive-toolbar]")).toHaveClass("h-7", "shrink-0");
-    expect((document.querySelector("[data-toolbar-item=filter-stage]") as HTMLElement).style.minWidth).toMatch(/^calc\(/);
+    expect(document.querySelector("[data-toolbar-item=filter-stage] [data-slot=toolbar-sizer]")).not.toBeNull();
     expect(document.querySelector("[data-slot=journal-scroll]")).toHaveClass("[scrollbar-gutter:stable]");
     expect(bar()).toHaveClass("h-8", "shrink-0");
   });

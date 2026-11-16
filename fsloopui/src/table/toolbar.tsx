@@ -23,16 +23,30 @@ export interface ToolbarItem {
   active?: boolean;
   /** Starts the right cluster: pushed to the line's end. */
   end?: boolean;
-  /** The values the control can show, «<field>: <value>»: its box is reserved for the longest and the trigger fills
-   * it, so choosing a shorter value never moves the items after it and the gaps between controls stay even
-   * (rules/ui → Strict 1). */
+  /** Only for a control whose value changes by itself when another control changes — «Вид», which turns «Свой
+   * набор» when a filter is changed by hand and would push the filter clicked (rules/ui → Strict 1): the values it can
+   * show, «<field>: <value>». Its box is the widest of them, measured by the browser, and the trigger fills it. A
+   * filter passes none: its trigger hugs the value the user picked (table #11, ui → Widths). */
   values?: readonly string[];
 }
 
-/** The reserved width of a select trigger that shows «<field>: <value>» — no count, which stays in the options
- * (table #11): the longest value at a Cyrillic letter's width (about 1.1 of the «0» that `ch` measures), the chevron
- * and the padding. */
-export const reserveWidth = (values: readonly string[]): string => `calc(${(Math.max(0, ...values.map((v) => v.length)) * 1.1).toFixed(1)}ch + 2.75rem)`;
+/** One value's room in a select trigger's chrome (u2's `CountSelect`: a 1 px border, 10 px before and 8 px after,
+ * «<field>:» and the value 6 px apart, a 16 px chevron) — invisible, drawn as generated content, so it takes the
+ * value's measured width and is no text anyone reads. */
+function Sizer({ text }: { text: string }) {
+  const at = text.indexOf(": ");
+  const field = at < 0 ? "" : `${text.slice(0, at)}:`;
+  const value = at < 0 ? text : text.slice(at + 2);
+  return (
+    <span aria-hidden="true" data-slot="toolbar-sizer" data-field={field} data-value={value} className="invisible flex h-7 items-center gap-1.5 border border-transparent pr-2 pl-2.5 text-sm whitespace-nowrap">
+      <span className="flex items-center gap-1.5">
+        {field && <span data-text={field} className="after:content-[attr(data-text)]" />}
+        <span data-text={value} className="after:content-[attr(data-text)]" />
+      </span>
+      <span className="size-4 shrink-0" />
+    </span>
+  );
+}
 
 export const GAP = 8;
 /** The search's floor and cap (ui → Widths: a toolbar search is flexible with a cap). */
@@ -134,10 +148,12 @@ function ItemSlot({ item, hidden, after }: { item: ToolbarItem; hidden: boolean;
         <div
           data-toolbar-item={item.id}
           data-flex={item.flex ? "" : undefined}
-          style={item.values ? { minWidth: reserveWidth(item.values) } : undefined}
-          className={cn("flex shrink-0 items-center", item.values && "[&>*]:w-full", item.flex && "max-w-80 min-w-48 flex-1 shrink", item.end && "ml-auto")}
+          className={cn("flex shrink-0 items-center", item.values && "grid [&>*]:[grid-area:1/1] [&>*]:w-full", item.flex && "max-w-80 min-w-48 flex-1 shrink", item.end && "ml-auto")}
         >
           {item.node}
+          {item.values?.map((v) => (
+            <Sizer key={v} text={v} />
+          ))}
         </div>
       )}
       {after}

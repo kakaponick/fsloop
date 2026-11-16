@@ -172,7 +172,7 @@ describe("the shell's walk", () => {
     expect(main).toHaveClass("overflow-y-auto", "max-[979px]:[scrollbar-gutter:stable]", "max-[979px]:[--view-flex:0_0_calc(100%_-_var(--spacing)*10)]");
     expect(body()).toHaveClass("[flex:var(--view-flex,1_1_0%)]");
     expect(header().className).not.toMatch(/max-h|overflow/);
-    expect(document.querySelector("[data-slot=view-tabs]")).toHaveClass("sticky", "top-0", "h-10", "bg-background");
+    expect(screen.getByRole("tablist", { name: "Разделы прогона" })).toHaveClass("sticky", "top-0", "group-data-horizontal/tabs:h-10", "bg-background");
   });
 
   test("11 · no runs under the root: which root, and that a new run appears by itself", async () => {

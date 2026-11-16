@@ -2,14 +2,17 @@
 // without — pagination or a counts strip, then «<shown> из <total noun>», then the selection «Выбрано N <noun>» in a
 // place reserved before anything is selected (table #5), then «обновлено <compact past>» with the full Moscow time in
 // its title, the age given by the caller's shared clock. It holds no actions but paging. Its height is fixed and
-// every number keeps its box, so it never moves what is above it or beside it (rules/ui → Strict 1).
+// every number keeps its box, so it never moves what is above it or beside it (rules/ui → Strict 1). The order of
+// its slots is the caller's prop (`order`); the slots it packs at the right end never move with the strip's width,
+// the age never shrinks, and the counts strip clips in its own box, its entries compact in a narrow bar.
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { ago, count, mskDateTime, num, plural, type Forms } from "../../shared/text.ts";
 import { Button } from "@/components/ui/button";
 import { Pagination, PaginationContent, PaginationItem } from "@/components/ui/pagination";
 import { cn } from "@/lib/utils";
-import { CountSelect, Hint, type HeldNoun } from "@/ui";
+import { CountSelect, Dot, Hint, type HeldNoun } from "@/ui";
+import type { Tone } from "../../shared/states.ts";
 import { ALL_ROWS, FILL_ROWS, type PageSize } from "./query.ts";
 
 export const PREV_PAGE = "Предыдущая страница";
@@ -45,9 +48,9 @@ export interface PagerProps {
   onPageSize: (size: PageSize) => void;
 }
 
-export function Pager({ page, pageCount, onPage, pageSize, onPageSize }: PagerProps) {
+export function Pager({ page, pageCount, onPage, pageSize, onPageSize, className }: PagerProps & { className?: string }) {
   return (
-    <div data-slot="pager" className="flex items-center gap-2">
+    <div data-slot="pager" className={cn("flex items-center gap-2", className)}>
       <Pagination aria-label="Страницы" className="mx-0 w-auto">
         <PaginationContent>
           <PaginationItem>
@@ -79,6 +82,36 @@ export function Pager({ page, pageCount, onPage, pageSize, onPageSize }: PagerPr
   );
 }
 
+/** A slot of the bar: «paging» — the pager, or the counts strip in its place; «shown» — «<shown> из <total noun>»;
+ * «selected» — the selection; «age» — «обновлено …». */
+export type BarSlot = "paging" | "shown" | "selected" | "age";
+
+/** The bar's order: the slots from its start, then the slots packed at its right end. */
+export interface BarOrder {
+  start: readonly BarSlot[];
+  end: readonly BarSlot[];
+}
+
+/** Paging first, then the total and the selection; the age alone at the right end. */
+export const DEFAULT_BAR_ORDER: BarOrder = { start: ["paging", "shown", "selected"], end: ["age"] };
+
+/** One entry of the counts strip: a dot in the state's tone, the state's word, its count in a three-digit box. In a
+ * narrow bar the word goes to the title and the screen reader, the dot and the count stay; a state the filters or a
+ * live change empty keeps its slot — a neutral dot and a muted 0 (Strict 1). */
+export function StripCount({ tone, label, count: n }: { tone: Tone; label: string; count: number }) {
+  return (
+    <span data-slot="state-count" title={`${label} ${num(n)}`} className="inline-flex shrink-0 items-center gap-1.5">
+      <Dot tone={n ? tone : "neutral"} />
+      <span data-slot="strip-label" className="@max-5xl/bar:sr-only">
+        {label}
+      </span>
+      <span data-slot="strip-count" className={cn("inline-block min-w-count tabular-nums", n > 0 && "text-foreground")}>
+        {num(n)}
+      </span>
+    </span>
+  );
+}
+
 export interface StatusBarProps {
   /** Paging, when the list is split; otherwise the counts strip takes the slot. */
   pager?: PagerProps | null;
@@ -93,26 +126,54 @@ export interface StatusBarProps {
   /** The data's last update and the shared clock; absent — no age is shown. */
   updatedAt?: string | null;
   now?: string | number;
+  /** The slots' order, the caller's: a view never reaches into the bar's slots. */
+  order?: BarOrder;
   className?: string;
 }
 
-export function StatusBar({ pager, counts, shown, total, noun, selected, updatedAt, now, className }: StatusBarProps) {
+export function StatusBar({ pager, counts, shown, total, noun, selected, updatedAt, now, order = DEFAULT_BAR_ORDER, className }: StatusBarProps) {
   const loaded = shown !== undefined && total !== undefined;
+  // each slot's node, or null when it has nothing to hold; `end` — the first slot packed at the right end
+  const slot = (name: BarSlot, end: boolean): ReactNode => {
+    const at = end && "ml-auto";
+    switch (name) {
+      case "paging":
+        if (!loaded) return null;
+        if (pager) return <Pager key={name} {...pager} className={cn("shrink-0", at)} />;
+        // the strip clips in its own box and never paints over a neighbour; its entries go compact in a narrow bar
+        return counts ? (
+          <div key={name} data-slot="counts-strip" className={cn("flex min-w-0 items-center gap-3 overflow-hidden", at)}>
+            {counts}
+          </div>
+        ) : null;
+      case "shown":
+        return loaded ? (
+          <span key={name} data-slot="shown" className={cn("shrink-0", at)}>
+            {shownText(shown, total, noun)}
+          </span>
+        ) : null;
+      case "selected":
+        return selected ? (
+          <span key={name} data-slot="selected" aria-live="polite" className={cn("shrink-0 text-foreground", at)} style={{ minWidth: selectedWidth(selected.noun) }}>
+            {selected.count > 0 ? selectedText(selected.count, selected.noun) : null}
+          </span>
+        ) : null;
+      case "age":
+        return updatedAt && now !== undefined ? (
+          <span key={name} data-slot="age" className={cn("shrink-0", at)} title={mskDateTime(updatedAt)}>
+            {ageText(updatedAt, now)}
+          </span>
+        ) : null;
+    }
+  };
+  const start = order.start.map((name) => slot(name, false));
+  // the end group opens at the bar's right end: its first slot that holds something takes the slack
+  const end: ReactNode[] = [];
+  for (const name of order.end) end.push(slot(name, !end.some(Boolean)));
   return (
-    <div data-slot="status-bar" className={cn("flex h-8 shrink-0 items-center gap-4 overflow-hidden text-xs whitespace-nowrap text-muted-foreground tabular-nums", className)}>
-      {loaded && pager && <Pager {...pager} />}
-      {loaded && !pager && counts && <div data-slot="counts-strip" className="flex min-w-0 items-center gap-3">{counts}</div>}
-      {loaded && <span data-slot="shown">{shownText(shown, total, noun)}</span>}
-      {selected && (
-        <span data-slot="selected" aria-live="polite" className="text-foreground" style={{ minWidth: selectedWidth(selected.noun) }}>
-          {selected.count > 0 ? selectedText(selected.count, selected.noun) : null}
-        </span>
-      )}
-      {updatedAt && now !== undefined && (
-        <span data-slot="age" className="ml-auto" title={mskDateTime(updatedAt)}>
-          {ageText(updatedAt, now)}
-        </span>
-      )}
+    <div data-slot="status-bar" className={cn("@container/bar flex h-8 shrink-0 items-center gap-4 overflow-hidden text-xs whitespace-nowrap text-muted-foreground tabular-nums", className)}>
+      {start}
+      {end}
     </div>
   );
 }

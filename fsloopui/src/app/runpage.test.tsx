@@ -268,6 +268,6 @@ describe("the run page's frame", () => {
     await act(async () => release());
     await waitFor(() => expect(screen.getByRole("tab", { name: /Находки/ }).querySelector("[data-slot=tab-count]")?.textContent).not.toBe(""));
     // The tab row is one fixed line; the lost connection is the shell's, so nothing arrives in it.
-    expect(screen.getByRole("tablist").closest("[data-slot=view-tabs]")).toHaveClass("h-10", "shrink-0");
+    expect(screen.getByRole("tablist")).toHaveClass("group-data-horizontal/tabs:h-10", "shrink-0");
   });
 });
