@@ -73,7 +73,7 @@ function ToolbarFacts({ run }: { run: LoadedRun }) {
         <CountLink count={candidates} noun={CANDIDATES} tone="neutral" href={href} onOpen={() => openFindings(run.key, CANDIDATE_FILTER, navigate)} />
       </Fact>
       <Fact widest={UNDECIDED_WIDEST} title={UNDECIDED_TITLE}>
-        <CountLink count={undecided} noun={NOUNS.finding} suffix={UNDECIDED} tone="neutral" href={href} onOpen={() => openFindings(run.key, UNDECIDED_FILTER, navigate)} />
+        <CountLink count={undecided} suffix={UNDECIDED} tone="neutral" href={href} onOpen={() => openFindings(run.key, UNDECIDED_FILTER, navigate)} />
       </Fact>
     </span>
   );

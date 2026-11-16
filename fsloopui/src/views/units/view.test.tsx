@@ -11,7 +11,7 @@ import { emptyStateText, glossaryLines, missingText, readPref } from "@/ui";
 import { assertLayout, fitsRegion, FRAME, headerWidth, isSelectFilter, mergeWidths, pack, presetDetail, runQuery, StatusBar, tableMinWidth, type FilterDef, type PackItem } from "@/table";
 import { GAP, OVERFLOW_WIDTH } from "../../table/toolbar.tsx";
 import { runKey as viewKey, type RunPrefs } from "../../table/view-state.ts";
-import { applyStylesheet, textWidth, usedBlockSize } from "../../app/layout-testing.ts";
+import { applyStylesheet, contentWidth, textWidth, usedBlockSize } from "../../app/layout-testing.ts";
 import { runPath } from "../../app/routes.ts";
 import { COLUMNS, STATE_GLOSSARY } from "./columns.tsx";
 import { BAR_ORDER } from "./index.tsx";
@@ -211,6 +211,39 @@ describe("the view's configuration at the production shape", () => {
     expect(pack(items("888 находок-кандидатов"), toolbar, { gap: GAP, overflow: OVERFLOW_WIDTH })).toEqual(["filter-pass"]);
   });
 
+  test("p3-review-critic-craft-2#craft-5: at 1440 the facts leave «Проход» whole beside «Состояние» — nothing folds into «…»", async () => {
+    // p3-final-units-plain.png (1440) folds «Проход» into the «…» after «Состояние: все»: the toolbar at x 336–1405,
+    // 1069 px; «Вид» 166, «Состояние: все» 124, the columns menu 28. «Проход: все» is «Состояние: все»'s box less the
+    // two words' difference; the search counts at its floor — its 107 px of chrome (icon, «/», clear, history), the
+    // field's 12 px of padding and the placeholder at the body face's 13 px. Every text by the platform face's measure
+    // (layout-testing → textWidth), which errs wide; the right cluster — both facts at their reserved widest form, then
+    // «Свернуть все юниты» — as the product's stylesheet draws it. The old «888 находок без решения» measures 341 px
+    // so (the frame's 329) and folds «Проход»; «888 без решения» leaves it 41 px.
+    renderUnits(fx, KEY, runPath(KEY, { view: "units" }));
+    await loaded();
+    await applyStylesheet();
+    const facts = document.querySelector("[data-slot=toolbar-facts]") as HTMLElement;
+    const reserves = [...facts.querySelectorAll("[data-slot=fact-reserve]")];
+    const cluster = facts.parentElement as HTMLElement;
+    const collapse = cluster.querySelector("[data-slot=collapse-all]") as HTMLElement;
+    const gap = (el: Element) => Number.parseFloat(getComputedStyle(el).columnGap);
+    const end = reserves.reduce((s, r) => s + contentWidth(r), 0) + gap(facts) * (reserves.length - 1) + gap(cluster) + contentWidth(collapse);
+    const items: PackItem[] = [
+      { id: "preset", kind: "sticky", width: 166 },
+      { id: "search", kind: "pinned", width: 107 + 12 + textWidth(SEARCH.placeholder) },
+      { id: "filter-state", kind: "ordinary", width: 124 },
+      { id: "filter-pass", kind: "ordinary", width: 124 - (textWidth("Состояние: все") - textWidth("Проход: все")) },
+      { id: "facts", kind: "pinned", width: end },
+      { id: "columns", kind: "pinned", width: 28 },
+    ];
+    expect(pack(items, 1069, { gap: GAP, overflow: OVERFLOW_WIDTH })).toEqual([]);
+    expect(reserves.map((r) => r.textContent)).toEqual(["888 кандидатов", "888 без решения"]);
+    // each reserve is its 7 px dot, its 6 px gap and its text at the body face: a measure that lost the dot would pass
+    // too easily; the cluster at least 111 + 16 + 122, then 8 and the 28 px button
+    expect(reserves.map((r) => contentWidth(r) - textWidth(r.textContent ?? ""))).toEqual([13, 13]);
+    expect(end).toBeGreaterThanOrEqual(111 + 16 + 122 + 8 + 28);
+  });
+
   test("improve-4 (1): «Вид» names the states of each slice that holds several, from its own definition — every string against a literal", () => {
     expect(PRESETS.map((p) => [p.label, presetDetail(p) ?? null])).toEqual([
       ["Все", null],
@@ -278,10 +311,11 @@ describe("the view's configuration at the production shape", () => {
     expect(candidatesText(3)).toBe("3 кандидата");
     expect(candidatesText(280)).toBe("280 кандидатов");
     expect(CANDIDATES_WIDEST).toBe("888 кандидатов");
-    expect(undecidedText(1)).toBe("1 находка без решения");
-    expect(undecidedText(12)).toBe("12 находок без решения");
-    expect(UNDECIDED_WIDEST).toBe("888 находок без решения");
-    expect(UNDECIDED_WIDEST.split(" ")).toHaveLength(4);
+    // craft-5: the run's decision word, as «кандидатов» is — what it counts and where it leads stay in its title
+    expect(undecidedText(1)).toBe("1 без решения");
+    expect(undecidedText(12)).toBe("12 без решения");
+    expect(UNDECIDED_WIDEST).toBe("888 без решения");
+    expect(UNDECIDED_WIDEST.split(" ")).toHaveLength(3);
   });
 });
 
@@ -321,12 +355,12 @@ describe("the task walk over u1's handler (surfaces/units.md → WALK)", () => {
     const view = renderUnits(fx, KEY, runPath(KEY, { view: "units" }));
     await loaded();
     const facts = [...document.querySelectorAll<HTMLElement>("[data-slot=toolbar-fact]")];
-    expect(facts.map((f) => f.querySelector("[data-slot=fact-reserve]")?.textContent)).toEqual(["888 кандидатов", "888 находок без решения"]);
+    expect(facts.map((f) => f.querySelector("[data-slot=fact-reserve]")?.textContent)).toEqual(["888 кандидатов", "888 без решения"]);
     for (const f of facts) expect(f.querySelector("[data-slot=fact-reserve]")).toHaveClass("invisible");
     const candidates = run.findings.filter((f) => f.effectiveStatus === "candidate").length;
     const undecided = run.findings.filter((f) => f.effectiveStatus === "undecided").length;
     expect(facts[0]).toHaveTextContent(new RegExp(`(^|\\D)${candidates} кандидат`));
-    expect(facts[1]).toHaveTextContent(new RegExp(`${undecided} наход\\S* без решения`));
+    expect(facts[1]).toHaveTextContent(new RegExp(`(^|\\D)${undecided} без решения`));
     expect(candidates).toBeGreaterThan(0);
     await user.click(within(facts[0]).getByRole("link"));
     expect(view.probe.location?.search).toBe("?view=findings");

@@ -39,8 +39,9 @@ export const closesTitle = (n: number): string => (n === 0 ? "Не закрыв�
 
 const ATTEMPTS: Forms = ["попытка", "попытки", "попыток"];
 
-/** «4 попытки» — shown only when a check ran more than once. */
-export const attemptsText = (n: number): string | null => (n > 1 ? count(n, ATTEMPTS) : null);
+/** «1 попытка», «4 попытки»: how many times a check ran — a check that ran once has a value too, so «—» reads only
+ * where none is recorded (rules/ui → Conventions 5; craft-8). */
+export const attemptsText = (n: number): string | null => (n > 0 ? count(n, ATTEMPTS) : null);
 
 /** A check's last outcome: the words of shared/states.ts's check-outcome map (code-10). */
 export { checkOutcome } from "../../../shared/states.ts";
@@ -59,7 +60,7 @@ export const LAUNCH_STATE_GLOSSARY: readonly GlossaryEntry[] = [
   { value: launchState({ running: false, seconds: 9 * 60 }, 0).label, meaning: "агент вернул отчёт; время — сколько он работал" },
   { value: launchState({ running: false, reportMissing: true }, 0).label, meaning: "запуск записан, но файла его отчёта нет" },
 ];
-export const LOG_LINE_GLOSSARY: readonly GlossaryEntry[] = [{ value: "Строка лога", meaning: "что проверка вывела последней строкой, как записано в логе" }];
+export const LOG_LINE_GLOSSARY: readonly GlossaryEntry[] = [{ value: CHECK_HEAD[4], meaning: "что проверка вывела последней строкой, как записано в логе" }];
 
 /** The cause of a waiting unit: «ждёт u2, u23». */
 export const waitsText = (ids: readonly string[]): string | null => (ids.length ? `ждёт ${ids.join(", ")}` : null);
@@ -71,19 +72,21 @@ export const waitsText = (ids: readonly string[]): string | null => (ids.length 
 export const UNITS_PART = "Список юнитов";
 export const briefPart = (path: string): string => `Бриф ${path}`;
 
-/** The toolbar facts (surfaces/units.md → ACTIONS): what no unit takes, as counts that open «Находки». */
-/** «280 кандидатов»: the run's word for a finding it does not fix (improve-4: «находок-кандидатов» cut «Проход» into
- * «…» at 1440); what the count is and where it leads stay in its title. */
+/** The toolbar facts (surfaces/units.md → ACTIONS): what no unit takes, as counts that open «Находки». Each is a
+ * count and the run's own decision word (ui → Page chrome: «count state»): «280 кандидатов», «12 без решения» — the
+ * words of the decision filter they open in «Находки». What the count is and where it leads stay in its title.
+ * improve-4 cut «находок-кандидатов», craft-5 the noun of «находок без решения»: with it, «Проход» folded into «…» at
+ * 1440. */
 export const CANDIDATES: Forms = ["кандидат", "кандидата", "кандидатов"];
 export const UNDECIDED = "без решения";
 export const candidatesText = (n: number): string => count(n, CANDIDATES);
-export const undecidedText = (n: number): string => `${count(n, NOUNS.finding)} ${UNDECIDED}`;
+export const undecidedText = (n: number): string => `${n} ${UNDECIDED}`;
 /** The widest form each fact takes at three digits: its box is reserved at that width (rules/ui → Strict 1). */
 export const CANDIDATES_WIDEST = candidatesText(888);
 export const UNDECIDED_WIDEST = undecidedText(888);
 /** The facts' titles: what the count is and where it leads (ux 1: one step away). */
 export const CANDIDATES_TITLE = "Находки-кандидаты: прогон их не исправляет — открыть в «Находках»";
-export const UNDECIDED_TITLE = "Находки без решения прогона — открыть в «Находках»";
+export const UNDECIDED_TITLE = "Находки, по которым прогон ещё не принял решения, — открыть в «Находках»";
 
 /** What a section of an open detail holds while a live change brings more: the held-order strip's noun in its
  * heading line — «1 новый запуск агента · показать», «2 новых проверки · показать». */

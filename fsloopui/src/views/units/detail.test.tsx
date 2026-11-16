@@ -3,8 +3,9 @@
 // title, 28 closes, 6 launches, 31 checks — with every absent part in its place: «юнит u7 не найден», «находка <id>
 // не найдена», «не записано», «Бриф units/u3/brief.md не прочитан: …». Strict 1: every list line is one fixed row.
 import "../../ui/test-setup.ts";
-import { appendFileSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -81,7 +82,7 @@ describe("a unit's detail at the production limits", () => {
   test("the fact list: the whole 287-character title the row cuts, the kind not recorded, each unit it waits for with its state, the failed brief — no «—» fact", () => {
     expect(TITLE).toHaveLength(287);
     mount();
-    expect(dts().map((d) => d.textContent)).toEqual(["Что делает", "Вид работы", "Ждёт юнитов", "Бриф юнита"]);
+    expect(dts().map((d) => d.textContent)).toEqual(["Ждёт юнитов", "Что делает", "Вид работы", "Бриф юнита"]);
     expect(value("Что делает").textContent).toBe(TITLE);
     expect(value("Вид работы")).toHaveTextContent("не записано");
     expect(within(value("Ждёт юнитов")).getByRole("link", { name: "u23" })).toHaveAttribute("href", runPath(KEY, { view: "units", unit: "u23" }));
@@ -98,7 +99,7 @@ describe("a unit's detail at the production limits", () => {
     expect(unitFacts(run, done).map((f) => f.label)).toEqual(["Вид работы", "Бриф юнита"]);
     // blocked, with its cause, its own working copy and commits past the row's one: each is a fact
     const stuck: Unit = { ...unit, state: "blocked", title: "part 7", blockedBy: [], blockedWhy: "tests stay red", tree: "C:/dev/wt/u24", sha: "c0ffee01", commits: ["c0ffee01", "c0ffee02"] };
-    expect(unitFacts(run, stuck).map((f) => f.label)).toEqual(["Вид работы", "Причина блокировки", "Рабочая копия", "Коммиты", "Бриф юнита"]);
+    expect(unitFacts(run, stuck).map((f) => f.label)).toEqual(["Причина блокировки", "Вид работы", "Рабочая копия", "Коммиты", "Бриф юнита"]);
     // waiting on committed units only: it waits for no one
     const free: Unit = { ...unit, state: "ready", title: "part 3", blockedBy: run.units.filter((u) => u.state === "committed").slice(0, 2).map((u) => u.id) };
     expect(unitFacts(run, free).map((f) => f.label)).toEqual(["Вид работы", "Бриф юнита"]);
@@ -172,7 +173,7 @@ describe("a unit's detail at the production limits", () => {
     const groups = checkGroups(checks);
     expect(groups.map((g) => [g.log, g.lines.map((l) => `${l.label} ${l.outcome} ${attemptsText(l.attempts) ?? ""}`.trim())])).toEqual([
       ["verify", ["type-check прошла 10 попыток", "lint прошла 10 попыток", "tests упала · exit 1 10 попыток"]],
-      ["land", ["push прошла"]],
+      ["land", ["push прошла 1 попытка"]],
     ]);
     mount();
     const lines = section("Проверки юнита").querySelectorAll<HTMLElement>("[data-slot=unit-check]");
@@ -195,7 +196,8 @@ describe("a unit's detail at the production limits", () => {
   test("the absent parts: no checks in the model read «не записано»; no closes, no launches read their own words", () => {
     // a unit that closes nothing: no finding names it either
     mount({ ...unit, closes: [], launches: [], blockedBy: [] }, null, { ...run, findings: base.findings.map((f) => ({ ...f, units: f.units.filter((id) => id !== "u24") })), running: [], errors: base.errors });
-    expect(screen.getByRole("heading", { name: "Не закрывает ни одной находки" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Не закрывает ни одной находки" })).toBeNull();
+    expect(screen.getByText("Не закрывает ни одной находки")).toBeInTheDocument();
     expect(section("Запуски агентов")).toHaveTextContent("—");
     expect(section("Проверки юнита")).toHaveTextContent("не записано");
     const facts = document.querySelector("[data-slot=fact-list]") as HTMLElement;
@@ -263,8 +265,8 @@ describe("a unit's detail at the production limits", () => {
     // «tests»: retried ten times, its line as fsloop wrote it — never rewritten into a duration
     expect(cells(2)[4].querySelector(".font-mono")).toHaveTextContent(/^2 failed$/);
     expect(cells(2)[4]).toHaveAttribute("title", "2 failed");
-    // «push» ran once: no attempts to count — the shared «—»; its line «main» as written
-    expect(cells(3)[2].querySelector("[data-slot=dash]")).not.toBeNull();
+    // «push» ran once: «1 попытка», a value, never the «—» of none (craft-8); its line «main» as written
+    expect(cells(3)[2]).toHaveTextContent(/^1 попытка$/);
     expect(cells(3)[4].querySelector(".font-mono")).toHaveTextContent(/^main$/);
     // «repro»: no end, no line recorded
     expect(cells(4)[3].querySelector("[data-slot=dash]")).not.toBeNull();
@@ -301,6 +303,43 @@ describe("a unit's detail at the production limits", () => {
     expect(state).toHaveAttribute("title", "исправлена");
   });
 
+  test("p3-review-critic-craft-2#craft-7: a blocked unit's detail opens on why it is blocked — its outcome rows first among the facts, a zero «closes» one muted line, not a heading", async () => {
+    // u23 of p3-final-units-u23.png: blocked, waiting for the user, closing nothing
+    const u23 = base.units.find((u) => u.id === "u23") as Unit;
+    expect(u23.state).toBe("blocked");
+    mount(u23, null, base);
+    expect(dts().map((d) => d.textContent)).toEqual(["Причина блокировки", "Вид работы", "Бриф юнита"]);
+    // a unit that waits and is blocked: both outcome rows open the list, in that order
+    const both: Unit = { ...u23, blockedBy: ["u24"], title: "part 23" };
+    expect(unitFacts(base, both).map((f) => f.label).slice(0, 2)).toEqual(["Ждёт юнитов", "Причина блокировки"]);
+    // «Не закрывает ни одной находки»: no heading, muted, regular weight, on the section's reserved 28 px line
+    expect(screen.queryByRole("heading", { name: "Не закрывает ни одной находки" })).toBeNull();
+    const zero = screen.getByText("Не закрывает ни одной находки");
+    expect(zero.textContent?.split(" ")).toHaveLength(5);
+    await applyStylesheet();
+    expect(getComputedStyle(zero).color).toBe("rgb(109, 109, 105)");
+    expect(getComputedStyle(zero).fontWeight).not.toBe("600");
+    expect(usedBlockSize(zero.parentElement as HTMLElement)).toBe(28);
+    // the sections that hold something keep their headings
+    expect(screen.getByRole("heading", { name: "Запуски агентов" })).toBeInTheDocument();
+  });
+
+  test("p3-review-critic-craft-2#craft-8: a check that ran once reads «1 попытка» under «Попытки», never the «—» of none", () => {
+    expect(attemptsText(1)).toBe("1 попытка");
+    expect(attemptsText(1)?.split(" ")).toHaveLength(2);
+    mount();
+    const push = within(section("Проверки юнита").querySelectorAll<HTMLElement>("[data-slot=unit-check]")[3]).getAllByRole("cell");
+    expect(push[0]).toHaveTextContent("push");
+    expect(push[2]).toHaveTextContent(/^1 попытка$/);
+    expect(push[2].querySelector("[data-slot=dash]")).toBeNull();
+  });
+
+  test("p3-review-critic-code#code-20: «Строка лога» is one word held once — the glossary's value is the header's own", () => {
+    const words = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "words.ts"), "utf8").replace(/\r\n/g, "\n");
+    expect(words.match(/Строка лога/g)).toHaveLength(1);
+    expect(LOG_LINE_GLOSSARY.map((e) => e.value)).toEqual([CHECK_HEAD[4]]);
+  });
+
   test("code-2: the checks are the model's own typed `Unit.checks`, absent while it carries none", () => {
     expect(checksOf({ checks })).toBe(checks);
     expect(checksOf({ checks: [] })).toEqual([]);
@@ -312,7 +351,6 @@ describe("a unit's detail at the production limits", () => {
     expect(closesTitle(1)).toBe("Закрывает 1 находку");
     expect(closesTitle(3)).toBe("Закрывает 3 находки");
     expect(closesTitle(0)).toBe("Не закрывает ни одной находки");
-    expect(attemptsText(1)).toBeNull();
     expect(attemptsText(31)).toBe("31 попытка");
     expect(attemptsText(2)).toBe("2 попытки");
     expect(checkOutcome(0)).toBe("прошла");
@@ -388,7 +426,7 @@ describe("an open detail under a live run (rules/ui → Strict 1: a live update 
 
   test("craft-5: a blocked unit committed while its detail is open keeps the fact rows it opened with — an emptied value reads «—» in place; the next open derives the set again", () => {
     const stuck: Unit = { ...unit, state: "blocked", title: "part 24", blockedBy: ["u23"], blockedWhy: "tests stay red", tree: "C:/dev/wt/u24", sha: "c0ffee01", commits: ["c0ffee01", "c0ffee02"] };
-    const opened = ["Вид работы", "Ждёт юнитов", "Причина блокировки", "Рабочая копия", "Коммиты", "Бриф юнита"];
+    const opened = ["Ждёт юнитов", "Причина блокировки", "Вид работы", "Рабочая копия", "Коммиты", "Бриф юнита"];
     const view = render(tree(stuck, checks, run));
     expect(labels()).toEqual(opened);
     const committed: Unit = { ...stuck, state: "committed", blockedWhy: null, tree: null, sha: "c0ffee03", commits: ["c0ffee03"] };

@@ -42,14 +42,16 @@ const LAUNCH_GRID = "grid grid-cols-[minmax(0,1fr)_9rem_7.5rem_9rem_8rem] items-
 const CHECK_GRID = "grid grid-cols-[minmax(0,12rem)_9rem_6rem_7.5rem_minmax(0,1fr)] items-center gap-x-3";
 
 /** A section: its heading in the page's title type on a 28 px line, which also holds the strip of the lines a live
- * change brought — reserved, so the strip's arrival moves nothing — then its list. */
-function Section({ title, id, strip, children }: { title: string; id: string; strip?: ReactNode; children: ReactNode }) {
+ * change brought — reserved, so the strip's arrival moves nothing — then its list. A `quiet` section holds nothing to
+ * head: its title is one muted line of body type in the same 28 px line, no heading (craft-7). */
+function Section({ title, id, strip, quiet = false, children }: { title: string; id: string; strip?: ReactNode; quiet?: boolean; children?: ReactNode }) {
+  const Title = quiet ? "p" : "h3";
   return (
     <section aria-labelledby={id} className="flex min-w-0 flex-col gap-1">
       <div data-slot="section-head" className="flex h-7 min-w-0 items-center gap-3">
-        <h3 id={id} className="m-0 shrink-0 text-sm font-semibold text-foreground">
+        <Title id={id} className={cn("m-0 shrink-0 text-sm", quiet ? "text-muted-foreground" : "font-semibold text-foreground")}>
           {title}
-        </h3>
+        </Title>
         {strip}
       </div>
       {children}
@@ -102,16 +104,18 @@ function Waits({ run, ids }: { run: DetailRun; ids: readonly string[] }) {
 
 type FactKey = keyof typeof FACT;
 
-/** Each fact in the list's order: whether it holds for the unit as it is now, and its value — null when it has none. */
+/** Each fact in the list's order: whether it holds for the unit as it is now, and its value — null when it has none.
+ * What asks for action opens the list (ux 9 → Facts: it is outcome, not a fact; craft-7): what the unit still waits
+ * for and why it is blocked, then the facts. */
 function factRows(run: DetailRun, u: Unit): { key: FactKey; holds: boolean; value: ReactNode }[] {
   const failed = briefFailure(run, u);
   const open = u.state !== "committed";
   const waits = open ? u.blockedBy.filter((id) => run.units.find((o) => o.id === id)?.state !== "committed") : [];
   return [
-    { key: "title", holds: !u.title || u.title.length > ROW_TITLE_CHARS, value: u.title || <NotRecorded /> },
-    { key: "kind", holds: true, value: u.kind ?? <NotRecorded /> },
     { key: "waits", holds: waits.length > 0, value: waits.length ? <Waits run={run} ids={waits} /> : null },
     { key: "why", holds: Boolean(open && u.blockedWhy), value: open && u.blockedWhy ? u.blockedWhy : null },
+    { key: "title", holds: !u.title || u.title.length > ROW_TITLE_CHARS, value: u.title || <NotRecorded /> },
+    { key: "kind", holds: true, value: u.kind ?? <NotRecorded /> },
     { key: "tree", holds: Boolean(u.tree), value: u.tree ? <Mono>{u.tree}</Mono> : null },
     {
       key: "commits",
@@ -128,10 +132,11 @@ function factRows(run: DetailRun, u: Unit): { key: FactKey; holds: boolean; valu
   ];
 }
 
-/** The facts the row does not show, and only those that hold for the unit's state (ux 2): the whole title when the
- * row may cut it, what it still waits for and why it is blocked while it is not committed, its own working copy, the
- * commits beyond the one in the row; the kind and the brief always. With `kept` — an open detail's facts — the rows
- * are the ones it opened with, whatever holds now: a value that emptied reads «—» in place (Strict 1). */
+/** The facts the row does not show, and only those that hold for the unit's state (ux 2): what it still waits for and
+ * why it is blocked while it is not committed — first, as its outcome —, the whole title when the row may cut it, its
+ * own working copy, the commits beyond the one in the row; the kind and the brief always. With `kept` — an open
+ * detail's facts — the rows are the ones it opened with, whatever holds now: a value that emptied reads «—» in place
+ * (Strict 1). */
 export function unitFacts(run: DetailRun, u: Unit, kept?: ReadonlySet<string>): Fact[] {
   return factRows(run, u)
     .filter((r) => (kept ? kept.has(r.key) : r.holds))
@@ -141,14 +146,15 @@ export function unitFacts(run: DetailRun, u: Unit, kept?: ReadonlySet<string>): 
 /** «Закрывает N находок»: the findings the run gave the unit — the same set its row counts (Conventions 3) — as the
  * shared rows that expand in place into the article (`@/finding` → ExpandingFindings, as a report's in «Отчёты»),
  * read-only: the verdict is set in «Находки» (Conventions 6); «Открыть в находках» leads there. The detail already
- * sits on the muted ground, so the rows carry no rules of their own. */
+ * sits on the muted ground, so the rows carry no rules of their own. A unit that closes none reads it on one muted
+ * line, not a heading over nothing (craft-7) — the same 28 px line, so a finding that arrives moves nothing. */
 function Closes({ run, unit, id, now }: { run: DetailRun; unit: Unit; id: string; now: number }) {
   const ids = closingIds(run, unit);
   const held = useHeld(ids, (fid) => fid);
   const byId = new Map<string, Finding>(run.findings.map((f) => [f.id, f]));
   const title = closesTitle(ids.length);
   return (
-    <Section title={title} id={id} strip={<SectionStrip fresh={held.fresh} noun={HELD_NOUN.finding} onApply={held.apply} />}>
+    <Section title={title} id={id} quiet={ids.length === 0} strip={<SectionStrip fresh={held.fresh} noun={HELD_NOUN.finding} onApply={held.apply} />}>
       {held.shown.length > 0 && <ExpandingFindings run={run} items={held.shown.map((fid) => byId.get(fid) ?? fid)} label={title} now={now} slot="unit-closes" ruled={false} unit={unit.id} />}
     </Section>
   );
