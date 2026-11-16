@@ -7,10 +7,13 @@ import { MemoryRouter, useLocation, useNavigate, type Location, type NavigateFun
 import { readRun } from "../../../server/run.ts";
 import { Loading, UiProvider } from "@/ui";
 import { ClockProvider } from "../../app/clock.tsx";
+import type { Transport } from "@/api";
 import { createLiveStore, LiveProvider, useRun } from "../../app/live.tsx";
 import { NOW, type FixtureApp } from "../../app/testing.tsx";
 import type { LoadedRun, ViewProps } from "../index.ts";
-import { ReportFetchProvider, type FetchReport } from "./report-text.ts";
+
+/** «Файл отчёта» answered in the server's place: the run's key and the file's name in, the response out. */
+export type FetchReport = (runKey: string, file: string) => Promise<Response>;
 
 export { fixtureApp, keyOf, MIN, NOW } from "../../app/testing.tsx";
 
@@ -52,12 +55,10 @@ export function renderView(fx: FixtureApp, runKey: string, path: string, View: C
     <UiProvider>
       <ClockProvider now={NOW}>
         <LiveProvider store={store}>
-          <ReportFetchProvider value={handlerReport(fx)}>
-            <MemoryRouter initialEntries={[path]}>
-              <Host runKey={runKey} View={View} />
-              <ProbeOf />
-            </MemoryRouter>
-          </ReportFetchProvider>
+          <MemoryRouter initialEntries={[path]}>
+            <Host runKey={runKey} View={View} />
+            <ProbeOf />
+          </MemoryRouter>
         </LiveProvider>
       </ClockProvider>
     </UiProvider>,
@@ -80,21 +81,27 @@ export const handlerReport =
 /** A view over a run object the test holds, so a live change is the next object: `again(next)`; `fetchReport`
  * answers «Файл отчёта» in the handler's place. */
 export function renderOver(fx: FixtureApp, run: LoadedRun, path: string, View: ComponentType<ViewProps>, { fetchReport }: { fetchReport?: FetchReport } = {}) {
-  const store = createLiveStore(fx.transport, { now: () => NOW });
+  const transport: Transport = fetchReport
+    ? {
+        ...fx.transport,
+        get(path) {
+          const url = new URL(path, "http://127.0.0.1:4747");
+          return url.pathname === "/api/report" ? fetchReport(url.searchParams.get("run") ?? "", url.searchParams.get("file") ?? "") : fx.transport.get(path);
+        },
+      }
+    : fx.transport;
+  const store = createLiveStore(transport, { now: () => NOW });
   const { probe, ProbeOf } = makeProbe();
-  const read = fetchReport ?? handlerReport(fx);
   const tree = (r: LoadedRun) => (
     <UiProvider>
       <ClockProvider now={NOW}>
         <LiveProvider store={store}>
-          <ReportFetchProvider value={read}>
-            <MemoryRouter initialEntries={[path]}>
-              <section data-slot="view-body" className="@container/view relative h-[40rem]">
-                <View run={r} />
-              </section>
-              <ProbeOf />
-            </MemoryRouter>
-          </ReportFetchProvider>
+          <MemoryRouter initialEntries={[path]}>
+            <section data-slot="view-body" className="@container/view relative h-[40rem]">
+              <View run={r} />
+            </section>
+            <ProbeOf />
+          </MemoryRouter>
         </LiveProvider>
       </ClockProvider>
     </UiProvider>

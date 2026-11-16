@@ -2,44 +2,14 @@
 // server's tick stream. A tick carries versions only; a moved version re-reads its part, in place — what is shown
 // stays until the new copy arrives, so nothing returns to a loading state. A dropped stream is a lost connection:
 // the data stays with its time; on reconnect the list and every watched run are re-read whole.
+// The store reaches the server through the API module only; the tree under its provider gets the same API.
 import { createContext, useContext, useEffect, useSyncExternalStore, type ReactNode } from "react";
 import type { RunCard } from "../../shared/model.ts";
+import { ApiProvider, createApi, type Transport, type Versions } from "@/api";
 import type { LoadedRun } from "../views/index.ts";
 
-export interface Versions {
-  list: number;
-  runs: Record<string, number>;
-}
-
-export interface StreamHandlers {
-  open(): void;
-  tick(versions: Versions): void;
-  error(): void;
-}
-
-/** How the store reaches the server: a GET and the tick stream. */
-export interface Transport {
-  get(path: string): Promise<Response>;
-  /** Opens the stream; the function it returns closes it. */
-  events(handlers: StreamHandlers): () => void;
-}
-
-export const httpTransport: Transport = {
-  get: (path) => fetch(path, { cache: "no-store" }),
-  events(handlers) {
-    const source = new EventSource("/api/events");
-    source.addEventListener("open", () => handlers.open());
-    source.addEventListener("error", () => handlers.error());
-    source.addEventListener("tick", (event) => {
-      try {
-        handlers.tick(JSON.parse((event as MessageEvent<string>).data));
-      } catch {
-        // a tick that is not JSON carries nothing
-      }
-    });
-    return () => source.close();
-  },
-};
+// the app's entry names the browser's transport here
+export { httpTransport } from "@/api";
 
 export type ListState = { status: "loading" } | { status: "ready"; cards: RunCard[]; roots: string[] } | { status: "error"; cause: string };
 export type RunState = { status: "loading" } | { status: "ready"; run: LoadedRun } | { status: "not-found" } | { status: "error"; cause: string };
@@ -57,19 +27,10 @@ const LOADING = { status: "loading" } as const;
 /** Runs kept read after their page closed, so Back shows one at once. */
 const KEEP = 4;
 
-async function causeOf(res: Response): Promise<string> {
-  try {
-    const body = await res.json();
-    if (body && typeof body.error === "string") return body.error;
-  } catch {
-    // not JSON
-  }
-  return `сервер ответил ${res.status}`;
-}
-
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export function createLiveStore(transport: Transport, { now = Date.now }: { now?: () => number } = {}) {
+  const api = createApi(transport);
   let state: LiveSnapshot = { list: LOADING, runs: {}, connection: "connecting", updatedAt: null };
   const listeners = new Set<() => void>();
   const watchers = new Map<string, number>();
@@ -91,12 +52,10 @@ export function createLiveStore(transport: Transport, { now = Date.now }: { now?
     const n = ++seq.list;
     busy.list = true;
     try {
-      const res = await transport.get("/api/runs");
-      if (!res.ok) throw new Error(await causeOf(res));
-      const body = (await res.json()) as { version: number; list: RunCard[]; roots?: string[] };
+      const body = await api.runs();
       if (n !== seq.list) return;
       known.list = body.version;
-      set({ list: { status: "ready", cards: body.list, roots: body.roots ?? [] }, updatedAt: now() });
+      set({ list: { status: "ready", cards: body.list, roots: body.roots }, updatedAt: now() });
     } catch (e) {
       // A failed re-read keeps the list it has; only a first read shows the failure.
       if (n === seq.list && state.list.status !== "ready") set({ list: { status: "error", cause: messageOf(e) } });
@@ -114,16 +73,13 @@ export function createLiveStore(transport: Transport, { now = Date.now }: { now?
     busy.runs.add(key);
     const mine = () => seq.runs.get(key) === n;
     try {
-      const res = await transport.get(`/api/run?run=${encodeURIComponent(key)}`);
+      const run = await api.run(key);
       if (!mine()) return;
-      if (res.status === 404) {
+      if (!run) {
         known.runs.delete(key);
         setRun(key, { status: "not-found" });
         return;
       }
-      if (!res.ok) throw new Error(await causeOf(res));
-      const run = (await res.json()) as LoadedRun;
-      if (!mine()) return;
       known.runs.set(key, run.version);
       setRun(key, { status: "ready", run }, { updatedAt: now() });
     } catch (e) {
@@ -166,6 +122,8 @@ export function createLiveStore(transport: Transport, { now = Date.now }: { now?
   }
 
   return {
+    /** The API the store reads through, for the tree under its provider: the verdict write, a report's text. */
+    api,
     getSnapshot: () => state,
     subscribe(listener: () => void) {
       listeners.add(listener);
@@ -173,7 +131,7 @@ export function createLiveStore(transport: Transport, { now = Date.now }: { now?
     },
     start() {
       if (close) return;
-      close = transport.events({ open, tick, error });
+      close = api.events({ open, tick, error });
       void loadList();
     },
     stop() {
@@ -218,13 +176,17 @@ export type LiveStore = ReturnType<typeof createLiveStore>;
 
 const LiveContext = createContext<LiveStore | null>(null);
 
-/** Starts the store's stream for the tree under it and stops it when the tree goes. */
+/** Starts the store's stream for the tree under it and stops it when the tree goes; the tree calls the store's API. */
 export function LiveProvider({ store, children }: { store: LiveStore; children: ReactNode }) {
   useEffect(() => {
     store.start();
     return () => store.stop();
   }, [store]);
-  return <LiveContext.Provider value={store}>{children}</LiveContext.Provider>;
+  return (
+    <LiveContext.Provider value={store}>
+      <ApiProvider value={store.api}>{children}</ApiProvider>
+    </LiveContext.Provider>
+  );
 }
 
 export function useLiveStore(): LiveStore {

@@ -8,12 +8,12 @@ import { render } from "@testing-library/react";
 import { useEffect } from "react";
 import { MemoryRouter, useLocation, type Location } from "react-router-dom";
 import { createApp } from "../../../server/http.ts";
+import type { Transport, VerdictBody } from "@/api";
 import { Loading, UiProvider } from "@/ui";
 import { ClockProvider } from "../../app/clock.tsx";
 import { createLiveStore, LiveProvider, useRun } from "../../app/live.tsx";
 import { fixtureApp, NOW, type FixtureApp } from "../../app/testing.tsx";
 import { FindingsView } from "./index.tsx";
-import { VerdictPostProvider, type PostVerdict, type VerdictBody } from "./verdict.tsx";
 
 export { keyOf, MIN, NOW } from "../../app/testing.tsx";
 
@@ -24,7 +24,7 @@ export function findingsApp(only: number[]) {
   const writer = createApp({ roots: [fx.root], distDir: dist, poll: false, now: () => NOW, git: () => null });
   const sent: VerdictBody[] = [];
   let failing: string | null = null;
-  const post: PostVerdict = async (body) => {
+  const post = async (body: VerdictBody): Promise<Response> => {
     sent.push(body);
     if (failing !== null) return new Response(JSON.stringify({ error: failing }), { status: 500, headers: { "content-type": "application/json" } });
     // the writer knows the findings a test added to the folder since it started: two ticks, the second reads them settled
@@ -36,9 +36,11 @@ export function findingsApp(only: number[]) {
     fx.app.pulse();
     return res;
   };
+  /** The view's transport: the fixture app's, with the verdict write going to the writer. */
+  const transport: Transport = { ...fx.transport, post: (path, body) => (path === "/api/verdict" ? post(body as VerdictBody) : fx.transport.post(path, body)) };
   return {
     fx,
-    post,
+    transport,
     sent,
     /** The next writes answer 500 with this cause; null — they reach the server again. */
     fail(cause: string | null) {
@@ -76,7 +78,7 @@ function Host({ runKey }: { runKey: string }) {
 
 /** The findings view of one run, as the run page mounts it, on a memory router at `path`, the clock at NOW. */
 export function renderFindings(app: FindingsApp, runKey: string, path: string) {
-  const store = createLiveStore(app.fx.transport, { now: () => NOW });
+  const store = createLiveStore(app.transport, { now: () => NOW });
   const probe = { location: null as Location | null };
   function Probe() {
     const location = useLocation();
@@ -89,12 +91,10 @@ export function renderFindings(app: FindingsApp, runKey: string, path: string) {
     <UiProvider>
       <ClockProvider now={NOW}>
         <LiveProvider store={store}>
-          <VerdictPostProvider value={app.post}>
-            <MemoryRouter initialEntries={[path]}>
-              <Host runKey={runKey} />
-              <Probe />
-            </MemoryRouter>
-          </VerdictPostProvider>
+          <MemoryRouter initialEntries={[path]}>
+            <Host runKey={runKey} />
+            <Probe />
+          </MemoryRouter>
         </LiveProvider>
       </ClockProvider>
     </UiProvider>,

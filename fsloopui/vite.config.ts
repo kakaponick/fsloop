@@ -19,5 +19,8 @@ export default defineConfig({
     // Half the logical CPUs: each file is a jsdom page over a live fixture server, and one worker per logical CPU
     // starved the heaviest walks past their 5 s limit under the parallel load.
     maxWorkers: "50%",
+    // A test's limit catches a hang at twice the 5 s a test may take (`tests 4`, `tests 10`): every wait inside it —
+    // 4 s at most (src/ui/test-setup.ts) — then fails as its own assertion, with its message (src/app/waits.test.ts).
+    testTimeout: 10_000,
   },
 });

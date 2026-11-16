@@ -5,9 +5,10 @@
 // field and raises a toast with «Повторить» that stays until closed. A later verdict replaces the earlier one; none
 // is ever cleared. A note being typed is a draft in the view's store, by finding id: it outlives a collapse, a page
 // change and a live re-render, and the detail says, in a line reserved for it, while the note is not saved (ux 4).
-import { createContext, useContext, useId, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useId, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { Finding, UserVerdict } from "../../../shared/model.ts";
 import { VERDICT, type Verdict } from "../../../shared/states.ts";
+import { useApi } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,33 +35,6 @@ export const VERDICTS = Object.keys(VERDICT) as Verdict[];
 export const NOTE_MAX = 4000;
 /** The dialog's lead on a selection: what one choice does to every selected finding. */
 export const SELECTION_PROMPT = "Выберите оценку — она сразу сохранится для каждой выбранной находки вместе с заметкой";
-
-// ── the write: a seam the tests answer through the server's own handler ────────────────────────
-
-export interface VerdictBody {
-  run: string;
-  findings: string[];
-  verdict: Verdict;
-  note: string | null;
-}
-
-export type PostVerdict = (body: VerdictBody) => Promise<Response>;
-
-export const httpPostVerdict: PostVerdict = (body) => fetch("/api/verdict", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-
-const PostContext = createContext<PostVerdict>(httpPostVerdict);
-/** Where the view sends a verdict; the app's default is the server's `POST /api/verdict`. */
-export const VerdictPostProvider = PostContext.Provider;
-
-async function causeOf(res: Response): Promise<string> {
-  try {
-    const body = await res.json();
-    if (body && typeof body.error === "string") return body.error;
-  } catch {
-    // not JSON
-  }
-  return `сервер ответил ${res.status}`;
-}
 
 // ── drafts: the notes being typed, by finding id ────────────────────────────────────────────────
 
@@ -106,7 +80,8 @@ export const useDraft = (verdicts: Pick<Verdicts, "draft" | "subscribe">, id: st
 
 /** The view's verdicts: the run's own, with the user's newer ones laid over them until the run re-reads them. */
 export function useVerdicts(runKey: string, now: number): Verdicts {
-  const post = useContext(PostContext);
+  // the write goes through the API module: `POST /api/verdict`, or the tests' own handler
+  const api = useApi();
   const [overlay, setOverlay] = useState<Readonly<Record<string, UserVerdict>>>({});
   const [drafts] = useState(createDrafts);
   const [version, setVersion] = useState(0);
@@ -130,9 +105,7 @@ export function useVerdicts(runKey: string, now: number): Verdicts {
       let saved: UserVerdict | null = null;
       let cause = "";
       try {
-        const res = await post({ run: runKey, findings: [...ids], verdict, note: kept });
-        if (res.ok) saved = ((await res.json()) as { verdict: UserVerdict }).verdict;
-        else cause = await causeOf(res);
+        saved = await api.verdict({ run: runKey, findings: [...ids], verdict, note: kept });
       } catch (e) {
         cause = e instanceof Error ? e.message : String(e);
       }

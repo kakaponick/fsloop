@@ -13,9 +13,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ReportsView } from "./index.tsx";
 import { reportPath } from "./reader.tsx";
-import type { FetchReport } from "./report-text.ts";
 import { reportTabs, unparsedText } from "./sections.ts";
-import { fixtureApp, handlerReport, keyOf, loadedRun, renderOver } from "./testing.tsx";
+import { fixtureApp, handlerReport, keyOf, loadedRun, renderOver, type FetchReport } from "./testing.tsx";
 
 const N = 40;
 const KEY = keyOf(N);

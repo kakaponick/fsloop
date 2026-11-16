@@ -7,6 +7,7 @@ import { CopyIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import type { Finding, Run } from "../../shared/model.ts";
 import { DECISION, FINDING_STATUS, stageOf, UNIT_STATE } from "../../shared/states.ts";
+import { frameSrc } from "@/api";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { copyText, FrameStrip, Hint, NotRecorded, RunningText, StatusDot, type Frame } from "@/ui";
@@ -16,8 +17,8 @@ import { CAUSE, CONFIDENCE, enumFact, FACT, reportWord, SECTION, verdictValue } 
 
 type ArticleRun = Pick<Run, "findings" | "units" | "launches" | "journal"> & { key: string };
 
-/** A frame of the run, served by the server's frame route. */
-export const frameSrc = (runKey: string, name: string): string => `/api/frame?run=${encodeURIComponent(runKey)}&name=${encodeURIComponent(name)}`;
+// a frame's address is the API module's; named here too until the reports reader imports it from `@/api`
+export { frameSrc };
 
 export interface FindingArticleProps {
   run: ArticleRun;

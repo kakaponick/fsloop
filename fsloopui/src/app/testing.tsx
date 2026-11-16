@@ -13,7 +13,8 @@ import { makeFixtureRoot, PROJECTS, runId } from "../../fixtures/make.ts";
 import { createApp } from "../../server/http.ts";
 import { UiProvider } from "../ui/provider.tsx";
 import { ClockProvider } from "./clock.tsx";
-import { createLiveStore, LiveProvider, type StreamHandlers, type Transport } from "./live.tsx";
+import type { StreamHandlers, Transport } from "@/api";
+import { createLiveStore, LiveProvider } from "./live.tsx";
 import { Shell, SHELL_WIDE } from "./shell.tsx";
 
 /** 16.11.2026 19:41 МСК — the fixture root's «now» and the clock of every rendered shell. */
@@ -93,6 +94,9 @@ export function fixtureApp({ only, empty = false }: { only?: number[]; empty?: b
     get(path) {
       requests.push(path);
       return answer?.(path) ?? handle(path);
+    },
+    post(path, body) {
+      return app.handle(new Request(`http://127.0.0.1:4747${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
     },
     events(handlers) {
       void connect(handlers);
