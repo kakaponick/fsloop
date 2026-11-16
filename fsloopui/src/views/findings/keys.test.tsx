@@ -10,6 +10,7 @@ import { criticReport, lines } from "../../../fixtures/make.ts";
 import { readRun } from "../../../server/run.ts";
 import { runPath } from "../../app/routes.ts";
 import { COLLAPSE_ALL } from "@/finding/words.ts";
+import { COLLAPSE_BLOCKED } from "./index.tsx";
 import { findingsApp, keyOf, MIN, NOW, renderFindings } from "./testing.tsx";
 import { VERDICT_KEYS } from "./verdict.tsx";
 
@@ -30,8 +31,8 @@ const loaded = () => waitFor(() => expect(bodyRows()).toHaveLength(TOTAL), { tim
 const verdictCell = (id: string) => row(id).querySelector("td[data-col=verdict]") as HTMLElement;
 const sentFor = (id: string) => app.sent.filter((b) => b.findings.includes(id));
 
-describe("cand-1 (u4-shape): «Свернуть все»", () => {
-  test("holds its 28 px box in the right cluster before any row opens; shows while one is open; closes every detail", async () => {
+describe("cand-1 (u4-shape), p2 craft-4: «Свернуть все»", () => {
+  test("always shown in its 28 px box; blocked with its reason while no row is open — focusable, inert; closes every detail once one is", async () => {
     const user = userEvent.setup({ delay: null });
     const view = renderFindings(app, KEY, runPath(KEY, { view: "findings" }));
     await loaded();
@@ -39,18 +40,31 @@ describe("cand-1 (u4-shape): «Свернуть все»", () => {
     const button = item.querySelector("button") as HTMLButtonElement;
     expect(COLLAPSE_ALL).toBe("Свернуть все находки");
     expect(button).toHaveAttribute("aria-label", COLLAPSE_ALL);
-    // nothing open: the box is there, unseen and out of the tab order
-    expect(button).toHaveClass("size-7", "invisible");
+    // nothing open: the button is in view, never `invisible` (ui → Blocked action), and says why it cannot run
+    expect(button).toHaveClass("size-7");
+    expect(button).not.toHaveClass("invisible");
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).not.toHaveAttribute("disabled");
+    expect(button).not.toHaveAttribute("tabindex", "-1");
+    expect(COLLAPSE_BLOCKED).toBe("Нет открытых строк — откройте строку");
+    expect(COLLAPSE_BLOCKED.split(" ")).toHaveLength(6);
+    fireEvent.focus(button);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(new RegExp(`^${COLLAPSE_BLOCKED}$`));
+    fireEvent.blur(button);
     const [a, b] = ids();
+    await user.click(button);
+    expect(openIds()).toEqual([]);
     await user.click(row(a).querySelector("td[data-col=summary]") as HTMLElement);
     await user.click(row(b).querySelector("td[data-col=summary]") as HTMLElement);
     expect(openIds()).toEqual([a, b]);
+    // the same box, now an action: a click never moves what was clicked (Strict 1)
     expect(button).toHaveClass("size-7");
-    expect(button).not.toHaveClass("invisible");
+    expect(button).not.toHaveAttribute("aria-disabled");
     await user.click(button);
     expect(openIds()).toEqual([]);
     await waitFor(() => expect(new URLSearchParams(view.probe.location?.search).get("finding")).toBeNull());
-    expect(button).toHaveClass("size-7", "invisible");
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).not.toHaveClass("invisible");
     view.unmount();
   });
 });

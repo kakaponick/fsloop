@@ -3,16 +3,17 @@
 // the view's configuration at the production shape (0 / 14 / 42 units, a 964 px region), the empty states and the
 // strict rules (no layout shift, no skeletons).
 import "../../ui/test-setup.ts";
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterAll, describe, expect, test, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
+import { NOUNS } from "../../../shared/text.ts";
 import { emptyStateText, glossaryLines, readPref } from "@/ui";
-import { assertLayout, fitsRegion, FRAME, headerWidth, isSelectFilter, mergeWidths, runQuery, tableMinWidth, type FilterDef } from "@/table";
+import { assertLayout, fitsRegion, FRAME, headerWidth, isSelectFilter, mergeWidths, runQuery, StatusBar, tableMinWidth, type FilterDef } from "@/table";
 import { runKey as viewKey, type RunPrefs } from "../../table/view-state.ts";
 import { runPath } from "../../app/routes.ts";
 import { COLUMNS, STATE_GLOSSARY } from "./columns.tsx";
 import { BAR_ORDER } from "./index.tsx";
-import { closingIds, DEFAULT_SORT, emptyFor, filtersFor, PRESETS, SEARCH, stateDetail, statesOf, stripStates, unitRows, type UnitRow } from "./query.ts";
+import { closingIds, DEFAULT_SORT, emptyFor, filtersFor, PRESETS, SEARCH, stateDetail, statesOf, stripStates, unitRows, unitStrip, type UnitRow } from "./query.ts";
 import { fixtureApp, keyOf, loadedRun, NOW, renderRun, renderUnits } from "./testing.tsx";
 import { CANDIDATES_WIDEST, candidatesText, UNDECIDED_WIDEST, undecidedText, unitNotFound } from "./words.ts";
 
@@ -346,13 +347,13 @@ describe("the task walk over u1's handler (surfaces/units.md → WALK)", () => {
     expect(readPref<RunPrefs | null>(viewKey("units", KEY), null)?.filters).toEqual({ state: ["blocked"] });
   });
 
-  test("craft-3: the counts strip is the table kit's `StripCount` — each entry's word goes to its title and the screen reader in a narrow bar", async () => {
+  test("craft-3, p2 craft-2: the counts strip is the table kit's `StripCount` — each entry keeps its word on screen, its full statement in its title", async () => {
     const { container } = renderUnits(fx, KEY, runPath(KEY, { view: "units" }));
     await loaded();
     const entries = [...container.querySelectorAll<HTMLElement>("[data-slot=counts-strip] [data-slot=state-count]")];
     expect(entries.map((e) => e.getAttribute("title"))).toEqual(["заблокирован 1", "проверяется 1", "пишется 1", "готов к работе 5", "черновик 4", "закоммичен 30"]);
     for (const e of entries) {
-      expect(e.querySelector("[data-slot=strip-label]")).toHaveClass("@max-5xl/bar:sr-only");
+      expect(e.querySelector("[data-slot=strip-label]")?.className).toBe("");
       expect(e.querySelector("[data-slot=strip-count]")).toHaveClass("min-w-count", "tabular-nums");
       expect(e).toHaveClass("shrink-0");
     }
@@ -485,6 +486,97 @@ describe("the empty states and the production shape (done-criteria 4, 6)", () =>
     expect(stripStates(seen, run.units)).toBe(seen);
     expect(stripStates(seen, [{ state: "land" }, { state: "debug" }])).toEqual([...seen, "land", "debug"]);
     expect(stripStates(["committed"], [{ state: "blocked" }])).toEqual(["committed", "blocked"]);
+  });
+
+  describe("p2-verdict craft-1, craft-2: the counts strip goes compact by its own room — every count whole, every entry worded", () => {
+    // The units bar as p2-verdict-units.png (1440: x 336–1405, 1069 px) and p2-verdict-units-1280.png (1280: x 336–1245,
+    // 909 px) measure it, and its neighbours there: «42 юнита», the selection's reserve, «обновлено меньше минуты назад».
+    const SHOWN = 51;
+    const SELECTED = 115;
+    const AGE = 187;
+    /** A strip word at 12 px: the six state words as p2-verdict-units.png measures them; any other by that frame's
+     * letters — 6.8 px a letter, 3.5 a space. */
+    const FRAME_WORDS: Record<string, number> = { заблокирован: 79, проверяется: 71, пишется: 48, "готов к работе": 82, черновик: 55, закоммичен: 68 };
+    const word = (w: string) => FRAME_WORDS[w] ?? Math.ceil([...w].reduce((s, ch) => s + (ch === " " ? 3.5 : 6.8), 0));
+    /** An entry: the 7 px dot, 6, its word, 6, the three-digit count box (21 px). */
+    const entry = (w: string) => 7 + 6 + word(w) + 6 + 21;
+    const rect = (w: number) => ({ width: w, height: 32, x: 0, y: 0, top: 0, left: 0, right: w, bottom: 32, toJSON: () => ({}) }) as DOMRect;
+
+    function bar(width: number) {
+      const callbacks: (() => void)[] = [];
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          constructor(cb: () => void) {
+            callbacks.push(cb);
+          }
+          observe() {}
+          disconnect() {}
+        },
+      );
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+        const d = this.dataset;
+        if (d.slot === "status-bar") return rect(width);
+        if (d.slot === "shown") return rect(SHOWN);
+        if (d.slot === "selected") return rect(SELECTED);
+        if (d.slot === "age") return rect(AGE);
+        if (d.stripSizer === "more") return rect(word(d.label ?? ""));
+        if (d.stripSizer) return rect(entry(d.label ?? ""));
+        return rect(0);
+      });
+      const view = render(
+        <StatusBar noun={NOUNS.unit} shown={42} total={42} strip={unitStrip(statesOf(run.units), run.units)} selected={{ count: 0, noun: { forms: NOUNS.unit, gender: "m" } }} updatedAt={new Date(NOW - 20_000).toISOString()} now={NOW} order={BAR_ORDER} />,
+      );
+      act(() => callbacks.forEach((cb) => cb()));
+      const strip = view.container.querySelector("[data-slot=counts-strip]") as HTMLElement;
+      const shown = [...strip.querySelectorAll<HTMLElement>(":scope > [data-slot=state-count]")];
+      const more = strip.querySelector<HTMLElement>(":scope > [data-slot=strip-more]");
+      const room = width - SHOWN - SELECTED - AGE - 3 * 16;
+      const used = shown.reduce((s, e) => s + entry(e.querySelector("[data-slot=strip-label]")?.textContent ?? ""), 0) + (more ? word("ещё 888 юнитов") : 0) + 12 * (shown.length + (more ? 1 : 0) - 1);
+      return { strip, texts: shown.map((e) => e.textContent), titles: shown.map((e) => e.title), more, room, used };
+    }
+    afterEach(() => {
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    });
+
+    test("1069 px (1440): the six states do not fit beside the reserve and the age, so the strip reads the «Вид» groups — every count whole, every entry with its word", () => {
+      const at = bar(1069);
+      // the full form the frame clipped: six entries, 703 px against 668 of room
+      expect(["заблокирован", "проверяется", "пишется", "готов к работе", "черновик", "закоммичен"].reduce((s, w) => s + entry(w), 0) + 5 * 12).toBeGreaterThan(at.room);
+      expect(at.texts).toEqual(["заблокированы1", "в работе2", "не начаты9", "закоммичены30"]);
+      expect(at.more).toBeNull();
+      expect(at.used).toBeLessThanOrEqual(at.room);
+      // a group's title names the states it holds
+      expect(at.titles).toEqual(["заблокирован 1", "проверяется 1, пишется 1", "готов к работе 5, черновик 4", "закоммичен 30"]);
+    });
+
+    test("909 px (1280): the same groups, each with its word — never a bare dot and number", () => {
+      const at = bar(909);
+      expect(at.texts).toEqual(["заблокированы1", "в работе2", "не начаты9", "закоммичены30"]);
+      for (const t of at.texts) expect(t).toMatch(/^\D+\d+$/);
+      expect(at.used).toBeLessThanOrEqual(at.room);
+    });
+
+    test("860 px (the 900 px band): the groups that fit, then «ещё N юнитов» for the rest — worded, its states in its title", () => {
+      const at = bar(860);
+      expect(at.texts).toEqual(["заблокированы1", "в работе2", "не начаты9"]);
+      expect(at.more).toHaveTextContent(/^ещё 30 юнитов$/);
+      expect(at.more).toHaveAttribute("title", "закоммичены 30");
+      expect(at.used).toBeLessThanOrEqual(at.room);
+      // Strict 1: the fold is fitted at its widest three-digit form, so a count that grows never pushes past the room;
+      // the sizers are out of the flow, unseen and unread
+      const sizers = at.strip.querySelector("[data-slot=strip-sizers]") as HTMLElement;
+      expect(sizers).toHaveAttribute("aria-hidden", "true");
+      expect(sizers).toHaveClass("invisible", "absolute");
+      expect(sizers.textContent).toBe("");
+      expect(sizers.querySelector("[data-strip-sizer=more]")).toHaveAttribute("data-label", "ещё 888 юнитов");
+    });
+
+    test("1600 px: the room holds every state — the full form, each state's word and count", () => {
+      const at = bar(1600);
+      expect(at.texts).toEqual(["заблокирован1", "проверяется1", "пишется1", "готов к работе5", "черновик4", "закоммичен30"]);
+    });
   });
 
   test("the held strip's line is reserved before anything waits in it (Strict 1)", () => {

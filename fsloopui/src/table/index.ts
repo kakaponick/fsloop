@@ -29,6 +29,6 @@ export {
 } from "./query.ts";
 export { actionsFor, copyAction, menuHeader, OPEN_ACTION, RowMenu, rowMenuGroups, type ActionScope, type RowAction } from "./row-menu.tsx";
 export { Highlight, SearchBox, type SearchBoxProps } from "./search.tsx";
-export { ageText, DEFAULT_BAR_ORDER, Pager, selectedText, shownText, StatusBar, StripCount, type BarOrder, type BarSlot, type PagerProps, type StatusBarProps } from "./status-bar.tsx";
+export { ageText, DEFAULT_BAR_ORDER, Pager, selectedText, shownText, StatusBar, StripCount, stripFit, type BarOrder, type BarSlot, type PagerProps, type StatusBarProps, type StripEntry, type StripFit, type StripForms } from "./status-bar.tsx";
 export { AdaptiveToolbar, type ToolbarItem } from "./toolbar.tsx";
 export { pushHistory, useRunView, useTableView, type RunPrefs, type TablePrefs } from "./view-state.ts";

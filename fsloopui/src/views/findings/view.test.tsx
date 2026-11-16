@@ -10,7 +10,7 @@ import type { Finding } from "../../../shared/model.ts";
 import { FINDING_STATUS, SEVERITY, VERDICT, type Verdict } from "../../../shared/states.ts";
 import { readRun } from "../../../server/run.ts";
 import { emptyStateText, glossaryLines, UiProvider } from "@/ui";
-import { ANY_LABEL, assertLayout, CUSTOM_LABEL, fitsRegion, headerWidth, isSelectFilter, mergeWidths, pack, PRESET_LABEL, runQuery, type FilterDef, type PackItem } from "@/table";
+import { ANY_LABEL, assertLayout, CUSTOM_LABEL, fitsRegion, FRAME, headerWidth, isSelectFilter, mergeWidths, pack, PRESET_LABEL, runQuery, SELECT_WIDTH, type FilterDef, type PackItem } from "@/table";
 import { FLEX_FLOOR, GAP, OVERFLOW_WIDTH } from "@/table/toolbar.tsx";
 import { CAUSE, CONFIDENCE, countFindings, enumFact, FACT, FindingArticle, findingNotFound, openFindings, reportWord, SECTION, stateText, textSections } from "@/finding";
 import { OBJECTED } from "@/finding/facets.ts";
@@ -76,6 +76,24 @@ describe("the view's configuration at the production shape", () => {
     const visible = COLUMNS.filter((c) => !c.hidden);
     expect(fitsRegion(visible, mergeWidths(COLUMNS, null), REGION)).toBe(true);
     expect(fitsRegion(visible, mergeWidths(COLUMNS, null), REGION_1440)).toBe(true);
+  });
+
+  test("p2 craft-3: each fixed column at its widest ordinary value on the 723-finding run, the excess to «Находка» — 334 px of sentence at 1440", () => {
+    // «ID»: the local id in mono at 12 px, 7.5 px a glyph — p2-verdict-shell.png holds «improve-12» in about 75 px
+    const mono = (text: string) => Math.ceil(text.length * 7.5);
+    expect(mono("improve-12")).toBe(75);
+    const locals = new Set(run.findings.map((f) => f.local));
+    expect(Math.max(...[...locals].map(mono))).toBe(mono("runtime-10"));
+    expect(widthOf("id")).toBe(92);
+    expect(mono("runtime-10") + CELL_PAD).toBeLessThanOrEqual(widthOf("id"));
+    expect(headerWidth("ID")).toBeLessThanOrEqual(widthOf("id"));
+    // «Серьёзность»: its widest value, «не записано» after its dot, under its header — the header is the wider
+    expect(textWidth("не записано") + DOT + CELL_PAD).toBeLessThanOrEqual(widthOf("severity"));
+    // the sentence's room at 1440 beside the 316 px sidebar: the region less the frame, the checkbox and the fixed columns
+    const fixed = COLUMNS.filter((c) => !c.hidden && c.width !== undefined).reduce((s, c) => s + (c.width ?? 0), 0);
+    expect(REGION_1440 - FRAME - SELECT_WIDTH - fixed).toBe(334);
+    // the 112 px «ID» gave it 314
+    expect(REGION_1440 - FRAME - SELECT_WIDTH - fixed - (112 - widthOf("id"))).toBe(314);
   });
 
   test("gap 6 (f12; table #10): «Оценка» clears its widest value, «не та серьёзность», by the same measure — the table still whole at 1280 and 1440", () => {

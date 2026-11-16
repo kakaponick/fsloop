@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import "../ui/test-setup.ts";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Profiler, useState, type ReactElement } from "react";
@@ -11,6 +13,7 @@ import type { FilterDef, Preset, SearchDef } from "./query.ts";
 import { copyAction, type RowAction } from "./row-menu.tsx";
 import { SearchBox } from "./search.tsx";
 import { StatusBar, StripCount } from "./status-bar.tsx";
+import { AdaptiveToolbar, FLEX_CAP } from "./toolbar.tsx";
 
 interface F {
   id: string;
@@ -440,6 +443,37 @@ describe("rows expand in place (rules/ui → Tables 3, Live data 3)", () => {
     expect(cell).toHaveClass("bg-muted");
     expect(cell.className).not.toMatch(/bg-muted\//);
   });
+
+  test("p1 cand-11 (partial in p2): an open row and its detail are one block, told from the table in dark — a 1 px muted-ink frame around both; a link's target framed in ink", () => {
+    renderUi(view({ open: ["f-001", "f-003"], target: "f-003" }));
+    const cell = (id: string) => document.querySelector(`tr[data-detail-for="${id}"] > td`) as HTMLElement;
+    // the open row draws the frame's top and sides, its detail the sides and the bottom
+    expect(row("f-001")).toHaveClass("[--frame:var(--muted-foreground)]");
+    expect(row("f-001").className).toContain("shadow-[inset_0_1px_0_0_var(--frame),inset_1px_0_0_0_var(--frame),inset_-1px_0_0_0_var(--frame)]");
+    expect(cell("f-001")).toHaveClass("bg-muted", "[--frame:var(--muted-foreground)]");
+    expect(cell("f-001").className).toContain("shadow-[inset_0_-1px_0_0_var(--frame),inset_1px_0_0_0_var(--frame),inset_-1px_0_0_0_var(--frame)]");
+    // a closed row has none
+    expect(row("f-002").className).not.toContain("--frame");
+    // a link's target: its row keeps the target mark, and the mark's ink frames its detail too
+    expect(row("f-003")).toHaveAttribute("data-target");
+    expect(cell("f-003")).toHaveClass("[--frame:var(--foreground)]");
+
+    // the dark theme's values: the muted ground alone is about 1.1:1 on the paper (p2-verdict-findings.png); the
+    // frame's muted ink clears the 3:1 a boundary needs (WCAG 1.4.11) on both
+    // the package root is the runner's cwd; jsdom's module URL is not a file URL
+    const css = readFileSync(join(process.cwd(), "src/styles/index.css"), "utf8").replace(/\r\n/g, "\n");
+    const darkBlock = css.slice(css.indexOf("@media (prefers-color-scheme: dark) {"));
+    const token = (name: string) => (darkBlock.match(new RegExp(`${name}:\\s*(#[0-9a-f]{6})`)) as RegExpMatchArray)[1];
+    const lum = (hex: string) => {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const contrast = (a: string, b: string) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05);
+    expect([token("--background"), token("--muted"), token("--muted-foreground")]).toEqual(["#101111", "#1b1c1c", "#98988f"]);
+    expect(contrast(token("--muted"), token("--background"))).toBeLessThan(1.2);
+    expect(contrast(token("--muted-foreground"), token("--muted"))).toBeGreaterThanOrEqual(3);
+    expect(contrast(token("--muted-foreground"), token("--background"))).toBeGreaterThanOrEqual(3);
+  });
 });
 
 describe("a row brought into view (craft-1; rules/ui → Conventions 12)", () => {
@@ -489,6 +523,49 @@ describe("a row brought into view (craft-1; rules/ui → Conventions 12)", () =>
     // f-007 under f-001's detail: 132 + 32 + 240 + 5 × 32 = 564, its detail past the box's end → 432 px down
     expect(scrollBy).toHaveBeenCalledWith({ top: 432 });
   });
+
+  // p1-verdict craft-1, unresolved in p2: the box is measured only after the first render, so a link's page is first
+  // taken at 50 rows, then «по экрану» measures 14 and the page size changes under the link. The order of events is
+  // the frame's: paging from 50, then the measured 14 — never a table already at its final size.
+  for (const [target, page] of [
+    ["f-151", "стр. 11 из 15"],
+    ["f-166", "стр. 12 из 15"],
+  ] as const)
+    test(`p1 craft-1: a link to ${target} while «по экрану» goes from 50 rows to the measured 14 — its page, its row under the sticky header, its detail in view`, () => {
+      let scrolled = 0;
+      const scrollBy = vi.fn(({ top }: { top: number }) => {
+        scrolled += top;
+      });
+      (HTMLElement.prototype as unknown as { scrollBy: unknown }).scrollBy = scrollBy;
+      // the box at 100 px, 480 px inside: (480 − 32) / 32 = 14 rows; its header sticky; rows and details move as it scrolls
+      vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
+        return this.dataset.slot === "table-scroll" ? 480 : 0;
+      });
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+        const rect = (top: number, height: number) => ({ top, bottom: top + height, height, width: 0, x: 0, y: top, left: 0, right: 0, toJSON: () => ({}) }) as DOMRect;
+        if (this.dataset.slot === "table-scroll") return rect(100, 480);
+        if (this.tagName === "THEAD") return rect(100, 32);
+        if (this.tagName === "TR" && this.parentElement?.tagName === "TBODY") {
+          let top = 132 - scrolled;
+          for (const tr of this.parentElement.children) {
+            if (tr === this) break;
+            top += (tr as HTMLElement).dataset.detailFor ? 240 : 32;
+          }
+          return rect(top, this.dataset.detailFor ? 240 : 32);
+        }
+        return rect(0, 0);
+      });
+      renderUi(view({ rows: make(200), target, open: [target] }));
+      expect(pageIds()).toHaveLength(14);
+      expect(screen.getByRole("navigation", { name: "Страницы" })).toHaveTextContent(page);
+      expect(pageIds()).toContain(target);
+      expect(row(target)).toHaveAttribute("data-target");
+      // the row's top on the header's bottom: the article under it fills the box
+      expect(row(target).getBoundingClientRect().top).toBe(132);
+      const detailRow = document.querySelector(`tr[data-detail-for="${target}"]`) as HTMLElement;
+      expect(detailRow.getBoundingClientRect().top).toBe(164);
+      expect(detailRow.getBoundingClientRect().bottom).toBeLessThanOrEqual(100 + 480);
+    });
 
   test("gap 5 (f12): a row the caller opens — a verdict key moving on to the next row — is brought into view as one the user expands", () => {
     const scrollBy = layout();
@@ -614,6 +691,39 @@ describe("the adaptive toolbar (table #11, #12, #14; rules/ui → Conventions 16
     expect(sizer.textContent).toBe("");
     expect(sizer).toHaveClass("invisible", "absolute", "px-1.5", "whitespace-nowrap");
     expect(box.querySelector("input")).toHaveAttribute("data-flex-field");
+  });
+
+  test("p2 craft-2 (conventions): a placeholder wider than the 20 rem cap raises the search's cap to its floor — «Задача, решение, пример, правило», 219 px, whole", () => {
+    const callbacks: (() => void)[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(cb: () => void) {
+          callbacks.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    // p2-verdict-conventions.png: the field capped at 320 px leaves about 212 px of text after its chrome, and the
+    // 219 px placeholder reads «…правилс»; the chrome is the item less its field, the field's padding 6 px a side
+    const PLACEHOLDER = "Задача, решение, пример, правило";
+    const TEXT = 219;
+    const PADDING = 12;
+    const CHROME = 96;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const w =
+        this.dataset.slot === "adaptive-toolbar" ? 1084 : this.dataset.toolbarItem === "search" ? 320 : this.hasAttribute("data-flex-field") ? 320 - CHROME : this.hasAttribute("data-flex-sizer") ? TEXT + PADDING : 0;
+      return { width: w, height: 28, x: 0, y: 0, top: 0, left: 0, right: w, bottom: 28, toJSON: () => ({}) } as DOMRect;
+    });
+    const { container } = renderUi(
+      <AdaptiveToolbar label="Поиск по соглашениям" items={[{ id: "search", kind: "pinned", flex: true, node: <SearchBox value="" onChange={() => {}} placeholder={PLACEHOLDER} history={[]} onCommit={() => {}} shortcut={false} /> }]} />,
+    );
+    act(() => callbacks.forEach((cb) => cb()));
+    const item = container.querySelector("[data-toolbar-item=search]") as HTMLElement;
+    // the cap becomes the floor: the chrome and the whole placeholder at the field's padding
+    expect(item.style.maxWidth).toBe(`${CHROME + TEXT + PADDING}px`);
+    expect(CHROME + TEXT + PADDING).toBeGreaterThan(FLEX_CAP);
   });
 
   test("the last filters fold into «…» as the toolbar narrows; a folded filter with a value marks «…»", async () => {
@@ -744,9 +854,9 @@ describe("the status bar (table #8; the design check)", () => {
   });
 
   test("no split: the counts strip takes the pager's slot", () => {
-    renderUi(view({ defaultPaged: false, counts: (rows) => <span>{rows.length} в счёте</span> }));
+    renderUi(view({ defaultPaged: false, counts: (rows) => ({ entries: [{ key: "kept", tone: "neutral", label: "в счёте", count: rows.length }] }) }));
     expect(screen.queryByRole("navigation", { name: "Страницы" })).toBeNull();
-    expect(screen.getByText("60 в счёте")).toBeInTheDocument();
+    expect(document.querySelector("[data-slot=counts-strip] > [data-slot=state-count]")).toHaveTextContent(/^в счёте60$/);
     expect(pageIds()).toHaveLength(60);
   });
 
@@ -765,7 +875,7 @@ describe("the status bar (table #8; the design check)", () => {
     expect(bar.querySelector("[data-slot=age]")).toHaveClass("shrink-0");
     expect(bar.querySelector("[data-slot=shown]")).toHaveClass("shrink-0");
     expect(bar.querySelector("[data-slot=counts-strip]")).toHaveClass("min-w-0", "overflow-hidden");
-    expect(bar).toHaveClass("@container/bar", "h-8");
+    expect(bar).toHaveClass("h-8");
   });
 
   test("craft-3: by default paging leads and the age alone is at the right end; a list that does not select reserves no selection", () => {
@@ -775,7 +885,7 @@ describe("the status bar (table #8; the design check)", () => {
     expect(bar.querySelector("[data-slot=age]")).toHaveClass("ml-auto", "shrink-0");
   });
 
-  test("craft-3: a strip entry goes compact in a narrow bar — its dot and count stay, its word goes to the title and the screen reader", () => {
+  test("p2 craft-2: a strip entry is always its dot, its word and its count — never a bare number, whatever the bar's width", () => {
     const { container } = renderUi(
       <>
         <StripCount tone="success" label="закоммичен" count={30} />
@@ -785,7 +895,8 @@ describe("the status bar (table #8; the design check)", () => {
     const [done, blocked] = [...container.querySelectorAll<HTMLElement>("[data-slot=state-count]")];
     expect(done).toHaveAttribute("title", "закоммичен 30");
     expect(done).toHaveTextContent(/^закоммичен30$/);
-    expect(done.querySelector("[data-slot=strip-label]")).toHaveClass("@max-5xl/bar:sr-only");
+    // the word is never sent to the screen reader alone: no class hides it at any width
+    expect(done.querySelector("[data-slot=strip-label]")?.className).toBe("");
     expect(done.querySelector("[data-slot=strip-count]")).toHaveClass("min-w-count", "tabular-nums", "text-foreground");
     expect(done.querySelector("[data-slot=dot]")).toHaveAttribute("data-tone", "success");
     // a state the filters empty keeps its slot: a neutral dot and a muted 0

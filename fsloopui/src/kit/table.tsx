@@ -8,7 +8,8 @@ import { FINDING_STATUS, SEVERITY, UNIT_STATE, VERDICT, type FindingStatus, type
 import { NOUNS } from "../../shared/text.ts";
 import { Button } from "@/components/ui/button";
 import { Dash, glossaryFrom, notify, RunningText, StatusDot } from "@/ui";
-import { copyAction, DataTable, StripCount, type BarOrder, type FilterDef, type Preset, type RowAction, type SearchDef, type TableColumn } from "@/table";
+import { copyAction, DataTable, type BarOrder, type FilterDef, type Preset, type RowAction, type SearchDef, type TableColumn } from "@/table";
+import { unitStrip } from "../views/units/query.ts";
 
 const NOW = "2026-11-16T07:00:00Z";
 const UPDATED = "2026-11-16T06:57:00Z";
@@ -173,13 +174,13 @@ const UNIT_ROW_ID = (r: KitUnit) => r.id;
 const UNIT_TITLE = (r: KitUnit) => `${r.id} — ${r.title}`;
 const UNIT_NOUN = { forms: NOUNS.unit, gender: "m" as const };
 
-function UnitCounts({ rows }: { rows: readonly KitUnit[] }): ReactNode {
-  const by = new Map<UnitState, number>();
-  for (const r of rows) by.set(r.state, (by.get(r.state) ?? 0) + 1);
-  return (Object.keys(UNIT_STATE) as UnitState[])
-    .filter((s) => by.has(s))
-    .map((s) => <StripCount key={s} tone={UNIT_STATE[s].tone} label={UNIT_STATE[s].compact} count={by.get(s) ?? 0} />);
-}
+/** The units view's strip over the kit's units: the states present, in the map's order, and the «Вид» groups the
+ * status bar falls back to when its room cannot hold every state whole. */
+const unitCounts = (rows: readonly KitUnit[]) =>
+  unitStrip(
+    (Object.keys(UNIT_STATE) as UnitState[]).filter((s) => rows.some((r) => r.state === s)),
+    rows,
+  );
 
 /** The units view's order: «42 юнита» first, the strip after it, the selection and the age at the right end. */
 const UNIT_BAR_ORDER: BarOrder = { start: ["shown", "paging"], end: ["selected", "age"] };
@@ -256,7 +257,7 @@ export function TableSection() {
             defaultSort={{ id: "pass", desc: true }}
             defaultPaged={false}
             empty={{ form: "not-yet", step: "decompose" }}
-            counts={(rows) => <UnitCounts rows={rows} />}
+            counts={unitCounts}
             barOrder={UNIT_BAR_ORDER}
             updatedAt={UPDATED}
             now={NOW}

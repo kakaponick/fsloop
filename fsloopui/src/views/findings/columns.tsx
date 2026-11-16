@@ -33,7 +33,9 @@ export const COLUMNS: readonly TableColumn<Finding>[] = [
     cell: (f) => <SeverityCell finding={f} />,
     text: (f) => stateWord(severityState(f)),
   },
-  { id: "id", label: "ID", width: 112, primary: true, rank: (f) => f.id, cell: (f, c) => <span className="font-mono text-xs">{c.hl(f.local)}</span>, text: (f) => f.id },
+  // the widest local id of the 723-finding run, «runtime-10», in 12 px mono (75 px) and the cell's padding; the 20 px
+  // it had past that go to «Находка» (p2 craft-3)
+  { id: "id", label: "ID", width: 92, primary: true, rank: (f) => f.id, cell: (f, c) => <span className="font-mono text-xs">{c.hl(f.local)}</span>, text: (f) => f.id },
   {
     id: "summary",
     label: "Находка",

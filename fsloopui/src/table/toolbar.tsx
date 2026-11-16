@@ -49,19 +49,22 @@ function Sizer({ text }: { text: string }) {
 }
 
 export const GAP = 8;
-/** The search's least floor and its cap (ui → Widths: a toolbar search is flexible with a cap): `max-w-80`. */
+/** The search's least floor and its cap (ui → Widths: a toolbar search is flexible with a cap): `max-w-80`, raised to
+ * the item's floor where its placeholder needs more (`flexFloor`). */
 export const FLEX_FLOOR = 192;
 export const FLEX_CAP = 320;
 
 /** A flexible item's floor (table #12, #14): its chrome — the item less its field — and the text its field must show
  * whole, measured on its sizer (the search's placeholder, `data-flex-sizer`, at the field's padding); never under
- * `FLEX_FLOOR`, never past the cap. An item without a field counts at `FLEX_FLOOR`. */
+ * `FLEX_FLOOR`. A floor past `FLEX_CAP` raises the item's cap to it, so a long placeholder is never cut (p2 craft-2:
+ * «Задача, решение, пример, правило» read «…правилс» under the 20 rem cap). An item without a field counts at
+ * `FLEX_FLOOR`. */
 export function flexFloor(node: HTMLElement): number {
   const field = node.querySelector<HTMLElement>("[data-flex-field]");
   const sizer = node.querySelector<HTMLElement>("[data-flex-sizer]");
   if (!field || !sizer) return FLEX_FLOOR;
   const chrome = node.getBoundingClientRect().width - field.getBoundingClientRect().width;
-  return Math.min(FLEX_CAP, Math.max(FLEX_FLOOR, Math.ceil(chrome + sizer.getBoundingClientRect().width)));
+  return Math.max(FLEX_FLOOR, Math.ceil(chrome + sizer.getBoundingClientRect().width));
 }
 export const OVERFLOW_WIDTH = 28;
 export const MORE_LABEL = "Ещё фильтры";
@@ -79,6 +82,8 @@ export function AdaptiveToolbar({ items, label, className }: AdaptiveToolbarProp
   const root = useRef<HTMLDivElement | null>(null);
   const widths = useRef(new Map<string, number>());
   const [folded, setFolded] = useState<readonly string[]>([]);
+  // a flexible item's cap where its floor is past `FLEX_CAP`
+  const [caps, setCaps] = useState<Readonly<Record<string, number>>>({});
   const ids = items.map((i) => `${i.id}:${i.kind}`).join("|");
 
   useLayoutEffect(() => {
@@ -87,10 +92,12 @@ export function AdaptiveToolbar({ items, label, className }: AdaptiveToolbarProp
     const measure = () => {
       const available = el.getBoundingClientRect().width;
       if (available <= 0) return; // not laid out (hidden, or a test without layout): fold nothing
+      const raised: Record<string, number> = {};
       for (const node of el.querySelectorAll<HTMLElement>("[data-toolbar-item]")) {
         const id = node.dataset.toolbarItem as string;
         const w = node.dataset.flex === "" ? flexFloor(node) : node.getBoundingClientRect().width;
         if (w > 0) widths.current.set(id, w);
+        if (node.dataset.flex === "" && w > FLEX_CAP) raised[id] = w;
       }
       const next = pack(
         items.map((i) => ({ id: i.id, kind: i.kind, width: widths.current.get(i.id) ?? 0 })),
@@ -98,7 +105,10 @@ export function AdaptiveToolbar({ items, label, className }: AdaptiveToolbarProp
         { gap: GAP, overflow: OVERFLOW_WIDTH },
       );
       // commit before paint: the line never shows unfolded and then jumps
-      flushSync(() => setFolded((prev) => (prev.join("|") === next.join("|") ? prev : next)));
+      flushSync(() => {
+        setFolded((prev) => (prev.join("|") === next.join("|") ? prev : next));
+        setCaps((prev) => (JSON.stringify(prev) === JSON.stringify(raised) ? prev : raised));
+      });
     };
     const observer = new ResizeObserver(measure);
     observer.observe(el);
@@ -147,19 +157,20 @@ export function AdaptiveToolbar({ items, label, className }: AdaptiveToolbarProp
   return (
     <div ref={root} role="toolbar" aria-label={label} data-slot="adaptive-toolbar" className={cn("flex h-7 min-w-0 shrink-0 items-center gap-2 overflow-hidden", className)}>
       {items.map((item, i) => (
-        <ItemSlot key={item.id} item={item} hidden={hidden.has(item.id)} after={i === lastFoldable && folded.length > 0 ? overflow : null} />
+        <ItemSlot key={item.id} item={item} hidden={hidden.has(item.id)} cap={caps[item.id]} after={i === lastFoldable && folded.length > 0 ? overflow : null} />
       ))}
     </div>
   );
 }
 
-function ItemSlot({ item, hidden, after }: { item: ToolbarItem; hidden: boolean; after: ReactNode }) {
+function ItemSlot({ item, hidden, cap, after }: { item: ToolbarItem; hidden: boolean; cap: number | undefined; after: ReactNode }) {
   return (
     <>
       {!hidden && (
         <div
           data-toolbar-item={item.id}
           data-flex={item.flex ? "" : undefined}
+          style={cap === undefined ? undefined : { maxWidth: cap }}
           className={cn("flex shrink-0 items-center", item.values && "grid [&>*]:[grid-area:1/1] [&>*]:w-full", item.flex && "max-w-80 min-w-48 flex-1 shrink", item.end && "ml-auto")}
         >
           {item.node}

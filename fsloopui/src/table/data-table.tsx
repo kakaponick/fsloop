@@ -18,7 +18,7 @@ import { CUSTOM_LABEL, FilterControl, filterSummary, PRESET_LABEL, PresetSelect 
 import { FILL_ROWS, nextSort, pageOf, pageOfIndex, runQuery, tokens as toTokens, type FilterDef, type Preset, type Rank, type RowsPerPage, type SearchDef, type SortSpec } from "./query.ts";
 import { OPEN_ACTION, pinnable, RowMenu, type RowAction } from "./row-menu.tsx";
 import { Highlight, SearchBox } from "./search.tsx";
-import { StatusBar, type BarOrder } from "./status-bar.tsx";
+import { StatusBar, type BarOrder, type StripForms } from "./status-bar.tsx";
 import { AdaptiveToolbar, type ToolbarItem } from "./toolbar.tsx";
 import { pushHistory, useRunView, useTableView } from "./view-state.ts";
 
@@ -78,8 +78,8 @@ export interface DataTableProps<R> {
   /** Pages on by default (50 a page); the units table shows every row. */
   defaultPaged?: boolean;
   empty: EmptyWhen;
-  /** The counts strip of the status bar when the list is not split: dots with counts over the kept rows. */
-  counts?: (rows: readonly R[]) => ReactNode;
+  /** The counts strip of the status bar when the list is not split: its forms over the kept rows. */
+  counts?: (rows: readonly R[]) => StripForms;
   /** The status bar's order, when the view's differs from the bar's own (a module-level constant). */
   barOrder?: BarOrder;
   /** Toolbar facts, at the right end. */
@@ -111,6 +111,14 @@ export const SELECT_ROW = "Выбрать строку";
 const ROW_HEIGHT = 32;
 /** «по экрану» before the table's box is measured (a test without layout). */
 const FILL_FALLBACK = 50;
+
+/** An open row and its detail read as one block (p1 cand-11): the muted ground alone is about 1.1:1 on the dark
+ * paper, so a 1 px frame in muted ink (over 3:1 on both) runs round them — the row draws its top and sides, the
+ * detail its sides and bottom; a link's target keeps its ink mark on the row, and the ink frames its detail too. */
+const FRAME_MUTED = "[--frame:var(--muted-foreground)]";
+const FRAME_TARGET = "[--frame:var(--foreground)]";
+const OPEN_ROW_FRAME = "shadow-[inset_0_1px_0_0_var(--frame),inset_1px_0_0_0_var(--frame),inset_-1px_0_0_0_var(--frame)]";
+const DETAIL_FRAME = "shadow-[inset_0_-1px_0_0_var(--frame),inset_1px_0_0_0_var(--frame),inset_-1px_0_0_0_var(--frame)]";
 
 /** The events that end a drag over the selection column. */
 const ENDS = ["pointerup", "pointercancel", "blur"] as const;
@@ -170,9 +178,14 @@ export function DataTable<R>(props: DataTableProps<R>) {
   const [pageState, setPageState] = useState(props.page ?? 1);
   const [seenSize, setSeenSize] = useState(size);
   if (size !== seenSize) {
-    // a new page size keeps the first row of the page in view
+    // a new page size keeps a link's row in view while it is on the page — «по экрану» measures the box only after
+    // the first render, so a link's page is first taken at 50 rows (p1 craft-1) — and otherwise the page's first row
     setSeenSize(size);
-    if (typeof seenSize === "number") setPageState(pageOfIndex((pageState - 1) * seenSize, size));
+    if (typeof seenSize === "number") {
+      const at = target ? display.indexOf(target) : -1;
+      const keep = at >= 0 && pageOfIndex(at, seenSize) === pageState ? at : (pageState - 1) * seenSize;
+      setPageState(pageOfIndex(keep, size));
+    }
   }
   const [seenPageProp, setSeenPageProp] = useState(props.page);
   if (props.page !== undefined && props.page !== seenPageProp) {
@@ -527,9 +540,11 @@ export function DataTable<R>(props: DataTableProps<R>) {
   };
   const targetOnPage = target !== null && pageIds.includes(target);
   useLayoutEffect(() => {
-    // once per link: the row it names, on its page
+    // once per link and page size: the row it names, on its page — again when «по экрану» measures the box and the
+    // page re-forms around it, so the scroll is taken on the final layout, not the 50-row one (p1 craft-1)
     if (targetOnPage && target) scrollToTop(target);
-  }, [targetOnPage, target]);
+    // `size`: the measured page size is the layout's change; the scroll reads the DOM it produced
+  }, [targetOnPage, target, size]);
   const handledOpen = useRef<{ id: string } | null>(null);
   useLayoutEffect(() => {
     let rid = expanded.current;
@@ -626,7 +641,7 @@ export function DataTable<R>(props: DataTableProps<R>) {
                       onClick={(e) => onRowClick(e, row)}
                       onFocus={(e) => e.target === e.currentTarget && setFocusId(rid)}
                       onContextMenu={() => onContextMenu(rid)}
-                      className={cn("h-8 outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset data-[menu]:bg-muted", pin ? "cursor-pointer" : "cursor-default", mp.className)}
+                      className={cn("h-8 outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset data-[menu]:bg-muted", pin ? "cursor-pointer" : "cursor-default", isOpen && [FRAME_MUTED, OPEN_ROW_FRAME], mp.className)}
                     >
                       <TableCell
                         className="border-b px-2 py-0"
@@ -679,7 +694,7 @@ export function DataTable<R>(props: DataTableProps<R>) {
                     </TableRow>
                     {isOpen && detail && (
                       <TableRow data-detail-for={rid} className="hover:bg-transparent">
-                        <TableCell colSpan={ordered.length + (slack ? 1 : 2)} className="border-b bg-muted p-0 whitespace-normal">
+                        <TableCell colSpan={ordered.length + (slack ? 1 : 2)} className={cn("border-b bg-muted p-0 whitespace-normal", rid === target ? FRAME_TARGET : FRAME_MUTED, DETAIL_FRAME)}>
                           <div className="px-4 py-3">{detail(row)}</div>
                         </TableCell>
                       </TableRow>
@@ -705,7 +720,7 @@ export function DataTable<R>(props: DataTableProps<R>) {
         shown={result?.matched}
         total={result?.total}
         pager={result && size ? { page: pg.page, pageCount: pg.pageCount, onPage: (p) => goPage(p), pageSize: tprefs.pageSize, onPageSize: (s) => setT({ pageSize: s }) } : null}
-        counts={result && counts ? counts(result.rows.filter((r) => !result.outside.has(rowId(r)))) : undefined}
+        strip={result && counts ? counts(result.rows.filter((r) => !result.outside.has(rowId(r)))) : undefined}
         selected={{ count: selectedCount, noun }}
         updatedAt={updatedAt}
         now={now}

@@ -6,7 +6,7 @@ import type { Launch, Run, RunningLaunch, Unit, UnitCheck } from "../../../share
 import { UNIT_STATE, type UnitState } from "../../../shared/states.ts";
 import { duration } from "../../../shared/text.ts";
 import { emptyWhen, type EmptyWhen } from "@/ui";
-import type { FilterDef, Preset, SearchDef } from "@/table";
+import type { FilterDef, Preset, SearchDef, StripEntry, StripForms } from "@/table";
 // From the file, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
 import { countFindings, MAJOR_UP } from "@/finding/facets.ts";
 import { checkOutcome, logName, waitsText } from "./words.ts";
@@ -124,6 +124,33 @@ export const statesOf = (units: readonly Pick<Unit, "state">[]): UnitState[] => 
 export function stripStates(seen: readonly UnitState[], units: readonly Pick<Unit, "state">[]): readonly UnitState[] {
   const fresh = statesOf(units).filter((s) => !seen.includes(s));
   return fresh.length ? [...seen, ...fresh] : seen;
+}
+
+/** The counts strip's two forms over the kept units (table #8; p2 craft-1, craft-2): every state of `states` with its
+ * count; and the «Вид» groups — «заблокированы», «в работе», «не начаты», «закоммичены» — in the order their first
+ * state takes in `states`, each titled by the states it holds; a state no group holds stays its own entry. The
+ * status bar picks the form its room holds whole. */
+export function unitStrip(states: readonly UnitState[], units: readonly Pick<Unit, "state">[]): StripForms {
+  const by = new Map<UnitState, number>();
+  for (const u of units) by.set(u.state, (by.get(u.state) ?? 0) + 1);
+  const n = (s: UnitState) => by.get(s) ?? 0;
+  const entries: StripEntry[] = states.map((s) => ({ key: s, tone: UNIT_STATE[s].tone, label: UNIT_STATE[s].compact, count: n(s) }));
+  const groups: StripEntry[] = [];
+  for (const s of states) {
+    const preset = PRESETS.find((p) => p.id !== "all" && p.filters.state?.includes(s));
+    const key = preset?.id ?? s;
+    if (groups.some((g) => g.key === key)) continue;
+    const members = preset ? states.filter((x) => preset.filters.state?.includes(x)) : [s];
+    const tones = new Set(members.map((m) => UNIT_STATE[m].tone));
+    groups.push({
+      key,
+      tone: tones.size === 1 ? UNIT_STATE[s].tone : "neutral",
+      label: preset ? preset.label.toLowerCase() : UNIT_STATE[s].compact,
+      count: members.reduce((sum, m) => sum + n(m), 0),
+      title: members.map((m) => `${UNIT_STATE[m].compact} ${n(m)}`).join(", "),
+    });
+  }
+  return { entries, groups };
 }
 
 // ── empty (rules/ui → Conventions 15) ───────────────────────────────────────────────────────────
