@@ -9,7 +9,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { MissingLine, missingText, NotFound, notFoundText, numberRange } from "./absent.tsx";
-import { AddressLink, AddressMenu, addressWhat } from "./address.tsx";
+import { AddressLink, AddressMenu, addressWhat, itemName } from "./address.tsx";
 import { revealIn, SCROLLER, useReveal } from "./reveal.ts";
 import { renderUi } from "./test-utils.tsx";
 
@@ -277,6 +277,15 @@ describe("p2-verdict-critic-craft-verdict-3#craft-4: an object's own address, on
     expect(link).toHaveTextContent(/^12$/);
     fireEvent.click(link, { ctrlKey: true });
     expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  test("p3-review-critic-craft-3#craft-5: an item a list numbers has one name on both lists — its number, then its lead", () => {
+    const entry = itemName("entry", "143", "Which report does the map read first?");
+    expect(entry).toBe("Решение #143: Which report does the map read first?");
+    expect(entry.split(/\s+/)).toHaveLength(9);
+    const convention = itemName("convention", "26", "A fold behind «Подробнее»");
+    expect(convention).toBe("Соглашение 26: A fold behind «Подробнее»");
+    expect(convention.split(/\s+/)).toHaveLength(6);
   });
 });
 

@@ -14,6 +14,13 @@ export const addressWhat = (kind: NumberedKind): string => `адрес ${NUMBERE
  * so the accusative is the word itself). */
 export const addressLabel = (kind: NumberedKind, id: string): string => `Ссылка на ${OBJECT_WORDS[kind].word} ${numberText(kind, id)}`;
 
+/** The item's own name for a screen reader, one form on every list that numbers its items: its number, then its lead —
+ * «Решение #40: <вопрос>», «Соглашение 12: <образец>» — so ↑/↓ announce which item and what it holds (craft-5). */
+export const itemName = (kind: NumberedKind, id: string, lead: string): string => {
+  const { word } = OBJECT_WORDS[kind];
+  return `${word[0].toUpperCase()}${word.slice(1)} ${numberText(kind, id)}: ${lead}`;
+};
+
 export interface AddressLinkProps {
   kind: NumberedKind;
   id: string;

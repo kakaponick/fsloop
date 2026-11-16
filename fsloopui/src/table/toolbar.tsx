@@ -57,7 +57,8 @@ export const FLEX_CAP = 320;
 /** A flexible item's floor (table #12, #14): its chrome — the item less its field — and the text its field must show
  * whole, measured on its sizer (the search's placeholder, `data-flex-sizer`, at the field's padding); never under
  * `FLEX_FLOOR`. A floor past `FLEX_CAP` raises the item's cap to it, so a long placeholder is never cut (p2 craft-2:
- * «Задача, решение, пример, правило» read «…правилс» under the 20 rem cap). An item without a field counts at
+ * «Соглашения»' placeholder, «Текст соглашения, пример, правило», is wider than the 20 rem cap and read «…правилс» under
+ * it). An item without a field counts at
  * `FLEX_FLOOR`. */
 export function flexFloor(node: HTMLElement): number {
   const field = node.querySelector<HTMLElement>("[data-flex-field]");

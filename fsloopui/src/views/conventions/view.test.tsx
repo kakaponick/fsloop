@@ -12,7 +12,7 @@ import userEvent from "@testing-library/user-event";
 import { afterAll, describe, expect, test, vi } from "vitest";
 import type { Convention } from "../../../shared/model.ts";
 import { writePref } from "@/ui";
-import { applyStylesheet, textWidth, usedBlockSize } from "../../app/layout-testing.ts";
+import { applyStylesheet, leftEdge, textWidth, usedBlockSize } from "../../app/layout-testing.ts";
 import { runPath } from "../../app/routes.ts";
 import { fixtureApp, keyOf, loadedRun, renderOver, renderView } from "../reports/testing.tsx";
 import { conventionPath, ConventionsView, copiedWhat, DESIGN_CHECK, emptyFor, INTRO, LABELS, NEVER_DESCRIPTION, NONE_WRITTEN, partsOf, placesOf, SEARCH } from "./index.tsx";
@@ -32,6 +32,7 @@ const fact = (li: HTMLElement, label: string) => [...li.querySelectorAll("dt")].
 const PATH = runPath(KEY, { view: "conventions" });
 const at = (convention: string) => `${PATH}&convention=${convention}`;
 const words = (s: string) => s.split(/\s+/).filter(Boolean).length;
+const px = (value: string) => Number.parseFloat(value) || 0;
 const base: Convention = { n: 1, text: "", pattern: "Owners of the shared parts", solution: "u1 `fsloopui/shared/`: every word", example: null, rule: "`ui` → Existing component first", launch: "p1-decompose-design-check", stage: "p1-decompose" };
 
 describe("«Соглашения»", () => {
@@ -42,8 +43,10 @@ describe("«Соглашения»", () => {
     const groups = [...document.querySelectorAll<HTMLElement>("section[data-launch]")];
     expect(groups.map((g) => g.dataset.launch)).toEqual(["p1-decompose-design-check", "p2-decompose-design-check"]);
     expect(within(groups[0]).getByRole("link", { name: `${DESIGN_CHECK}, проход 1` })).toHaveAttribute("href", runPath(KEY, { view: "reports", report: "p1-decompose-design-check" }));
-    // craft-16: the group heading is the Title role — `text-base` is 14 px in this theme (styles/index.css)
-    expect(within(groups[0]).getByRole("heading", { level: 2 })).toHaveClass("text-base", "font-semibold");
+    // craft-16: the group heading is the Title role — `text-base` is 14 px in this theme (styles/index.css);
+    // p3-review-critic-craft-3#craft-6: an h3, under the run page's hidden h2 «Соглашения», as the journal's entries
+    expect(within(groups[0]).getByRole("heading", { level: 3 })).toHaveClass("text-base", "font-semibold");
+    expect(within(groups[0]).queryByRole("heading", { level: 2 })).toBeNull();
     expect(groups[0]).toHaveTextContent("26 соглашений");
     // the second check wrote none, and says so
     expect(groups[1]).toHaveTextContent("0 соглашений");
@@ -302,7 +305,7 @@ describe("f15: the list's shape, the address and search", () => {
     writePref(`table:conventions:run:${KEY}`, { filters: {}, search: "part-12" });
     renderOver(fx, run, at("3"), ConventionsView);
     expect(document.querySelector("[data-slot=table-search] input")).toHaveAttribute("placeholder", SEARCH.placeholder);
-    expect(SEARCH.placeholder).toBe("Задача, решение, пример, правило");
+    expect(SEARCH.placeholder).toBe("Текст соглашения, пример, правило");
     expect(document.querySelector("[data-slot=adaptive-toolbar]")).toHaveClass("h-7", "shrink-0");
     expect(items().map((li) => li.dataset.convention)).toEqual(["3", "12"]);
     expect(within(article(3)).getByText("вне фильтра")).toBeInTheDocument();
@@ -338,8 +341,9 @@ describe("u12: p2-assess-critic-improve#improve-9, design-3, design-15", () => {
     const slot = bar().querySelector("[data-slot=in-view]") as HTMLElement;
     // 11 shows 8 px under the group's sticky heading — not a line; 17 shows 50 px above the box's end
     await waitFor(() => expect(slot).toHaveTextContent(/^на экране 12–17$/));
-    // Strict 1: reserved at «на экране 26–26» with 2 ch of room, before the range is known (a flex item of the bar)
-    expect(slot.style.minWidth).toBe("17ch");
+    // Strict 1: reserved at «на экране 999–999» with 2 ch of room, before the range is known (a flex item of the bar) —
+    // three digits at least, so a 27th convention past 99 moves nothing (p3-review-critic-code#code-15)
+    expect(slot.style.minWidth).toBe("19ch");
     rects.mockRestore();
   });
 
@@ -362,7 +366,7 @@ describe("u12: p2-assess-critic-improve#improve-9, design-3, design-15", () => {
     expect(s.zIndex).toBe("10");
     expect(usedBlockSize(h)).toBe(32);
     // the heading and its launch on one line: the title, then the launch muted and cut at its end
-    expect(h.querySelector("h2")?.parentElement).toBe(h.querySelector("p")?.parentElement);
+    expect(h.querySelector("h3")?.parentElement).toBe(h.querySelector("p")?.parentElement);
     expect(getComputedStyle(h.querySelector("p") as HTMLElement).textOverflow).toBe("ellipsis");
     expect(getComputedStyle(document.querySelector("[data-slot=conventions-scroll]") as HTMLElement).getPropertyValue("scroll-padding-top")).toBe("32px");
   });
@@ -383,6 +387,52 @@ describe("u12: p2-assess-critic-improve#improve-9, design-3, design-15", () => {
   test("improve-9 (5): the group's link says where it leads", () => {
     renderOver(fx, run, PATH, ConventionsView);
     expect(within(head("p1-decompose-design-check")).getByRole("link", { name: `${DESIGN_CHECK}, проход 1` })).toHaveAttribute("title", "Открыть отчёт проверки дизайна");
+  });
+
+  test("p3-review-critic-craft-3#craft-2: the scroller's content box holds the rows' 12 px bleed, so the target mark draws all four sides; the caption, the heading and a row's text share one 12 px inset", async () => {
+    renderOver(fx, run, at("12"), ConventionsView);
+    await applyStylesheet();
+    const box = document.querySelector("[data-slot=conventions-scroll]") as HTMLElement;
+    const list = article(12).closest("ol") as HTMLElement;
+    const column = box.firstElementChild as HTMLElement;
+    // the mark's box starts at the scroller's own edge, never 12 px past it where `overflow` clips (x = 336 on
+    // p3-final-conventions-12.png), and ends inside the column it bleeds into
+    expect(leftEdge(article(12), box)).toBe(0);
+    expect(px(getComputedStyle(column).paddingRight) + px(getComputedStyle(list).marginRight)).toBe(0);
+    const textStart = (el: HTMLElement) => leftEdge(el, box) + px(getComputedStyle(el).paddingLeft);
+    expect(textStart(document.querySelector("[data-slot=conventions-intro]") as HTMLElement)).toBe(12);
+    expect(leftEdge(within(head("p1-decompose-design-check")).getByRole("heading"), box)).toBe(12);
+    expect(textStart(article(12))).toBe(12);
+  });
+
+  test("p3-review-critic-craft-3#craft-3: the not-found line stands 4 px under the caption, at its inset — the one gap «Журнал» keeps", async () => {
+    renderOver(fx, run, at("99"), ConventionsView);
+    await applyStylesheet();
+    const intro = document.querySelector("[data-slot=conventions-intro]") as HTMLElement;
+    const line = intro.querySelector("[data-slot=convention-missing]") as HTMLElement;
+    expect(line.previousElementSibling).toHaveAttribute("data-slot", "running-text");
+    expect(px(getComputedStyle(intro).rowGap) + px(getComputedStyle(line).marginTop) + px(getComputedStyle(line).paddingTop)).toBe(4);
+    expect(px(getComputedStyle(line).paddingLeft) + px(getComputedStyle(line).marginLeft)).toBe(0);
+  });
+
+  test("p3-review-critic-craft-3#craft-5: a focused convention is named by its number, then its pattern — «Соглашение 12: …», as a decision is", () => {
+    // the words are the shared builder's (src/ui/address.test.tsx → itemName)
+    const whole: Convention = { ...base, n: 3, pattern: null, solution: null, text: "Stage words — one map in `shared/`" };
+    renderOver(fx, { ...run, conventions: [...run.conventions.slice(0, 2), whole, ...run.conventions.slice(3)] }, PATH, ConventionsView);
+    expect(article(12)).toHaveAccessibleName("Соглашение 12: Pattern 12");
+    // a line with no split is named by its text as it reads, its code marks gone
+    expect(article(3)).toHaveAccessibleName("Соглашение 3: Stage words — one map in shared/");
+  });
+
+  test("p3-review-critic-craft-3#craft-7: the search names what it looks in by the words the view shows — «соглашение», «Пример», «Правило» — and no word it does not", async () => {
+    renderOver(fx, run, PATH, ConventionsView);
+    expect(SEARCH.placeholder).toBe("Текст соглашения, пример, правило");
+    expect(words(SEARCH.placeholder)).toBe(4);
+    await waitFor(() => expect(items()).toHaveLength(26), { timeout: 4000 });
+    const shown = (document.querySelector("[data-slot=conventions-view]")?.textContent ?? "").toLowerCase();
+    for (const word of ["соглашени", "пример", "правило"]) expect(shown).toContain(word);
+    // «задача» named the pattern, a part no label of the view calls so
+    expect(SEARCH.placeholder.toLowerCase()).not.toContain("задач");
   });
 
   test("design-15: Enter on a focused convention opens its address menu, as on a decision", async () => {

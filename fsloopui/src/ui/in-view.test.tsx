@@ -50,8 +50,12 @@ describe("improve-9 (1): the in-view strip, one part for both lists", () => {
     expect(box).toHaveTextContent(/^на экране #142–#143$/);
     expect(box.style.minWidth).toBe("21ch");
     rerender(<InView kind="convention" range={["12", "17"]} last="26" />);
-    // «на экране 26–26», 15 characters
-    expect(box.style.minWidth).toBe("17ch");
+    // p3-review-critic-code#code-15: three digits at least (DESIGN.md → The Tabular Rule), so a list that grows past
+    // 99 moves nothing beside the box — «на экране 999–999», 17 characters
+    expect(box.style.minWidth).toBe("19ch");
+    rerender(<InView kind="entry" range={["7", "7"]} last="7" />);
+    // «на экране #999–#999», 19 characters
+    expect(box.style.minWidth).toBe("21ch");
   });
 
   test("useInView: the items `data-<kind>` marks in the scroller, measured before paint and on every scroll", async () => {

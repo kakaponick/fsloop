@@ -1,7 +1,7 @@
 // fsloopUI's shared components (DESIGN.md → Components): every presentational part a view builds from, over the
 // shadcn library in src/components/ui. A view imports from here, never a second copy of a part.
 export { CLOSE, Dash, MissingLine, missingText, NotFound, NotRecorded, notFoundText, NUMBERED, numberRange, numberText, OBJECT_WORDS, type NumberedKind, type ObjectKind } from "./absent.tsx";
-export { AddressLink, addressLabel, AddressMenu, addressWhat, type AddressLinkProps } from "./address.tsx";
+export { AddressLink, addressLabel, AddressMenu, addressWhat, itemName, type AddressLinkProps } from "./address.tsx";
 export { Clamp, COLLAPSE, EXPAND, type ClampProps } from "./clamp.tsx";
 export { ChoiceToggles, type Choice, type ChoiceTogglesProps } from "./choice-toggles.tsx";
 export { CountLink, type CountLinkProps } from "./count-link.tsx";

@@ -547,7 +547,8 @@ describe("improve-5 (3) · the page's outline on every view: h1 the run, a visua
     ["Юниты", "units", "&unit=u22", () => screen.findAllByRole("heading", { level: 3 })],
     ["Отчёты", "reports", "", () => screen.findAllByRole("heading", { level: 3 })],
     ["Отчёты", "reports", "&report=p1-map-map", () => screen.findAllByRole("heading", { level: 3 })],
-    ["Соглашения", "conventions", "", () => waitFor(() => expect(screen.getAllByRole("heading", { level: 2 }).length).toBeGreaterThan(1))],
+    // p3-review-critic-craft-3#craft-6: a design check's group is an h3 under the hidden h2 «Соглашения»
+    ["Соглашения", "conventions", "", () => screen.findAllByRole("heading", { level: 3 })],
     ["Журнал", "journal", "", () => screen.findAllByRole("heading", { level: 3 })],
   ];
 

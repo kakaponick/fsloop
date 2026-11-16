@@ -76,10 +76,15 @@ export interface InViewProps {
   last: string | null;
 }
 
+/** A number's box is three digits wide at least (DESIGN.md → The Tabular Rule), so a list growing past 99 — a live
+ * decision numbered 100 after 99 — moves nothing beside the strip (code-15). */
+const MIN_DIGITS = 3;
+
 /** «на экране …» for the status bar's `counts` slot, in a box as wide as the widest form from the first paint. */
 export function InView({ kind, range, last }: InViewProps) {
-  // two ends as wide as the highest number, the decisions' «#» included
-  const widest = last ? `${PREFIX}${numberText(kind, last)}–${numberText(kind, last)}`.length + SPARE_CH : 0;
+  // two ends as wide as the highest number, three digits at least, the decisions' «#» included
+  const wide = last && last.length < MIN_DIGITS ? "9".repeat(MIN_DIGITS) : last;
+  const widest = wide ? `${PREFIX}${numberText(kind, wide)}–${numberText(kind, wide)}`.length + SPARE_CH : 0;
   return (
     <span data-slot="in-view" className="inline-block" style={{ minWidth: `${widest}ch` }}>
       {inViewText(kind, range)}

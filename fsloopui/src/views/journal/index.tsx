@@ -23,12 +23,12 @@
 import { memo, useCallback, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { JournalEntry } from "../../../shared/model.ts";
-import { stageOf, type Step } from "../../../shared/states.ts";
+import { stageOf, STEPS, type Step } from "../../../shared/states.ts";
 import { count, NOUNS, num } from "../../../shared/text.ts";
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@/components/ui/input-group";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
-import { AddressLink, AddressMenu, Dash, EmptyState, emptyWhen, FactList, FieldCap, fileFailure, flatItem, FlatList, folderFailure, HeldStrip, InView, Keys, markProps, MissingLine, numberRange, numberText, openItemMenu, OutOfFilter, PartFailed, RunningText, SCROLLER, useInView, useReveal, type Fact, type HeldNoun, type InViewRange } from "@/ui";
+import { AddressLink, AddressMenu, Dash, EmptyState, emptyWhen, FactList, FieldCap, fileFailure, flatItem, FlatList, folderFailure, HeldStrip, InView, itemName, Keys, markProps, MissingLine, numberRange, numberText, openItemMenu, OutOfFilter, PartFailed, RunningText, SCROLLER, useInView, useReveal, type Fact, type HeldNoun, type InViewRange } from "@/ui";
 import { AdaptiveToolbar, filterSummary, FilterControl, Highlight, pushHistory, runQuery, SearchBox, StatusBar, tokens, useRunView, useTableView, type FilterDef, type SearchDef, type ToolbarItem } from "@/table";
 import { useNow } from "../../app/clock.tsx";
 import { resolverFor, routerLink } from "../../app/links.tsx";
@@ -54,14 +54,14 @@ export const GOTO_LABEL = `${GOTO_TEXT}: номер решения`;
 export const GOTO_KEY = "KeyG";
 /** The caption's words, around the keys' caps: what a decision is, what stands beside a ref, what ↑/↓ and G do. */
 export const CAPTION = {
-  lead: "Решение — что прогон решил без вас; рядом со ссылкой — что за ней.",
+  // one line in the list's column at 1440, its three caps included (craft-1): «у ссылки», the ref's fact after it
+  lead: "Решение — что прогон решил без вас; у ссылки — что за ней.",
   move: "— по решениям",
   goto: "— к номеру",
 } as const;
 
 /** «#12 · проход 1 · карта». */
 export const entryHead = (e: Pick<JournalEntry, "n" | "stage">): string => `#${e.n} · ${e.stage ? stageOf(e.stage).full : "этап не записан"}`;
-
 export function stageFilter(entries: readonly JournalEntry[]): FilterDef<JournalEntry> {
   const stages = [...new Set(entries.map((e) => e.stage))];
   return { id: "stage", label: "Этап", values: (e) => [e.stage], options: stages.map((s) => ({ value: s, label: stageOf(s).full })), placeholder: "Найти этап" };
@@ -77,6 +77,13 @@ export const SEARCH: SearchDef<JournalEntry> = {
 
 /** The stage the first decision comes at: the map writes the route. */
 const FIRST: Step = "map";
+
+/** The stage an empty journal's decisions come at: the run's own stage once it is past the map — a decision is taken
+ * at any stage, so the stage it is at is the soonest — never a stage it has already passed (craft-8). */
+const emptyStep = (run: Pick<LoadedRun, "now">): Step => {
+  const at = stageOf(run.now?.stage).step;
+  return at !== null && STEPS.indexOf(at) > STEPS.indexOf(FIRST) ? at : FIRST;
+};
 
 /** The first and the last number of the entries; null — there are none. */
 const rangeOf = (entries: readonly Pick<JournalEntry, "n">[]): [string, string] | null => (entries.length ? [entries[0].n, entries[entries.length - 1].n] : null);
@@ -198,6 +205,9 @@ function Journal({ run }: { run: LoadedRun }) {
   const stages = railStages(q.rows);
   const current = stageAt(range, q.rows);
   const latest = q.rows.length ? q.rows[q.rows.length - 1].n : null;
+  // the in-view box's widest form is the journal's, never the rows a filter keeps: «Этап» narrowing the list moves
+  // nothing in the status bar (code-15); the journal is in `#` order, held entries included
+  const highest = run.journal.length ? run.journal[run.journal.length - 1].n : null;
 
   const toolbar: ToolbarItem[] = [
     { id: "search", kind: "pinned", flex: true, node: <SearchBox value={prefs.search} onChange={(v) => setPrefs({ search: v })} placeholder={SEARCH.placeholder} history={table.history} onCommit={(term) => setTable({ history: pushHistory(table.history, term) })} /> },
@@ -210,7 +220,7 @@ function Journal({ run }: { run: LoadedRun }) {
   ];
 
   const missing = entry !== null && !target ? entry : null;
-  const never = emptyWhen(run, FIRST).form === "never";
+  const empty = emptyWhen(run, emptyStep(run));
   const hrefOf = (n: string) => runPath(run.key, { view: JOURNAL_VIEW, entry: n });
 
   return (
@@ -238,7 +248,8 @@ function Journal({ run }: { run: LoadedRun }) {
                   id={missing}
                   range={shownRange}
                   slot="entry-missing"
-                  className="pt-4"
+                  // at the entries' 16 px inset, 4 px under the caption — the one gap «Соглашения» keeps (craft-3)
+                  className="px-4 pt-1"
                   onClose={() => {
                     go("", { replace: true });
                     // the button goes with the line: focus lands on the list's Tab stop
@@ -247,7 +258,7 @@ function Journal({ run }: { run: LoadedRun }) {
                 />
               )}
               {run.journal.length === 0 ? (
-                never ? <EmptyState form="never" noun={DECISION_NOUN} className="py-16" /> : <EmptyState form="not-yet" noun={DECISION_NOUN} step={FIRST} className="py-16" />
+                empty.form === "never" ? <EmptyState form="never" noun={DECISION_NOUN} className="py-16" /> : <EmptyState form="not-yet" noun={DECISION_NOUN} step={empty.step} className="py-16" />
               ) : q.rows.length === 0 ? (
                 <EmptyState form="filtered" noun={DECISION_NOUN} filters={filterSummary([filter], prefs.filters, prefs.search)} onReset={() => setPrefs({ filters: {}, search: "" })} className="py-16" />
               ) : (
@@ -338,7 +349,7 @@ function Journal({ run }: { run: LoadedRun }) {
           setPlaced(new Set(run.journal.map((e) => e.n)));
         }}
       />
-      <StatusBar counts={<InView kind="entry" range={range} last={latest} />} shown={q.matched} total={q.total} noun={DECISION_NOUN} updatedAt={updated === null ? null : new Date(updated).toISOString()} now={now} />
+      <StatusBar counts={<InView kind="entry" range={range} last={highest} />} shown={q.matched} total={q.total} noun={DECISION_NOUN} updatedAt={updated === null ? null : new Date(updated).toISOString()} now={now} />
     </div>
   );
 }
@@ -413,7 +424,8 @@ const Entry = memo(function Entry({ entry: e, run, resolve, toks, target, edge, 
         tabIndex={-1}
         {...flatItem(e.n)}
         data-entry={e.n}
-        aria-labelledby={`j${e.n}-q`}
+        // its number, then its question: the one name of a numbered item (craft-5)
+        aria-label={itemName("entry", e.n, e.question)}
         data-target={marks["data-target"]}
         data-edge={marks["data-edge"]}
         className={cn("flex flex-col gap-1 rounded-md px-4 py-3 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset", marks.className)}
@@ -427,7 +439,7 @@ const Entry = memo(function Entry({ entry: e, run, resolve, toks, target, edge, 
           </span>
           {outside && <OutOfFilter className="ml-auto" />}
         </p>
-        <h3 id={`j${e.n}-q`} className="m-0 text-base font-semibold text-balance break-words">
+        <h3 className="m-0 text-base font-semibold text-balance break-words">
           <Highlight text={e.question} tokens={toks} />
         </h3>
         <FactList facts={facts} className="mt-1 grid-cols-1 gap-y-0.5 @min-[40rem]/view:grid-cols-[5.5rem_minmax(0,1fr)] @min-[40rem]/view:gap-y-1.5" />

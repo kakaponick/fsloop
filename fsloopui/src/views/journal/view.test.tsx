@@ -13,7 +13,7 @@ import type { JournalEntry } from "../../../shared/model.ts";
 import { writePref } from "@/ui";
 import { runPath } from "../../app/routes.ts";
 import { fixtureApp, keyOf, loadedRun, renderOver, renderView } from "../reports/testing.tsx";
-import { applyStylesheet } from "../../app/layout-testing.ts";
+import { applyStylesheet, contentWidth, innerWidth, leftEdge, textWidth } from "../../app/layout-testing.ts";
 import { entryHead, gotoMissText, JournalView, LABELS, railStages, SEARCH, stageAt, stageFilter } from "./index.tsx";
 import { refObject } from "./ref-link.tsx";
 
@@ -29,6 +29,7 @@ const article = (n: number) => document.querySelector(`article[data-entry="${n}"
 const loaded = (count = 143) => waitFor(() => expect(articles()).toHaveLength(count), { timeout: 4000 });
 const bar = () => document.querySelector("[data-slot=status-bar]") as HTMLElement;
 const path = (extra: Record<string, string> = {}) => runPath(KEY, { view: "journal", ...extra });
+const px = (value: string) => Number.parseFloat(value) || 0;
 /** The value an entry gives a label: the `dd` after its `dt`; undefined — the entry has no such row. */
 const fact = (a: HTMLElement, label: string) => [...a.querySelectorAll("dt")].find((dt) => dt.textContent === label)?.nextElementSibling as HTMLElement | undefined;
 
@@ -309,13 +310,38 @@ describe("live and empty", () => {
     expect(document.querySelector("[data-slot=held-strip]")).toHaveTextContent("2 новых решения · показать");
   });
 
-  test("empty: not yet names the stage of the first decision; never, for a closed run", () => {
+  test("p3-review-critic-craft-3#craft-8: empty, not yet, names the stage the run is at — the first decision's before it — never a stage the run has passed; never, for a closed run", () => {
     const small = loadedRun(fx, SMALL, keyOf(SMALL));
+    const now = small.now as NonNullable<typeof small.now>;
+    expect(now.stage).toBe("p1-review");
     const a = renderOver(fx, { ...small, journal: [] }, runPath(keyOf(SMALL), { view: "journal" }), JournalView);
-    expect(screen.getByText("Решений ещё нет — они появятся на этапе «карта»")).toBeInTheDocument();
+    expect(screen.getByText("Решений ещё нет — они появятся на этапе «ревью»")).toBeInTheDocument();
+    expect(screen.queryByText(/«карта»/)).toBeNull();
     a.unmount();
+    const b = renderOver(fx, { ...small, now: { ...now, stage: "p1-map" }, journal: [] }, runPath(keyOf(SMALL), { view: "journal" }), JournalView);
+    expect(screen.getByText("Решений ещё нет — они появятся на этапе «карта»")).toBeInTheDocument();
+    b.unmount();
+    const c = renderOver(fx, { ...small, now: null, journal: [] }, runPath(keyOf(SMALL), { view: "journal" }), JournalView);
+    expect(screen.getByText("Решений ещё нет — они появятся на этапе «карта»")).toBeInTheDocument();
+    c.unmount();
     renderOver(fx, { ...small, closed: true, journal: [] }, runPath(keyOf(SMALL), { view: "journal" }), JournalView);
     expect(screen.getByText("В этом прогоне не было решений")).toBeInTheDocument();
+  });
+
+  test("p3-review-critic-code#code-15: the in-view box is reserved at the journal's highest number whatever «Этап» keeps, and three digits wide, so a live #100 after #99 moves nothing", () => {
+    const slot = () => bar().querySelector("[data-slot=in-view]") as HTMLElement;
+    writePref(`table:journal:run:${KEY}`, { filters: { stage: ["p1-map"] }, search: "" });
+    const a = renderOver(fx, run, path(), JournalView);
+    expect(articles()).toHaveLength(59);
+    // «на экране #143–#143», 19 characters, and 2 ch of room — the journal's, never the 59 rows' «#59–#59» (17 ch)
+    expect(slot().style.minWidth).toBe("21ch");
+    a.unmount();
+    writePref(`table:journal:run:${KEY}`, { filters: {}, search: "" });
+    const b = renderOver(fx, { ...run, journal: run.journal.slice(0, 99) }, path(), JournalView);
+    // 99 decisions: «на экране #999–#999» from the first paint (DESIGN.md → The Tabular Rule: three digits)
+    expect(slot().style.minWidth).toBe("21ch");
+    b.again({ ...run, version: 2, journal: run.journal.slice(0, 100) });
+    expect(slot().style.minWidth).toBe("21ch");
   });
 
   test("craft-15: a journal that cannot be read fails in the list's place — «Журнал решений не прочитан: …», never empty", () => {
@@ -534,9 +560,10 @@ describe("pass 2 (f16): volume, keyboard, the entry's address", () => {
     expect(caption).toHaveAttribute("data-slot", "journal-caption");
     // before the «не найдено» line and the list, scrolled with them
     expect(caption.nextElementSibling).toHaveAttribute("data-slot", "entry-missing");
-    const text = "Решение — что прогон решил без вас; рядом со ссылкой — что за ней. ↑↓ — по решениям, G — к номеру.";
+    // p3-review-critic-craft-3#craft-1: «у ссылки» where «рядом со ссылкой» took the line's last 6 px
+    const text = "Решение — что прогон решил без вас; у ссылки — что за ней. ↑↓ — по решениям, G — к номеру.";
     expect(caption).toHaveTextContent(text);
-    expect(caption.textContent?.split(/\s+/).filter(Boolean)).toHaveLength(22);
+    expect(caption.textContent?.split(/\s+/).filter(Boolean)).toHaveLength(21);
     // the keys are caps, never inline code
     expect([...caption.querySelectorAll("kbd[data-slot=kbd]")].map((k) => k.textContent)).toEqual(["↑", "↓", "G"]);
     expect(caption.querySelector("code")).toBeNull();
@@ -544,6 +571,49 @@ describe("pass 2 (f16): volume, keyboard, the entry's address", () => {
     await applyStylesheet();
     expect(getComputedStyle(caption).minHeight).toBe("20px");
     expect(getComputedStyle(caption).fontSize).toBe("12px");
+  });
+
+  test("p3-review-critic-craft-3#craft-1: the caption is one line in the list's column at 1440 — its words and its three caps within 75 ch + 9.5 rem, less the gutter and its 2 × 16 px", async () => {
+    renderView(fx, KEY, path(), JournalView);
+    await loaded();
+    await applyStylesheet();
+    const list = document.querySelector("[data-slot=journal-scroll]") as HTMLElement;
+    const caption = list.querySelector("[data-slot=journal-caption]") as HTMLElement;
+    // the list's column at 1440 (p3-final-journal-plain.png: the entries' 75 ch + 8.5 rem run 661 px, so a ch of the
+    // 13 px body is 7 px): 75 ch + 9.5 rem, less the scroller's stable gutter and the caption's 16 px each side
+    const room = innerWidth(caption, list, 75 * 7 + 9.5 * 16);
+    expect(room).toBe(630);
+    // the line as it draws at 1440, G's part included (it shows from 52 rem of the view): the words at 12 px, each cap
+    // at its box, the ↑↓ group's 4 px gap
+    const caps = [...caption.querySelectorAll<HTMLElement>("kbd[data-slot=kbd]")];
+    expect(caps.map((k) => k.textContent)).toEqual(["↑", "↓", "G"]);
+    const cap = (k: HTMLElement) => Math.max(contentWidth(k), px(getComputedStyle(k).minWidth));
+    const words = textWidth((caption.textContent ?? "").replace(/[↑↓G]/g, ""), { size: 12 });
+    expect(words + caps.reduce((n, k) => n + cap(k), 0) + 4).toBeLessThanOrEqual(room);
+  });
+
+  test("p3-review-critic-craft-3#craft-3: the not-found line stands at the entries' 16 px inset, 4 px under the caption — the one gap «Соглашения» keeps", async () => {
+    renderView(fx, KEY, path({ entry: "999" }), JournalView);
+    await loaded();
+    await applyStylesheet();
+    const list = document.querySelector("[data-slot=journal-scroll]") as HTMLElement;
+    const caption = list.querySelector("[data-slot=journal-caption]") as HTMLElement;
+    const line = list.querySelector("[data-slot=entry-missing]") as HTMLElement;
+    const textStart = (el: HTMLElement) => leftEdge(el, list) + px(getComputedStyle(el).paddingLeft);
+    expect(textStart(caption)).toBe(16);
+    expect(textStart(article(1))).toBe(16);
+    expect(textStart(line)).toBe(16);
+    const under = getComputedStyle(caption);
+    const over = getComputedStyle(line);
+    expect(px(under.paddingBottom) + px(under.marginBottom) + px(over.marginTop) + px(over.paddingTop)).toBe(4);
+  });
+
+  test("p3-review-critic-craft-3#craft-5: a focused entry is named by its number, then its question — «Решение #40: …», in the form a convention takes", async () => {
+    renderView(fx, KEY, path(), JournalView);
+    await loaded();
+    // the words are the shared builder's (src/ui/address.test.tsx → itemName)
+    expect(article(40)).toHaveAccessibleName("Решение #40: Question 40: which way?");
+    expect(article(143)).toHaveAccessibleName("Решение #143: Question 143: which way?");
   });
 
   test("improve-7 (5): the entries' list and each entry's refs keep their list role under `list-none`", async () => {

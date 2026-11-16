@@ -27,7 +27,7 @@ import { STAGE_WORDS, stageOf } from "../../../shared/states.ts";
 import { count, NOUNS, type Forms } from "../../../shared/text.ts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { AddressLink, AddressMenu, baseName, copyLabel, copyText, EmptyState, emptyWhen, FactList, fileFailure, flatItem, FlatList, folderFailure, Hint, InView, markProps, MissingLine, NotRecorded, openItemMenu, OutOfFilter, PartFailed, PLACE_WHAT, REVEAL_GAP, RunningText, SCROLLER, TOAST_MAX_TITLE, useInView, useReveal, type Fact, type Resolve } from "@/ui";
+import { AddressLink, AddressMenu, baseName, copyLabel, copyText, EmptyState, emptyWhen, FactList, fileFailure, flatItem, FlatList, folderFailure, Hint, InView, markProps, itemName, MissingLine, NotRecorded, openItemMenu, OutOfFilter, PartFailed, PLACE_WHAT, REVEAL_GAP, RunningText, SCROLLER, TOAST_MAX_TITLE, useInView, useReveal, type Fact, type Resolve } from "@/ui";
 import { AdaptiveToolbar, filterSummary, Highlight, pushHistory, runQuery, SearchBox, StatusBar, tokens, useRunView, useTableView, type SearchDef, type ToolbarItem } from "@/table";
 import { useNow } from "../../app/clock.tsx";
 import { LINK_CLASS, resolverFor, routerLink } from "../../app/links.tsx";
@@ -54,13 +54,14 @@ export const CONVENTIONS_PART = "Список соглашений";
 /** The view's id for its persisted search (view state, never the URL: rules/ui → Conventions 12). */
 export const CONVENTIONS_VIEW = "conventions";
 
-/** The search looks in every part of a convention; the places and the launch match as identifiers (table #12). */
+/** The search looks in every part of a convention; the places and the launch match as identifiers (table #12). The
+ * placeholder names what it looks in by the words the view shows (craft-7): the convention's text — its pattern and
+ * its solution, which the caption calls «соглашение» —, «Пример» and «Правило». */
 export const SEARCH: SearchDef<Convention> = {
   identifiers: (c) => [...placesOf(c.example), c.launch],
   text: (c) => (c.pattern ? [c.pattern, c.solution, c.example, c.rule] : [c.text]),
-  placeholder: "Задача, решение, пример, правило",
+  placeholder: "Текст соглашения, пример, правило",
 };
-
 /** A bare example that is one token is one place; anything with a space is prose. */
 const BARE_PLACE = /^\S+$/;
 
@@ -199,7 +200,10 @@ export function ConventionsView({ run }: ViewProps) {
             <EmptyState form="never" noun={DESIGN_CHECK_NOUN} description={NEVER_DESCRIPTION} className="py-16" />
           )
         ) : (
-          <div className="flex max-w-[calc(var(--container-measure)+26.5rem)] flex-col gap-6 py-2">
+          // the column holds the rows' 12 px bleed in its own padding, inside the scroller's content box, so a row's
+          // target mark, focus ring and hover ground draw all four sides — `overflow-y-auto` clips on x too (craft-2);
+          // the caption, a group's heading and a row's text share its 12 px inset, the row's box 12 px wider each side
+          <div className="flex max-w-[calc(var(--container-measure)+28rem)] flex-col gap-6 px-3 py-2">
             <div data-slot="conventions-intro" className="flex flex-col gap-1">
               <RunningText text={INTRO} measure={false} className="text-xs text-muted-foreground" />
               {wanted !== null && !target && (
@@ -229,10 +233,11 @@ export function ConventionsView({ run }: ViewProps) {
                   return (
                     <section key={g.launch} data-launch={g.launch} aria-labelledby={`conv-${g.launch}`} className="flex flex-col gap-2">
                       {/* one fixed 32 px line on the page's ground, sticking while the group's conventions pass under
-                          it; it spans their -12 px rows, so no row shows past its edges (improve-9, design-3) */}
+                          it; it spans their -12 px rows, so no row shows past its edges (improve-9, design-3). An h3:
+                          the view's own heading under the run page's hidden h2 «Соглашения» (craft-6) */}
                       <header className="sticky top-0 z-10 -mx-3 flex h-8 min-w-0 items-center bg-background px-3">
                         <div className="flex min-w-0 items-baseline gap-2">
-                          <h2 id={`conv-${g.launch}`} className="m-0 shrink-0 text-base font-semibold">
+                          <h3 id={`conv-${g.launch}`} className="m-0 shrink-0 text-base font-semibold">
                             {href ? (
                               <Link to={href} title={GROUP_LINK_TITLE} className={LINK_CLASS}>
                                 {title}
@@ -240,7 +245,7 @@ export function ConventionsView({ run }: ViewProps) {
                             ) : (
                               title
                             )}
-                          </h2>
+                          </h3>
                           <p className="m-0 min-w-0 truncate text-xs text-muted-foreground tabular-nums">
                             <span className="font-mono">{hl(g.launch)}</span>
                             {/* the count where two checks share the status bar's total; with one, it says it there and
@@ -321,7 +326,9 @@ function ConventionItem({ convention: c, runKey, resolve, toks, target, outside,
       <article
         tabIndex={-1}
         {...flatItem(id)}
-        aria-label={`Соглашение ${c.n}`}
+        // its number, then its pattern — a line with no split, its text as it reads, its code marks gone: the one name
+        // of a numbered item (craft-5)
+        aria-label={itemName("convention", id, lead.replace(/`/g, ""))}
         data-target={marks["data-target"]}
         className={cn(
           "grid gap-x-6 gap-y-1 rounded-md px-3 py-2.5 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset @min-[56rem]/view:grid-cols-[17rem_minmax(0,1fr)]",
