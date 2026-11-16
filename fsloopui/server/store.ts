@@ -148,12 +148,14 @@ export function createStore({ roots, git }: { roots: string[]; git?: Git }) {
     const recordFailed = run.errors.filter((e) => e.file === RECORD);
     if (recordFailed.length && prev?.card.recorded) {
       // run.json cannot be read right now (half-written, or locked while fsl.mjs renames it): the previous record
-      // stands, with the file's error (rules/ui → Conventions 14).
+      // stands, with the file's error (rules/ui → Conventions 14). On every such path the stamp and the read time stay
+      // the ones the record was read whole at, so the next ticks read the folder again even when its bytes never move
+      // (a lock that lifts): verdict-1 with no model kept, verdict-2 with one.
       const before = prev.run ?? closedRuns.get(found.key) ?? null;
-      // A closed run with no model kept: the card carries the error, and the stamp stays the one the model was read
-      // at, so the next ticks read the folder again (verdict-1).
+      // A closed run with no model kept: the card carries the error.
       if (!before) return { ...prev, pending: null, waits: 0, card: { ...prev.card, errors: prev.goodErrors + recordFailed.length } };
       run = { ...before, errors: [...before.errors.filter((e) => e.file !== RECORD), ...recordFailed] };
+      return entryOf(found, prev, run, { stamp: prev.stamp, readAt: prev.readAt, lastWriteAt: lastWriteOf(run, at.newest) });
     }
     const transcripts = run.sessions.map((s) => s.transcript).filter((t): t is string => Boolean(t));
     const stamp = transcripts.join() === sessions.join() ? at.stamp : ((await walkFolder(found.dir, await launchesStarted(transcripts)))?.stamp ?? at.stamp);

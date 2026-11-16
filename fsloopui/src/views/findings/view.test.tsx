@@ -14,6 +14,7 @@ import { ANY_LABEL, assertLayout, CUSTOM_LABEL, fitsRegion, FRAME, headerWidth, 
 import { FLEX_FLOOR, GAP, OVERFLOW_WIDTH } from "@/table/toolbar.tsx";
 import { CAUSE, CONFIDENCE, countFindings, enumFact, FACT, FindingArticle, findingNotFound, openFindings, reportWord, SECTION, stateText, textSections } from "@/finding";
 import { OBJECTED } from "@/finding/facets.ts";
+import { textWidth as measure } from "../../app/layout-testing.ts";
 import { renderShell } from "../../app/testing.tsx";
 import { runPath } from "../../app/routes.ts";
 import { COLUMNS } from "./columns.tsx";
@@ -37,15 +38,10 @@ const loaded = () => waitFor(() => expect(bodyRows()).toHaveLength(50), { timeou
 const REGION = 1280 - 316 - 40;
 const REGION_1440 = 1440 - 316 - 40;
 
-/** A value's width at the body face (Segoe UI, 13 px), by glyph class and rounded up: a wide letter 11 px, a narrow
- * one or a space 4.3, a digit 7.5, another capital 9, the rest 7.4. p1-verdict-findings.png calibrates it: its
- * 160 px «Отчёт» cut «code · проход 1 · приёмка» to «code · проход 1 · прие…», which this measure puts past the
- * cell's 144 px of text — it errs wide, never narrow. */
-function textWidth(text: string): number {
-  let w = 0;
-  for (const ch of text) w += /[мшщжюыМШЩЖЮЫmwMW…]/.test(ch) ? 11 : /[ijlrtfI.,:;!| ·]/.test(ch) ? 4.3 : /[0-9]/.test(ch) ? 7.5 : /[A-ZА-ЯЁ]/.test(ch) ? 9 : 7.4;
-  return Math.ceil(w);
-}
+/** A value's width at the body face (Segoe UI, 13 px), by glyph class and rounded up (app/layout-testing.ts).
+ * p1-verdict-findings.png calibrates it: its 160 px «Отчёт» cut «code · проход 1 · приёмка» to
+ * «code · проход 1 · прие…», which this measure puts past the cell's 144 px of text — it errs wide, never narrow. */
+const textWidth = (text: string) => measure(text);
 /** A cell's 8 px on each side; a state's 7 px dot and the 6 px before its word. */
 const CELL_PAD = 16;
 const DOT = 7 + 6;

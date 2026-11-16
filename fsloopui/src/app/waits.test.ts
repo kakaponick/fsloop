@@ -6,9 +6,29 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { getConfig } from "@testing-library/react";
 import { describe, expect, test } from "vitest";
+import { budgetBreach } from "../ui/test-budget.ts";
 
 /** The package: vitest runs from it (`npm test`, `npx vitest run` in fsloopui/). */
 const PACKAGE = process.cwd();
+/** `tests 10`: one test — up to 5 s. */
+const BUDGET = 5000;
+
+describe("every test runs within the 5 s budget (`tests 10`); the test's limit only catches a hang (`tests 4`)", () => {
+  test("a test over 5 000 ms fails with its name and its time; one at 5 000 ms or under passes", () => {
+    expect(budgetBreach("4–6: rows expand in place", 5326.4)).toBe("«4–6: rows expand in place» took 5326 ms: over the 5000 ms one test may take (tests 10)");
+    expect(budgetBreach("4–6: rows expand in place", BUDGET)).toBeNull();
+    expect(budgetBreach("4–6: rows expand in place", 120)).toBeNull();
+  });
+
+  test("the check runs around every test of every file: it is the suite's setup file", () => {
+    const config = readFileSync(join(PACKAGE, "vite.config.ts"), "utf8").replace(/\r\n/g, "\n");
+    expect(config).toMatch(/setupFiles:\s*\["src\/ui\/test-budget\.ts"\]/);
+  });
+
+  test("the test's limit is a hang bound: at least twice the budget", ({ task }) => {
+    expect(task.timeout ?? 0).toBeGreaterThanOrEqual(BUDGET * 2);
+  });
+});
 
 /** Every test file of the package, by its path from the package. */
 function testFiles(): string[] {

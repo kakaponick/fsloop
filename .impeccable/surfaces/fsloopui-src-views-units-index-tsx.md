@@ -46,7 +46,7 @@ SHAPE:
       - «major+» and «minor», numeric counts of the findings it closes, with a glossary on «major+»;
       - «Запуски», a numeric count;
     - per `table` #9, #10, #15 and `ui` → Glossary;
-  - status bar: the total («42 юнита», or «N из M юнитов» when filtered), then the counts strip — a dot, label and count per state, the label dropped to the title and the screen reader when the bar is narrower than 64 rem — then, at the right end, the selection and the data's age. This is the distribution (`table` #8);
+  - status bar: the total («42 юнита», or «N из M юнитов» when filtered), then the counts strip in the first form that fits its own room whole (`stripFit`): every state; else the «Вид» groups («заблокированы · в работе · не начаты · закоммичены», each titled by its states); else the leading groups that fit and «ещё N юнитов», titled by what it folds — every entry always its dot, word and count, nothing clipped or wordless (at 1440 and 1280 px the groups, at 900 px the fold) — then, at the right end, the selection and the data's age. This is the distribution (`table` #8);
   - expanded detail, in a capped region that scrolls (`rules/ui` → Layout 5–6):
     - the fact list (`ui` → Roles): Что делает (full title) · Вид (kind) · Ждёт (blockedBy, each id with its state, linking to that unit's address) · Причина (blockedWhy) · Рабочая копия · Коммиты · Бриф (path, mono);
     - each section's heading in the Title type in a 28 px line that also holds its held-order strip;

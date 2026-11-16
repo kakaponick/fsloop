@@ -143,6 +143,33 @@ describe("createStore — closed runs, read when asked for", () => {
     expect(s.list().list[0]).toMatchObject({ key: "app/c1053d01", recorded: true, closed: true, goal: "Run c1053d01, written again.", errors: 0 });
   });
 
+  test("its run.json unreadable while its model is cached: read again on later ticks, the whole record served once readable (verdict-2)", async () => {
+    const { root: at, dirOf } = closedRoot(["c1053d01"]);
+    const s = createStore({ roots: [at], git: () => null });
+    await s.refresh({ full: true });
+    const key = "app/c1053d01";
+    // Asked for: its model is now in the cache.
+    expect(s.run(key)?.goal).toBe("Run c1053d01.");
+    const path = join(dirOf("c1053d01"), "run.json");
+    // The record as fsl.mjs writes it next, and the same bytes caught unreadable: one length, one time, so the folder's
+    // stamp does not move when the file becomes readable — a lock that lifts rather than a write that ends.
+    const whole = readFileSync(path, "utf8").replace("Run c1053d01.", "Run c1053d01!");
+    const at1 = new Date(NOW + 5000);
+    writeFileSync(path, `x${whole.slice(1)}`);
+    utimesSync(path, at1, at1);
+    await s.refresh({ full: true });
+    await s.refresh({ full: true });
+    // The previous record stands, with the file's error.
+    expect(s.run(key)).toMatchObject({ goal: "Run c1053d01.", recorded: true, closed: true });
+    expect(s.run(key)?.errors.map((e) => e.file)).toEqual(["run.json"]);
+    writeFileSync(path, whole);
+    utimesSync(path, at1, at1);
+    await s.refresh({ full: true });
+    await s.refresh({ full: true });
+    expect(s.run(key)).toMatchObject({ goal: "Run c1053d01!", recorded: true, closed: true, errors: [] });
+    expect(s.list().list[0]).toMatchObject({ key, goal: "Run c1053d01!", errors: 0 });
+  });
+
   test("a run read again keeps one place in the cache: the four asked for last are served from it (code cand-4)", async () => {
     const ids = ["c1053d01", "c1053d02", "c1053d03", "c1053d04", "c1053d05"];
     const { root: at, dirOf } = closedRoot(ids);

@@ -12,11 +12,11 @@ SHAPE:
   1. **Enter.** The user opens the «Находки» tab (`?view=findings`). The first load is a framed spinner in the table's place with «Загрузка…» (`rules/ui` → Tables 2).
   2. **Nothing to show.** If the run has no findings yet, the empty state names the stage that fills it: «Критики ещё не писали отчётов — находки появятся на этапе «<next stage that launches a critic>»» (Conventions 15).
   3. **Read the list.** The typical state is the full table, sorted by severity rank. The user reads the rows, narrows them with «Вид», the search (`/` focuses it) or a filter, and gets either the narrowed rows or the filtered-to-none empty state. That state names the active filters and offers «Сбросить фильтры» (`ui` → Empty states).
-  4. **Expand a finding.** A click or Enter expands the row in place (Tables 3). Several rows may be open at once, and open rows survive refreshes (Live data 3).
+  4. **Expand a finding.** A click or Enter expands the row in place (Tables 3); the open row and its detail read as one block inside a 1 px frame of muted ink. Several rows may be open at once, and open rows survive refreshes (Live data 3).
   5. **Look at a frame.** A thumbnail opens the frame viewer: ‹ ›, ←/→ and the wheel step through it; Escape returns focus to the thumbnail (Layout 7).
   6. **Set a verdict.** The user sets it in the detail, or through «Оценить…» in the row menu, where it applies to one row or to a selection with one note. It shows at once («Ваша оценка: согласен · 19:41 МСК»). In the detail, keys 1–4 set the verdict of the finding in focus and move focus to the next row of the page with no verdict, its detail opening in place of the rated one's when that was open; the caps show in the tooltip «Выбрать клавишами 1 2 3 4» over the toggles, and the dialog has no keys. If the write fails, the row reverts, the note text stays in its field, and a toast «Оценка не сохранилась: <причина>» with «Повторить» stays until closed (Conventions 6).
   7. **Live update.** A changed row updates in place with an edge mark (Conventions 9). New findings, and rows a live change moves, gather in one strip at the table's end: «12 новых находок · показать». A row that left the filter stays where it was, marked «вне фильтра», and the strip says «убрать» or «обновить список» (Live data 2).
-  8. **Link to a finding.** `?finding=<id>` opens the run, goes to that finding's page, expands, scrolls to and marks the row. If the filters hide it, it shows anyway, marked «вне фильтра». An id the run does not hold reads «Находка <id> не найдена» (Conventions 5 and 12).
+  8. **Link to a finding.** `?finding=<id>` opens the run, goes to that finding's page, expands, scrolls the table's own box to the row and marks it; once «по экрану» measures the box, the page re-forms around that row, never around its first row, and the row is placed under the header again. If the filters hide it, it shows anyway, marked «вне фильтра». An id the run does not hold reads «Находка <id> не найдена» (Conventions 5 and 12).
   9. **Shell states.** The lost-connection strip and the read errors belong to the shell and the run frame (u3: Live data 5, Conventions 13). This view adds no copy of them.
 - RANGES:
   - **Empty:** 0 findings, in init runs and in a run before its first critic.
@@ -29,8 +29,8 @@ SHAPE:
   - **Other limits:** text up to 1920 characters. Across all runs, 13 status words (`statusOf`). Units per run 0/14/42. Frames per run 0/8/289, with up to 8 linked to one finding.
   - **Pagination:** 50 rows a page by default, so the volume run is 15 pages (`table #1`). The whole run's data reaches the client and is filtered there (`rules/ui` → Tables 1).
   - **Width budget at 1280 px,** taking the prototype's 316 px sidebar:
-    - fixed columns: checkbox 32, «Серьёзность» 116, «ID» 112, «Отчёт» 200 (resizable; it clears «runtime · проход 1 · приёмка», the widest launch name of the 723-finding run), «Состояние» 156 (it clears «не исправлена · f10»), «Оценка» 136 (it clears «не та серьёзность»);
-    - «Находка» keeps a floor of 154 px, so 1280 px holds the table whole (924 of 924 px); at 1440 it gets about 322 px.
+    - fixed columns: checkbox 32, «Серьёзность» 116, «ID» 92 (it clears «runtime-10», the widest local id), «Отчёт» 200 (resizable; it clears «runtime · проход 1 · приёмка», the widest launch name of the 723-finding run), «Состояние» 156 (it clears «не исправлена · f10»), «Оценка» 136 (it clears «не та серьёзность»);
+    - «Находка» keeps a floor of 154 px, so 1280 px holds the table whole in its 924 px view; at 1440 it gets 334 px.
     - «Место» (location) is therefore off by default, but searchable and shown in the detail (`table #10`, Tables 5).
 - LEADS:
   - Before any filter, the user first reads the critical and major rows that still need someone, in this sort order:
@@ -45,7 +45,7 @@ SHAPE:
     1. «Вид» select with counts (Conventions 16): Все · Без оценки · С возражением (every verdict but «согласен») · В исправление · Кандидаты · Закоммичены;
     2. search with history, pinned. Identifier tokens (id, location, unit ids, report) are OR-matched; free-text tokens (rule, action, why, raw) are AND-matched. Placeholder «Текст, файл, id, юнит» (`table #12`);
     3. filters, each with counts over the unfiltered set (`table #11`): «Серьёзность» select · «Состояние» select · «Отчёт» combobox (up to 32 reports) · «Юнит» combobox (up to 42) · «Оценка» select (its first option «с возражением», explained in the header's glossary) · «Охват» select · «Правка» select (the `/impeccable` verb; keeps map row 33). The last two collapse first into `…`;
-    4. «Свернуть все находки» — an icon-only 28 px button in the right cluster, its box always held, invisible while no row is open; a click closes every open detail;
+    4. «Свернуть все находки» — an icon-only 28 px button in the right cluster, always shown in its box; while no row is open it is the blocked action — dimmed, focusable, inert, its tooltip the reason «Нет открытых строк — откройте строку»; a click closes every open detail;
     5. the columns menu (`table #3`).
   - **Row context menu (`table #4`):**
     - «Открыть» (expand/collapse; the default pin, Tables 3);
