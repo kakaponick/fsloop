@@ -23,6 +23,8 @@ const fx = fixtureApp({ only: [N] });
 afterAll(() => fx.close());
 const run = loadedRun(fx, N, KEY);
 const launch = (id: string) => run.launches.find((l) => l.id === id) as Launch;
+/** The frames the fixture took of «accounts»: the craft critic's «Кадры» count. */
+const accountsFrames = run.surfaces.find((s) => s.key === "accounts")?.frames.length ?? 0;
 
 const open = (report: string, extra: Record<string, string> = {}, over = run) => renderOver(fx, over, runPath(KEY, { view: "reports", report, ...extra }), ReportsView);
 const reader = () => document.querySelector("[data-slot=report-reader]") as HTMLElement;
@@ -52,25 +54,90 @@ describe("a critic's report", () => {
     expect(reportPath("/home/op/runs/a5/", "reports/x.md")).toBe("/home/op/runs/a5/reports/x.md");
   });
 
-  test("the fact list: outcome rows first — state, findings by severity, scores — then the facts, «Подробнее» last", () => {
+  test("craft-13: the reader opens on its outcome — the outcome rows, one muted line agent · model · duration · tokens, the rest behind «Подробнее»", async () => {
+    const user = userEvent.setup({ delay: null });
     open("p1-map-craft-accounts");
     expect(factRows()).toEqual([
-      ["Состояние", "завершён · 9 мин"],
+      ["Состояние", "завершён"],
       ["Находки", "18 находок3 critical6 major9 minor"],
       ["Оценки раздела", "accountsаудит 8 из 20·критика 18 из 40"],
-      ["Агент", "критикfsloop-critic"],
-      ["Линза критика", "craft assess"],
-      ["Модель", "claude-opus-5-5"],
-      ["Этап", "проход 1 · карта"],
-      ["Начало", "14.11 20:01 МСК"],
-      ["Длительность", "9 мин"],
-      ["Токены", "3,4 млн токенов"],
     ]);
+    const meta = reader().querySelector("[data-slot=report-meta]") as HTMLElement;
+    // «отчёт критика» on the line above names the agent, so this line starts at the model
+    expect(meta).toHaveTextContent(/^claude-opus-5-5 · 9 мин · 3,4 млн токенов$/);
+    expect(meta.previousElementSibling).toHaveTextContent(/^отчёт критика/);
+    expect(meta).toHaveClass("text-muted-foreground");
+    // the line sits in the identity, above the fact list
+    expect(meta.compareDocumentPosition(reader().querySelector("[data-slot=fact-list]") as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // 18 findings of the critic, 20 in «Находки» with its two ideas: the count stays plain (Conventions 7)
     expect(reader().querySelector("[data-slot=report-severity] [data-slot=count]")).toHaveTextContent("18 находок");
-    expect(screen.getByRole("button", { name: "Подробнее" })).toBeInTheDocument();
     // the current report's score is marked, not a link
     expect(reader().querySelector("[data-slot=score-audit] [aria-current]")).toHaveTextContent("8");
+    await user.click(screen.getByRole("button", { name: "Подробнее" }));
+    expect(factRows().slice(3, 7)).toEqual([
+      ["Агент", "критикfsloop-critic"],
+      ["Линза критика", "craft assess"],
+      ["Этап", "проход 1 · карта"],
+      ["Начало", "14.11 20:01 МСК"],
+    ]);
+    // what the line holds is not repeated as a row
+    expect(factRows().map((r) => r[0])).not.toContain("Модель");
+  });
+
+  test("craft-13: a launch the record leaves without model, duration or tokens: the line skips them, «Подробнее» says «не записано»", async () => {
+    const user = userEvent.setup({ delay: null });
+    const bare: Launch = { ...launch("p1-map-craft-accounts"), model: null, seconds: null, spend: null };
+    open(bare.id, {}, { ...run, launches: run.launches.map((l) => (l.id === bare.id ? bare : l)) });
+    // nothing left to say on the line: no empty line holds a place
+    expect(reader().querySelector("[data-slot=report-meta]")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Подробнее" }));
+    const rows = new Map(factRows().map(([k, v]) => [k, v]));
+    expect(rows.get("Модель")).toBe("не записано");
+    expect(rows.get("Длительность")).toBe("не записано");
+    expect(rows.get("Токены")).toBe("не записано");
+  });
+
+  test("craft-13: the section tabs stay in view while the report scrolls — sticky on the page's ground, the frames a tab of their own", () => {
+    open("p1-map-craft-accounts");
+    // the strip is the shared tabs' list: its root pins it to the reader's top on the page's ground
+    const tabs = reader().querySelector("[data-slot=report-sections] > [data-slot=tabs]") as HTMLElement;
+    expect(within(tabs).getByRole("tablist", { name: "Разделы отчёта" }).parentElement).toBe(tabs);
+    expect(tabs).toHaveClass("[&>[role=tablist]]:sticky", "[&>[role=tablist]]:top-0", "[&>[role=tablist]]:z-10", "[&>[role=tablist]]:bg-background");
+    // the frames no longer stand between the facts and the tabs
+    expect(reader().querySelector("[data-slot=frame-strip]")).toBeNull();
+    expect(accountsFrames).toBeGreaterThan(0);
+    expect(tabNames()).toContain(`Кадры${accountsFrames}`);
+  });
+
+  test("craft-13: «Кадры» with none says why", () => {
+    open("p1-review-critic-code", { tab: "frames" });
+    expect(within(reader()).getByRole("tabpanel")).toHaveTextContent(/^Кадров нет: отчёт не оценивал раздел интерфейса, а его находки не ссылаются на кадры\.$/);
+  });
+
+  test("craft-13: «Находки» lists FindingRows that expand in place, several at once", async () => {
+    const user = userEvent.setup({ delay: null });
+    open("p1-map-craft-accounts");
+    const list = reader().querySelector("[data-slot=report-findings]") as HTMLElement;
+    const rows = list.querySelectorAll<HTMLElement>("[data-slot=finding-row]");
+    expect(rows).toHaveLength(18);
+    expect(list.querySelectorAll("[data-slot=finding-article]")).toHaveLength(0);
+    // each row's box is one fixed line, so the list never jumps as it renders
+    for (const r of rows) expect(r).toHaveClass("h-8");
+    const items = [...list.querySelectorAll<HTMLElement>(":scope > li")];
+    const first = items[0];
+    const toggle = within(first).getByRole("button", { name: `Развернуть находку ${first.dataset.finding?.split("#")[1]}` });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const detail = document.getElementById(toggle.getAttribute("aria-controls") as string) as HTMLElement;
+    expect(first).toContainElement(detail);
+    expect(within(detail).getByRole("link", { name: "Открыть в находках" })).toHaveAttribute("href", runPath(KEY, { view: "findings", finding: first.dataset.finding as string }));
+    expect(detail.querySelectorAll("[data-slot=finding-article]")).toHaveLength(1);
+    // a click on the row's sentence opens the next one too; the first stays open
+    await user.click(items[1].querySelector("[data-slot=finding-row] > span:nth-child(3)") as HTMLElement);
+    expect(list.querySelectorAll("[data-slot=finding-article]")).toHaveLength(2);
+    await user.click(toggle);
+    expect(list.querySelectorAll("[data-slot=finding-article]")).toHaveLength(1);
   });
 
   test("«Подробнее»: tokens by kind, the first request, child launches with their tokens, the agent id, the transcript", async () => {
@@ -111,11 +178,12 @@ describe("a critic's report", () => {
   test("the tabs: fixed for a critic, counts, a muted «0» whose body says the critic wrote nothing; «Файл отчёта» last", async () => {
     const user = userEvent.setup({ delay: null });
     const view = open("p1-review-critic-code");
-    expect(tabNames()).toEqual(["Находки30", "Не проверено0", "Идеи вне прогона0", "Порядок правок0", "Допущения0", "Файл отчёта"]);
+    // a code critic judges no surface and its findings cite no frame: «Кадры» stays, a muted «0», so the strip matches
+    expect(tabNames()).toEqual(["Находки30", "Не проверено0", "Идеи вне прогона0", "Порядок правок0", "Допущения0", "Кадры0", "Файл отчёта"]);
     // two critics of other lenses keep the same strip, plus the sections their lens writes
     view.unmount();
     open("p1-map-craft-accounts");
-    expect(tabNames()).toEqual(["Находки18", "Не проверено1", "Идеи вне прогона2", "Порядок правок1", "Допущения1", "Файл отчёта"]);
+    expect(tabNames()).toEqual(["Находки18", "Не проверено1", "Идеи вне прогона2", "Порядок правок1", "Допущения1", `Кадры${accountsFrames}`, "Файл отчёта"]);
     const zero = reportTabs(launch("p1-review-critic-code"), 30)[1];
     expect(zero).toMatchObject({ label: "Не проверено", count: 0 });
     await user.click(screen.getByRole("tab", { name: /^Не проверено/ }));
@@ -130,21 +198,17 @@ describe("a critic's report", () => {
     expect(within(reader()).getByRole("tabpanel")).toHaveTextContent("Критик ничего сюда не записал.");
   });
 
-  test("«Находки»: a severity filter, then each finding as the shared article with «Открыть в находках»", async () => {
+  test("«Находки»: a severity filter over the report's rows", async () => {
     const user = userEvent.setup({ delay: null });
     open("p1-map-craft-accounts");
     const list = reader().querySelector("[data-slot=report-findings]") as HTMLElement;
-    expect(list.querySelectorAll("[data-slot=finding-article]")).toHaveLength(18);
-    const first = list.querySelector("li") as HTMLElement;
-    const id = first.dataset.finding as string;
-    expect(within(first).getByRole("link", { name: "Открыть в находках" })).toHaveAttribute("href", runPath(KEY, { view: "findings", finding: id }));
     await user.click(screen.getByRole("radio", { name: /^critical/ }));
-    expect(list.querySelectorAll("[data-slot=finding-article]")).toHaveLength(3);
+    expect(list.querySelectorAll("[data-slot=finding-row]")).toHaveLength(3);
   });
 
   test("a design check: its conventions as a tab, with a link to «Соглашения»", async () => {
     open("p1-decompose-design-check", { tab: "conventions" });
-    expect(tabNames()).toEqual(["Находки10", "Не проверено0", "Идеи вне прогона0", "Порядок правок0", "Допущения0", "Соглашения26", "Файл отчёта"]);
+    expect(tabNames()).toEqual(["Находки10", "Не проверено0", "Идеи вне прогона0", "Порядок правок0", "Допущения0", "Соглашения26", "Кадры0", "Файл отчёта"]);
     const panel = within(reader()).getByRole("tabpanel");
     expect(panel.querySelectorAll("[data-slot=section-items] > li")).toHaveLength(26);
     expect(within(panel).getByRole("link", { name: "Все соглашения прогона" })).toHaveAttribute("href", runPath(KEY, { view: "conventions" }));
@@ -159,14 +223,19 @@ describe("a critic's report", () => {
 });
 
 describe("other kinds", () => {
-  test("an implementer: its RESULT … VERIFY tabs, the result as its outcome, the unit a link", () => {
+  test("an implementer: its RESULT … VERIFY tabs, the result as its outcome, the unit a link", async () => {
+    const user = userEvent.setup({ delay: null });
     open("p1-units-u1-implement");
+    // no frames: an implementer's strip has no «Кадры»
     expect(tabNames()).toEqual(["Итог1", "Файлы1", "Тесты2", "Заметки0", "Находки1", "Паритет0", "Проверка кода1", "Файл отчёта"]);
-    expect(factRows().slice(0, 3)).toEqual([
-      ["Состояние", "завершён · 9 мин"],
+    expect(factRows()).toEqual([
+      ["Состояние", "завершён"],
       ["Итог", "done"],
       ["Находки", "1 находка1 без серьёзности"],
     ]);
+    // «отчёт запуска» does not name the agent: the line does
+    expect(reader().querySelector("[data-slot=report-meta]")).toHaveTextContent(/^исполнитель · claude-opus-5-5 · /);
+    await user.click(screen.getByRole("button", { name: "Подробнее" }));
     expect(reader().querySelector("[data-slot=fact] a[href*='unit=u1']")).toHaveTextContent("u1");
     expect(reader()).toHaveTextContent("отчёт запуска");
   });
@@ -185,7 +254,7 @@ describe("other kinds", () => {
   test("research: its own section as written, then the file", () => {
     open("p1-spike-spike-telegram");
     expect(tabNames()).toEqual(["SPIKE1", "Файл отчёта"]);
-    expect(factRows()[0]).toEqual(["Состояние", "завершён · 9 мин"]);
+    expect(factRows()[0]).toEqual(["Состояние", "завершён"]);
   });
 });
 
@@ -281,13 +350,19 @@ describe("the production shape", () => {
     const extra = stages.slice(1).map((stage) => ({ ...l, id: `${stage}-craft-accounts`, stage }));
     const surfaces: Surface[] = run.surfaces.map((s) => (s.key === "accounts" ? { ...s, frames, scores } : s));
     expect(new TextEncoder().encode(items.join("\n")).length).toBeGreaterThan(59_000);
-    open(l.id, { tab: "assumptions" }, { ...run, launches: [...run.launches.map((x) => (x.id === l.id ? l : x)), ...extra], surfaces });
+    const over = { ...run, launches: [...run.launches.map((x) => (x.id === l.id ? l : x)), ...extra], surfaces };
+    const view = open(l.id, { tab: "assumptions" }, over);
     const panel = within(reader()).getByRole("tabpanel");
     expect(panel.querySelectorAll("[data-slot=section-items] > li")).toHaveLength(240);
     expect(panel).toHaveTextContent(items[239].trim());
     expect(panel.querySelector("[data-slot=running-text]")?.closest("div.max-w-measure")).toBeTruthy();
-    const strip = reader().querySelector("[data-slot=frame-strip]") as HTMLElement;
+    view.unmount();
+    // the frames are a tab of their own (craft-13): «Кадры 20»
+    open(l.id, { tab: "frames" }, over);
+    expect(screen.getByRole("tab", { name: /^Кадры/ })).toHaveTextContent("Кадры20");
+    const strip = within(reader()).getByRole("tabpanel").querySelector("[data-slot=frame-strip]") as HTMLElement;
     expect(within(strip).getAllByRole("button", { name: /^Открыть кадр / })).toHaveLength(16);
+    for (const t of within(strip).getAllByRole("button", { name: /^Открыть кадр / })) expect(t).toHaveClass("h-thumb-h", "w-thumb-w");
     expect(within(strip).getByRole("button", { name: "ещё 4 кадра" })).toBeInTheDocument();
     const audit = reader().querySelector("[data-slot=score-audit]") as HTMLElement;
     expect(audit).toHaveTextContent("аудит 8 → 9 → 10 → 11 → 12 из 20");

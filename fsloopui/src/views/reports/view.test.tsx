@@ -11,8 +11,9 @@ import { readPref } from "@/ui";
 import { isSelectFilter, type FilterDef } from "@/table";
 import { renderShell } from "../../app/testing.tsx";
 import { runPath } from "../../app/routes.ts";
-import { ReportsView } from "./index.tsx";
+import { ReportsView, REPORT_NOT_FOUND_NEXT } from "./index.tsx";
 import { filtersFor, groupsOf, railItems, rankSurfaces } from "./model.ts";
+import { OVERVIEW_EMPTY, OVERVIEW_LEAD } from "./overview.tsx";
 import { fixtureApp, keyOf, loadedRun, NOW, renderOver, renderView } from "./testing.tsx";
 
 const N = 40; // the production maximum: 97 launches, one more running
@@ -23,7 +24,8 @@ const fx = fixtureApp({ only: [N, SMALL, INIT] });
 afterAll(() => fx.close());
 const run = loadedRun(fx, N, KEY);
 
-const railLinks = () => [...document.querySelectorAll<HTMLAnchorElement>("[data-slot=report-rail] [data-flat-item]")];
+/** The rail's reports: its flat items but the first, «Обзор разделов интерфейса». */
+const railLinks = () => [...document.querySelectorAll<HTMLAnchorElement>("[data-slot=report-rail] [data-flat-item]:not([data-slot=rail-overview])")];
 const loaded = () => waitFor(() => expect(railLinks()).toHaveLength(98), { timeout: 4000 });
 const bar = () => document.querySelector("[data-slot=status-bar]") as HTMLElement;
 const reportsPath = (extra: Record<string, string> = {}) => runPath(KEY, { view: "reports", ...extra });
@@ -51,6 +53,17 @@ describe("the rail's model at the production shape", () => {
     expect(isSelectFilter(f.lens as FilterDef<unknown>)).toBe(false);
     expect(f.surface.options).toHaveLength(21);
     expect(isSelectFilter(f.surface as FilterDef<unknown>)).toBe(false);
+  });
+
+  test("craft-27: equal critical + major tie by the latest score, the lower first; a surface without scores after them", () => {
+    const score = (stage: string, audit: number, critique: number) => ({ stage, launch: `${stage}-craft`, audit, auditMax: 20, critique, critiqueMax: 40 });
+    const surface = (key: string, scores: ReturnType<typeof score>[]) => ({ key, label: key, scores, frames: [], findings: 1 });
+    const ranked = rankSurfaces(
+      [surface("a", [score("p1-map", 18, 36)]), surface("b", []), surface("c", [score("p1-map", 10, 20)]), surface("d", [score("p1-map", 19, 39), score("p2-assess", 9, 18)])],
+      ["a", "b", "c", "d"].map((s) => ({ surface: s, severity: "major" as const })),
+    );
+    // d's latest pass scored 9/20 and 18/40 — below c's 10/20 and 20/40 — though its first pass scored best
+    expect(ranked.map((s) => s.key)).toEqual(["d", "c", "a", "b"]);
   });
 
   test("the overview ranks surfaces by critical + major, then by key", () => {
@@ -88,7 +101,8 @@ describe("the task walk (surfaces/reading.md → WALK «Отчёты»)", () => 
     const view = renderView(fx, KEY, reportsPath(), ReportsView);
     await loaded();
     const rail = screen.getByRole("group", { name: "Отчёты прогона" });
-    expect(railLinks().filter((a) => a.tabIndex === 0)).toHaveLength(1);
+    // with no report open the stop is the overview, the open item (craft-27)
+    expect([...rail.querySelectorAll<HTMLElement>("[data-flat-item]")].filter((a) => a.tabIndex === 0)).toEqual([rail.querySelector("[data-slot=rail-overview]")]);
     const headings = [...rail.querySelectorAll<HTMLElement>("[data-slot=rail-heading]")];
     expect(headings.map((h) => h.textContent)).toEqual([
       "карта· проход 121",
@@ -107,17 +121,16 @@ describe("the task walk (surfaces/reading.md → WALK «Отчёты»)", () => 
       "приёмка· проход 25",
     ]);
     for (const h of headings) expect(h.tabIndex).toBe(-1);
-    // a craft critic: description, kind word, findings by severity in the worst one's tone
+    // a craft critic: description, kind word (its group mixes kinds), findings by severity as plain text
     const craft = railLinks().find((a) => a.dataset.flatItem === "p1-map-craft-accounts") as HTMLElement;
     expect(craft).toHaveTextContent("craft accounts");
     expect(craft).toHaveTextContent("критик");
     expect(within(craft).getByText("3 critical · 6 major · 9 minor")).toBeInTheDocument();
-    expect(craft.querySelector("[data-slot=dot]")).toHaveAttribute("data-tone", "danger");
-    // the running launch: a neutral «работает · 12 мин»; an implementer: its result
+    // the running launch: «работает · 12 мин», neutral, so no dot; an implementer: its result
     const running = railLinks().at(-1) as HTMLElement;
     expect(running).toHaveTextContent("u30 implement");
     expect(within(running).getByText("работает · 12 мин")).toBeInTheDocument();
-    expect(running.querySelector("[data-slot=dot]")).toHaveAttribute("data-tone", "neutral");
+    expect(running.querySelector("[data-slot=dot]")).toBeNull();
     const implement = railLinks().find((a) => a.dataset.flatItem === "p1-units-u1-implement") as HTMLElement;
     expect(within(implement).getByText("итог: done · 1 находка")).toBeInTheDocument();
     const verdict = railLinks().find((a) => a.dataset.flatItem === "p1-verdict-critic-code-verdict") as HTMLElement;
@@ -131,6 +144,31 @@ describe("the task walk (surfaces/reading.md → WALK «Отчёты»)", () => 
     await user.keyboard("{Enter}");
     await waitFor(() => expect(new URLSearchParams(view.probe.location?.search).get("report")).toBe(railLinks()[2].dataset.flatItem));
     expect(screen.getByRole("heading", { level: 2, name: "craft bots" })).toBeInTheDocument();
+  });
+
+  test("craft-34: the kind word only where kinds mix in a group; a dot only where a state asks for the operator", async () => {
+    const view = renderView(fx, KEY, reportsPath(), ReportsView);
+    await loaded();
+    const link = (id: string) => railLinks().find((a) => a.dataset.flatItem === id) as HTMLElement;
+    const kind = (id: string) => link(id).querySelector("[data-slot=rail-kind]");
+    // «карта · проход 1» holds the map and 20 craft critics: each row names its kind
+    expect(kind("p1-map-map")).toHaveTextContent(/^карта$/);
+    expect(kind("p1-map-craft-accounts")).toHaveTextContent(/^критик$/);
+    // «ревью · проход 1» holds critics alone and «юниты в работе · проход 1» implementers alone: no kind word, the
+    // item's title keeps it
+    expect(kind("p1-review-critic-code")).toBeNull();
+    expect(link("p1-review-critic-code").title).toMatch(/ — критик$/);
+    expect(kind("p1-units-u1-implement")).toBeNull();
+    // findings by severity, results and running launches are plain text: no dot ranks nothing on 98 rows
+    expect(railLinks().filter((a) => a.querySelector("[data-slot=dot]"))).toEqual([]);
+    view.unmount();
+
+    // a launch whose report is missing waits on the operator: its row alone carries the amber dot
+    const l: Launch = { ...(run.launches.find((x) => x.id === "p1-map-craft-bots") as Launch), reportMissing: true };
+    renderOver(fx, { ...run, launches: run.launches.map((x) => (x.id === l.id ? l : x)) }, reportsPath(), ReportsView);
+    expect(railLinks().filter((a) => a.querySelector("[data-slot=dot]")).map((a) => a.dataset.flatItem)).toEqual(["p1-map-craft-bots"]);
+    expect(link("p1-map-craft-bots").querySelector("[data-slot=dot]")).toHaveAttribute("data-tone", "warning");
+    expect(within(link("p1-map-craft-bots")).getByText("нет отчёта")).toBeInTheDocument();
   });
 
   test("2: search and the «Агент», «Линза», «Раздел» filters with counts, persisted as view state; filtered to none", async () => {
@@ -154,6 +192,8 @@ describe("the task walk (surfaces/reading.md → WALK «Отчёты»)", () => 
     await user.paste("ни-одного-такого");
     expect(await screen.findByText("Нет отчётов, подходящих под фильтры")).toBeInTheDocument();
     expect(screen.getByText("Фильтры: Раздел: accounts · Поиск: «ни-одного-такого»")).toBeInTheDocument();
+    // craft-27: the way back to the overview stays above the empty rail
+    expect(document.querySelector("[data-slot=report-rail] [data-slot=rail-overview]")).toHaveTextContent("Обзор разделов интерфейса");
     await user.click(screen.getByRole("button", { name: "Сбросить фильтры" }));
     await loaded();
 
@@ -170,8 +210,9 @@ describe("the task walk (surfaces/reading.md → WALK «Отчёты»)", () => 
     expect(within(overview).getByRole("heading", { name: "Разделы интерфейса" })).toBeInTheDocument();
     const lines = [...overview.querySelectorAll<HTMLElement>("li[data-surface]")];
     expect(lines).toHaveLength(20);
-    // every surface was judged once at the map: 3 critical and 6 major each, so the key orders them
-    expect(lines.map((l) => l.dataset.surface)).toEqual([...run.surfaces.map((s) => s.key)].sort());
+    // every surface was judged once at the map: 3 critical and 6 major each, so the score orders them, the lowest
+    // first (accounts 8/20 · 18/40, bots 9 · 19 …), equal scores by key (craft-27)
+    expect(lines.map((l) => l.dataset.surface)).toEqual(["accounts", "bots", "campaigns", "chats", "dialogs", "seo", "journal", "settings", "leads", "shell", "notifications", "sign-in", "traffic", "overview", "proxies", "users", "roles", "warmup", "schedules", "workers"]);
     const accounts = lines[0];
     expect(accounts).toHaveTextContent("3 critical");
     expect(accounts).toHaveTextContent("6 major");
@@ -179,6 +220,38 @@ describe("the task walk (surfaces/reading.md → WALK «Отчёты»)", () => 
     expect(accounts).toHaveTextContent("критика 18 из 40");
     const links = within(accounts).getAllByRole("link");
     expect(links.map((a) => a.getAttribute("href"))).toEqual([reportsPath({ report: "p1-map-craft-accounts" }), reportsPath({ report: "p1-map-craft-accounts" })]);
+  });
+
+  test("craft-27: the wide rail opens on «Обзор разделов интерфейса» — the overview's address, current while no report is open", async () => {
+    const user = userEvent.setup({ delay: null });
+    const view = renderView(fx, KEY, reportsPath({ report: "p1-map-craft-accounts" }), ReportsView);
+    await loaded();
+    const rail = screen.getByRole("group", { name: "Отчёты прогона" });
+    const overview = rail.querySelectorAll<HTMLAnchorElement>("[data-flat-item]")[0];
+    expect(overview).toHaveAttribute("data-slot", "rail-overview");
+    expect(overview).toHaveTextContent(/^Обзор разделов интерфейса$/);
+    expect(overview).toHaveAttribute("href", reportsPath());
+    expect(overview).not.toHaveAttribute("aria-current");
+    // its box is reserved like a report's: one line, a fixed height
+    expect(overview).toHaveClass("h-9", "shrink-0");
+    // one more stop of the same list: ↑ from the first report reaches it, Enter opens the overview
+    railLinks()[0].focus();
+    await user.keyboard("{ArrowUp}");
+    expect(overview).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(new URLSearchParams(view.probe.location?.search).get("report")).toBeNull());
+    expect(document.querySelector("[data-slot=reports-overview]")).toBeInTheDocument();
+    expect(overview).toHaveAttribute("aria-current", "page");
+  });
+
+  test("craft-27: the overview's lead and its empty line name no side — the list is on the left only in the wide view", () => {
+    expect(OVERVIEW_LEAD).toBe(
+      "Критики craft оценивали эти разделы; сначала идут те, где больше находок critical и major, а при равенстве — с более низкой оценкой. Оценки — аудит из 20 и критика из 40 по этапам прогона; каждое число открывает отчёт, который его поставил. Отчёт любого запуска выбирается в списке отчётов.",
+    );
+    expect(OVERVIEW_LEAD.split(/\s+/)).toHaveLength(48);
+    expect(OVERVIEW_EMPTY).toBe("Критики craft не оценивали разделов интерфейса в этом прогоне — выберите отчёт в списке отчётов.");
+    expect(OVERVIEW_EMPTY.split(/\s+/)).toHaveLength(15);
+    for (const s of [OVERVIEW_LEAD, OVERVIEW_EMPTY, REPORT_NOT_FOUND_NEXT]) expect(s).not.toMatch(/слева|справа/);
   });
 
   test("3–6: opening a report pushes its address, the tab is `tab=`, Back returns to the same report, tab and scroll", async () => {
@@ -276,7 +349,9 @@ describe("the strict rules (rules/ui → Strict)", () => {
     for (const c of document.querySelectorAll("[data-slot=report-sections] [data-slot=tab-count]")) expect(c).toHaveClass("min-w-count", "tabular-nums");
     const agent = document.querySelector("[data-toolbar-item=filter-agent]") as HTMLElement;
     expect(agent.style.minWidth).toMatch(/^calc\(/);
-    for (const t of screen.getAllByRole("button", { name: /^Открыть кадр / })) expect(t).toHaveClass("h-thumb-h", "w-thumb-w");
+    // the report's sections: a sticky strip, each finding one 32 px row (craft-13)
+    expect(document.querySelector("[data-slot=report-sections] > [data-slot=tabs]")).toHaveClass("[&>[role=tablist]]:sticky", "[&>[role=tablist]]:top-0");
+    for (const r of document.querySelectorAll("[data-slot=report-findings] [data-slot=finding-row]")) expect(r).toHaveClass("h-8");
     // the fold: the rail's region and the picker's line both exist, the container decides which shows
     expect(document.querySelector("[data-slot=report-rail]")).toHaveClass("hidden", "@min-[52rem]/reports:flex", "w-60");
     const picker = document.querySelector("[data-slot=report-picker]") as HTMLElement;

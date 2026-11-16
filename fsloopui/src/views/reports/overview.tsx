@@ -10,9 +10,11 @@ import { rankSurfaces } from "./model.ts";
 import { SurfaceScores } from "./scores.tsx";
 
 export const OVERVIEW_TITLE = "Разделы интерфейса";
+// The list of reports is a rail on the left in a wide view and the «Отчёт» picker above in a narrow one: the copy
+// names the list, never its side.
 export const OVERVIEW_LEAD =
-  "Выберите отчёт в списке слева. Ниже — разделы интерфейса, которые оценивали критики craft, по числу находок critical и major. Оценки — аудит из 20 и критика из 40 по этапам прогона; каждое число открывает отчёт, который его поставил.";
-export const OVERVIEW_EMPTY = "Критики craft не оценивали разделов интерфейса в этом прогоне — выберите отчёт в списке слева.";
+  "Критики craft оценивали эти разделы; сначала идут те, где больше находок critical и major, а при равенстве — с более низкой оценкой. Оценки — аудит из 20 и критика из 40 по этапам прогона; каждое число открывает отчёт, который его поставил. Отчёт любого запуска выбирается в списке отчётов.";
+export const OVERVIEW_EMPTY = "Критики craft не оценивали разделов интерфейса в этом прогоне — выберите отчёт в списке отчётов.";
 export const NO_SCORES = "критики craft не ставили оценок";
 
 export function Overview({ surfaces, findings, hrefOf }: { surfaces: readonly Surface[]; findings: readonly Finding[]; hrefOf: (launch: string) => string | null }) {

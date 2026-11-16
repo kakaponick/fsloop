@@ -18,7 +18,7 @@ import { runPath } from "../../app/routes.ts";
 import type { LoadedRun, ViewProps } from "../index.ts";
 import { filtersFor, heldItems, placeItems, railItems, REPORTS_VIEW, resolveItem, SEARCH, type RailItem } from "./model.ts";
 import { Overview } from "./overview.tsx";
-import { Rail, RAIL_LABEL } from "./rail.tsx";
+import { OVERVIEW_ITEM, Rail, RAIL_LABEL } from "./rail.tsx";
 import { Reader, reportPath } from "./reader.tsx";
 
 const NOUN: HeldNoun = { forms: NOUNS.report, gender: "m" };
@@ -76,9 +76,23 @@ function Reports({ run }: { run: LoadedRun }) {
   // ── the reader's scroll, per report and tab ─────────────────────────────────────────────────────
   const reader = useRef<HTMLDivElement>(null);
   const place = `${run.key}|${reportId ?? ""}|${tab ?? ""}`;
+  const lastReport = useRef(reportId);
   useLayoutEffect(() => {
-    if (reader.current) reader.current.scrollTop = scrolls.get(place) ?? 0;
-  }, [place]);
+    const el = reader.current;
+    if (!el) return;
+    const saved = scrolls.get(place);
+    const sameReport = lastReport.current === reportId;
+    lastReport.current = reportId;
+    if (saved !== undefined || !sameReport) {
+      el.scrollTop = saved ?? 0;
+      return;
+    }
+    // a section opened for the first time while the strip is pinned: the strip stays where it is and the new
+    // section starts right under it, instead of the reader jumping back to the facts
+    const sections = el.querySelector<HTMLElement>("[data-slot=report-sections]");
+    const top = sections ? sections.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop : 0;
+    el.scrollTop = Math.min(el.scrollTop, Math.max(0, top));
+  }, [place, reportId]);
   const onTab = (next: string) =>
     setParams(
       (prev) => {
@@ -115,11 +129,18 @@ function Reports({ run }: { run: LoadedRun }) {
       <div className="flex min-h-0 flex-1 border-t">
         <nav aria-label={RAIL_LABEL} data-slot="report-rail" className="hidden w-60 shrink-0 flex-col border-r @min-[52rem]/reports:flex">
           <div data-slot="rail-scroll" className="min-h-0 flex-1 overflow-y-auto py-1 pr-1 [scrollbar-gutter:stable]">
-            {filteredOut ? (
-              <EmptyState form="filtered" noun={NOUNS.report} filters={filterSummary(defs, prefs.filters, prefs.search)} onReset={() => setPrefs({ filters: {}, search: "" })} className="px-2 py-8" />
-            ) : (
-              <Rail items={railShown} outside={q.outside} findings={run.findings} current={item?.id ?? null} arrived={arrived} hrefOf={hrefOf} pathOf={pathOf} now={now} />
-            )}
+            <Rail
+              items={railShown}
+              outside={q.outside}
+              findings={run.findings}
+              current={item?.id ?? null}
+              arrived={arrived}
+              hrefOf={hrefOf}
+              overviewHref={runPath(run.key, { view: "reports" })}
+              pathOf={pathOf}
+              now={now}
+              empty={filteredOut ? <EmptyState form="filtered" noun={NOUNS.report} filters={filterSummary(defs, prefs.filters, prefs.search)} onReset={() => setPrefs({ filters: {}, search: "" })} className="px-2 py-8" /> : undefined}
+            />
           </div>
           <HeldStrip counts={{ fresh, moved, left: 0 }} noun={NOUN} onApply={() => setHeld(placeItems(items, held))} />
         </nav>
@@ -132,7 +153,7 @@ function Reports({ run }: { run: LoadedRun }) {
               onValueChange={(v) => navigate(v[0] ? hrefOf(v[0]) : runPath(run.key, { view: "reports" }))}
               options={railShown.map((s) => ({ value: s.item.id, label: `${s.item.description} · ${s.item.kind}` }))}
               placeholder="Найти отчёт"
-              anyLabel="обзор разделов"
+              anyLabel={OVERVIEW_ITEM.toLowerCase()}
             />
           </div>
           <div
@@ -163,7 +184,9 @@ function Reports({ run }: { run: LoadedRun }) {
           </div>
         </div>
       </div>
-      <StatusBar shown={q.matched} total={q.total} noun={NOUNS.launch} updatedAt={updated === null ? null : new Date(updated).toISOString()} now={now} />
+      {/* the total is the run's one launch count, the tab's number (Conventions 3); a launch still in the strip is
+          counted there and not yet shown */}
+      <StatusBar shown={q.matched} total={run.launchCount} noun={NOUNS.launch} updatedAt={updated === null ? null : new Date(updated).toISOString()} now={now} />
     </div>
   );
 }

@@ -6,7 +6,7 @@ import type { Finding, Launch, Run, RunningLaunch, Surface, SurfaceScore } from 
 import { agentKind, launchState, stageOf, type Tone } from "../../../shared/states.ts";
 import { count, NOUNS } from "../../../shared/text.ts";
 import type { FilterDef, SearchDef } from "@/table";
-import { lensOf, reportFindings, reportKind, resultOf, severityCounts, severityText, verdictCounts, verdictText, worstTone } from "./sections.ts";
+import { lensOf, reportFindings, reportKind, resultOf, severityCounts, severityText, verdictCounts, verdictText } from "./sections.ts";
 
 /** The view state's id: filters and search per run, history per view. */
 export const REPORTS_VIEW = "reports";
@@ -126,8 +126,9 @@ export interface ItemState {
   text: string;
 }
 
-/** The rail's second line: «2 major · 5 minor» in the worst severity's tone; a verdict's counts; an implementer's
- * result; «работает · 12 мин» while it runs; «нет отчёта» when its file is missing. */
+/** The rail's second line: «2 major · 5 minor», neutral — on a rail of reports in run order every critic would wear
+ * the same red, so severity's tone stays where it ranks (the reader, the overview); a verdict's counts; an
+ * implementer's result; «работает · 12 мин» while it runs; «нет отчёта», in its warning tone, when its file is missing. */
 export function itemState(item: RailItem, findings: readonly Finding[], now: number, { ended = false } = {}): ItemState {
   if (item.running) {
     if (ended) return { tone: "neutral", text: launchState({ running: false }, now).label };
@@ -150,7 +151,7 @@ export function itemState(item: RailItem, findings: readonly Finding[], now: num
   }
   if (kind === "critic") {
     const counts = severityCounts(own);
-    return counts.length ? { tone: worstTone(counts), text: severityText(counts) } : { tone: "neutral", text: "без находок" };
+    return { tone: "neutral", text: counts.length ? severityText(counts) : "без находок" };
   }
   const s = launchState({ running: false, seconds: l.seconds }, now);
   return { tone: s.tone, text: s.label };
@@ -211,14 +212,28 @@ export interface SurfaceLine {
   scores: SurfaceScore[];
 }
 
-/** The surfaces ranked by critical + major findings, most first; ties by key. */
+/** How a surface stood at its latest judged stage: the mean of its audit and critique as shares of their scales;
+ * null when no stage scored it. */
+function standing(scores: readonly SurfaceScore[]): number | null {
+  const last = scores.at(-1);
+  if (!last) return null;
+  const shares = [
+    last.audit !== null && last.auditMax ? last.audit / last.auditMax : null,
+    last.critique !== null && last.critiqueMax ? last.critique / last.critiqueMax : null,
+  ].filter((x): x is number => x !== null);
+  return shares.length ? shares.reduce((a, b) => a + b, 0) / shares.length : null;
+}
+
+/** The surfaces ranked by critical + major findings, most first; equal ones by their latest score, the lower first,
+ * a surface no stage scored after them; then by key. */
 export function rankSurfaces(surfaces: readonly Surface[], findings: readonly Pick<Finding, "surface" | "severity">[]): SurfaceLine[] {
+  const rank = (s: SurfaceLine) => standing(s.scores) ?? Number.POSITIVE_INFINITY;
   return surfaces
     .map((s) => {
       const own = findings.filter((f) => f.surface === s.key);
       return { key: s.key, label: s.label, critical: own.filter((f) => f.severity === "critical").length, major: own.filter((f) => f.severity === "major").length, scores: s.scores };
     })
-    .sort((a, b) => b.critical + b.major - (a.critical + a.major) || b.critical - a.critical || a.key.localeCompare(b.key));
+    .sort((a, b) => b.critical + b.major - (a.critical + a.major) || b.critical - a.critical || rank(a) - rank(b) || a.key.localeCompare(b.key));
 }
 
 /** One score series: the stages that wrote it, in order, and the scale its last stage used. */

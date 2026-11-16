@@ -4,7 +4,7 @@
 // one kind never shift the strip; an empty section stays with a muted «0». Agent kinds, launch states and severity
 // words come from shared/states.ts, never from here.
 import type { Finding, Launch } from "../../../shared/model.ts";
-import { SEVERITY, type Severity, type Tone } from "../../../shared/states.ts";
+import { SEVERITY, type Severity } from "../../../shared/states.ts";
 import { count, num, plural } from "../../../shared/text.ts";
 
 /** A value the report left empty: «—», «-», «none» or nothing. */
@@ -29,6 +29,7 @@ export const SECTION_LABELS = {
   NOTES: "Заметки",
   PARITY: "Паритет",
   VERIFY: "Проверка кода",
+  FRAMES: "Кадры",
   FILE: "Файл отчёта",
 } as const;
 
@@ -54,6 +55,7 @@ export type TabBody =
   | { kind: "findings" }
   | { kind: "items"; section: string; value: string | null; items: string[] }
   | { kind: "parts"; parts: { key: string; label: string; items: string[]; mono: boolean }[] }
+  | { kind: "frames" }
   | { kind: "file" };
 
 export interface ReportTab {
@@ -66,6 +68,7 @@ export interface ReportTab {
 
 export const FILE_TAB = "file";
 export const FINDINGS_TAB = "findings";
+export const FRAMES_TAB = "frames";
 
 /** Sections that are facts of the reader, not tabs: the lens and the craft scores. */
 const FACT_SECTIONS = new Set(["LENS", "AUDIT"]);
@@ -107,10 +110,13 @@ export const reportFindings = <F extends Pick<Finding, "launch" | "source">>(fin
 
 const fileTab: ReportTab = { id: FILE_TAB, label: SECTION_LABELS.FILE, count: 1, body: { kind: "file" } };
 
-/** The tabs of a report, fixed per agent kind, «Файл отчёта» last; `findings` — the report's own (`reportFindings`).
- * A running launch has none. */
-export function reportTabs(l: Launch, findings: number): ReportTab[] {
+/** The tabs of a report, fixed per agent kind, «Кадры» then «Файл отчёта» last; `findings` — the report's own
+ * (`reportFindings`); `frames` — the frames of its surface, or those its findings cite. A critic always has «Кадры»
+ * (a muted «0» when it has none), so two critics' strips match; another kind has it only when it has frames. A
+ * running launch has no tabs. */
+export function reportTabs(l: Launch, findings: number, frames = 0): ReportTab[] {
   const findingsTab = (): ReportTab => ({ id: FINDINGS_TAB, label: SECTION_LABELS.FINDINGS, count: findings, body: { kind: "findings" } });
+  const framesTab: ReportTab = { id: FRAMES_TAB, label: SECTION_LABELS.FRAMES, count: frames, body: { kind: "frames" } };
   const kind = reportKind(l);
   const present = Object.keys(l.sections).filter((k) => !FACT_SECTIONS.has(k));
   if (kind === "critic") {
@@ -118,8 +124,9 @@ export function reportTabs(l: Launch, findings: number): ReportTab[] {
     const extras = LENS_SECTIONS.filter((k) => present.includes(k) || LENS_IMPLIES.some(([re, s]) => s === k && re.test(lens)));
     const known = new Set<string>([...CRITIC_BASE, ...LENS_SECTIONS]);
     const others = present.filter((k) => !known.has(k));
-    return [findingsTab(), ...CRITIC_BASE.map((k) => itemsTab(l, k)), ...extras.map((k) => itemsTab(l, k)), ...others.map((k) => itemsTab(l, k)), fileTab];
+    return [findingsTab(), ...CRITIC_BASE.map((k) => itemsTab(l, k)), ...extras.map((k) => itemsTab(l, k)), ...others.map((k) => itemsTab(l, k)), framesTab, fileTab];
   }
+  const framed = frames > 0 ? [framesTab] : [];
   if (kind === "implement") {
     const others = present.filter((k) => !IMPLEMENT_KNOWN.has(k));
     return [
@@ -131,16 +138,20 @@ export function reportTabs(l: Launch, findings: number): ReportTab[] {
       itemsTab(l, "PARITY"),
       itemsTab(l, "VERIFY"),
       ...others.map((k) => itemsTab(l, k)),
+      ...framed,
       fileTab,
     ];
   }
-  return [...present.map((k) => itemsTab(l, k)), ...(findings ? [findingsTab()] : []), fileTab];
+  return [...present.map((k) => itemsTab(l, k)), ...(findings ? [findingsTab()] : []), ...framed, fileTab];
 }
 
 /** The body of a tab nothing was written into. */
 export function emptyTabText(kind: ReportKind): string {
   return kind === "critic" ? "Критик ничего сюда не записал." : kind === "implement" ? "Исполнитель ничего сюда не записал." : "Запуск ничего сюда не записал.";
 }
+
+/** «Кадры» with none: frames are the run's, not the critic's writing, so the body says why there are none. */
+export const NO_FRAMES = "Кадров нет: отчёт не оценивал раздел интерфейса, а его находки не ссылаются на кадры.";
 
 // ── outcome words ────────────────────────────────────────────────────────────────────────────
 
@@ -158,9 +169,6 @@ export function severityCounts(findings: readonly Pick<Finding, "severity">[]): 
 
 /** «2 critical · 5 major · 3 minor» — the severity words as the shared map writes them. */
 export const severityText = (counts: readonly SeverityCount[]): string => counts.map((c) => `${num(c.n)} ${SEVERITY[c.severity].compact}`).join(" · ");
-
-/** The tone of the worst severity present (Conventions 2: critical red, major amber, minor neutral). */
-export const worstTone = (counts: readonly SeverityCount[]): Tone => (counts.length ? SEVERITY[counts[0].severity].tone : "neutral");
 
 export const VERDICT_WORDS = ["resolved", "partial", "unresolved"] as const;
 export type VerdictWord = (typeof VERDICT_WORDS)[number];

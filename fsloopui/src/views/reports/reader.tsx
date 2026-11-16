@@ -1,11 +1,12 @@
 // The report reader (surfaces/reading.md → BLOCKS 3–6, LEADS; `ux 9`): one launch as an object page — its identity
-// (the description as the title, the launch id, the report's path copied on click), then one fact list whose first
-// rows are the outcome (finished or running with its age; findings by severity, the RESULT, or the verdicts) and,
-// for a craft report, the scores across stages; the facts follow, the rest behind «Подробнее». Then the frames of
-// its surface, and the report's sections as tabs with counts, fixed per agent kind, «Файл отчёта» last. Bodies are
-// running text at the reading measure; ids in them are links.
-import { CopyIcon } from "lucide-react";
-import { useState, type ReactNode } from "react";
+// (the description as the title, the launch id, the report's path copied on click, then one muted line: agent ·
+// model · duration · tokens), then one fact list of the outcome alone (the state; findings by severity, the RESULT,
+// or the verdicts; for a craft report, the scores across stages) with every other fact behind «Подробнее». Then the
+// report's sections as tabs with counts, fixed per agent kind, «Кадры» and «Файл отчёта» last; the strip stays in
+// view while the report scrolls. Bodies are running text at the reading measure; ids in them are links; the
+// findings are compact rows that expand in place (craft-13: the product first, in the first viewport).
+import { ChevronRightIcon, CopyIcon } from "lucide-react";
+import { useId, useState, type MouseEvent, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { Finding, Launch } from "../../../shared/model.ts";
 import { launchState, NOT_RECORDED, reportWord, SEVERITY, stageOf } from "../../../shared/states.ts";
@@ -16,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { copyLabel, copyText, CountLink, CountTabs, CountTabsContent, Dot, FactList, FrameStrip, Hint, Loading, NotRecorded, PartFailed, RunningText, StatusDot, type Fact, type Frame } from "@/ui";
 // From the files, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
 import { FindingArticle, frameSrc } from "@/finding/article.tsx";
+import { FindingRow } from "@/finding/row.tsx";
 import { openFindings } from "@/finding/open.ts";
 import { LINK_CLASS, ObjectLink, resolverFor, routerLink } from "../../app/links.tsx";
 import { runPath } from "../../app/routes.ts";
@@ -26,6 +28,7 @@ import { SurfaceScores } from "./scores.tsx";
 import {
   emptyTabText,
   FILE_TAB,
+  NO_FRAMES,
   reportKind,
   reportTabs,
   resultOf,
@@ -43,6 +46,7 @@ import {
 export const COPY_PATH_WHAT = "путь к отчёту";
 export const OPEN_IN_FINDINGS = "Открыть в находках";
 export const ALL_CONVENTIONS = "Все соглашения прогона";
+export const SECTIONS_LABEL = "Разделы отчёта";
 
 /** The report file's full path: the run folder joined with the launch's relative report path. */
 export function reportPath(dir: string, report: string): string {
@@ -64,7 +68,7 @@ export interface ReaderProps {
 export function Reader({ run, item, tab, onTab, now }: ReaderProps) {
   const l = item.launch;
   return (
-    <article data-slot="report-reader" aria-labelledby="report-title" className="flex min-w-0 flex-col gap-5">
+    <article data-slot="report-reader" aria-labelledby="report-title" className="flex min-w-0 flex-col gap-4">
       <Identity run={run} item={item} />
       {l ? <Finished run={run} launch={l} item={item} tab={tab} onTab={onTab} now={now} /> : <Running item={item} now={now} />}
     </article>
@@ -93,7 +97,31 @@ function Identity({ run, item }: { run: LoadedRun; item: RailItem }) {
           </Hint>
         )}
       </p>
+      {l && <MetaLine launch={l} />}
     </header>
+  );
+}
+
+/** One muted line of what produced the report — agent · model · duration · tokens (the split in the title): the
+ * facts the user reads once, kept beside the identity instead of as rows ahead of the outcome. The agent's word is
+ * left out where the line above already says it («отчёт критика»); a part the record lacks is left out here and
+ * reads «не записано» under «Подробнее». No part, no line. */
+function MetaLine({ launch: l }: { launch: Launch }) {
+  const spend = l.spend ? tokens(l.spend) : null;
+  const parts: { key: string; node: ReactNode }[] = reportKind(l) === "critic" ? [] : [{ key: "agent", node: <span title={l.agent ?? undefined}>{l.kind}</span> }];
+  if (l.model) parts.push({ key: "model", node: <span className="font-mono text-xs">{l.model}</span> });
+  if (l.seconds !== null) parts.push({ key: "duration", node: <span title="длительность запуска">{duration(l.seconds * 1000)}</span> });
+  if (spend) parts.push({ key: "tokens", node: <span title={spend.title}>{spend.compact}</span> });
+  if (!parts.length) return null;
+  return (
+    <p data-slot="report-meta" className="m-0 flex min-w-0 flex-wrap items-baseline text-muted-foreground tabular-nums">
+      {parts.map((p, i) => (
+        <span key={p.key} className="whitespace-nowrap">
+          {i > 0 && <span aria-hidden="true">{" · "}</span>}
+          {p.node}
+        </span>
+      ))}
+    </p>
   );
 }
 
@@ -151,12 +179,14 @@ function Finished({ run, launch: l, item, tab, onTab, now }: { run: LoadedRun; l
   const kind = reportKind(l);
   const findings = reportFindings(run.findings, l.id);
   const all = run.findings.filter((f) => f.launch === l.id).length;
-  const state = launchState({ running: false, seconds: l.seconds, reportMissing: l.reportMissing }, now);
+  // the state alone: how long the launch took is on the identity's line
+  const state = launchState({ running: false, reportMissing: l.reportMissing }, now);
   const verdicts = kind === "critic" ? verdictCounts(l) : null;
   const result = kind === "implement" ? resultOf(l) : null;
   const scored = run.surfaces.filter((s) => s.scores.some((sc) => sc.launch === l.id));
   const hrefOf = (launch: string) => (run.launches.some((x) => x.id === launch) ? runPath(run.key, { view: "reports", report: launch }) : null);
 
+  // ── the outcome: what the report says, the only rows open by default ───────────────────────────
   const facts: Fact[] = [{ label: "Состояние", outcome: true, value: <StatusDot state={{ tone: state.tone, label: state.label }} form="full" /> }];
   if (kind === "implement") facts.push({ label: "Итог", outcome: true, value: result ? <span className="font-mono text-xs">{result}</span> : <NotRecorded /> });
   if (verdicts) facts.push({ label: SECTION_LABELS.VERDICT, outcome: true, value: <span className="tabular-nums">{verdictText(verdicts)}</span> });
@@ -177,24 +207,25 @@ function Finished({ run, launch: l, item, tab, onTab, now }: { run: LoadedRun; l
         </span>
       ),
     });
-  facts.push({ label: "Агент", value: <AgentValue kind={l.kind} agent={l.agent} /> });
+
+  // ── «Подробнее»: how the launch ran ────────────────────────────────────────────────────────────
+  const more: Fact[] = [{ label: "Агент", value: <AgentValue kind={l.kind} agent={l.agent} /> }];
   const lens = l.sections.LENS?.value?.trim();
-  if (lens) facts.push({ label: "Линза критика", value: <span className="font-mono text-xs">{lens}</span> });
-  facts.push({ label: "Модель", value: l.model ? <span className="font-mono text-xs">{l.model}</span> : <NotRecorded /> });
-  facts.push({ label: "Этап", value: stageOf(l.stage).full });
-  if (l.unit) facts.push({ label: "Юнит", value: <ObjectLink run={run} kind="unit" id={l.unit} /> });
-  facts.push({ label: "Начало", value: at(l.startedAt, now) });
-  facts.push({ label: "Длительность", value: l.seconds !== null ? <span className="tabular-nums">{duration(l.seconds * 1000)}</span> : <NotRecorded /> });
-  const spend = l.spend ? tokens(l.spend) : null;
-  facts.push({ label: "Токены", value: spend ? <span title={spend.title} className="tabular-nums">{spend.compact}</span> : <NotRecorded /> });
-  const more: Fact[] = l.spend
-    ? [
-        { label: "Вход", value: <span className="tabular-nums">{count(l.spend.input, NOUNS.token)}</span> },
-        { label: "Выход", value: <span className="tabular-nums">{count(l.spend.output, NOUNS.token)}</span> },
-        { label: "Запись в кэш", value: <span className="tabular-nums">{count(l.spend.cacheWrite, NOUNS.token)}</span> },
-        { label: "Чтение кэша", value: <span className="tabular-nums">{count(l.spend.cacheRead, NOUNS.token)}</span> },
-      ]
-    : [];
+  if (lens) more.push({ label: "Линза критика", value: <span className="font-mono text-xs">{lens}</span> });
+  more.push({ label: "Этап", value: stageOf(l.stage).full });
+  if (l.unit) more.push({ label: "Юнит", value: <ObjectLink run={run} kind="unit" id={l.unit} /> });
+  more.push({ label: "Начало", value: at(l.startedAt, now) });
+  // the identity's line holds model, duration and tokens; one the record lacks is said here, never guessed
+  if (!l.model) more.push({ label: "Модель", value: <NotRecorded /> });
+  if (l.seconds === null) more.push({ label: "Длительность", value: <NotRecorded /> });
+  if (!l.spend) more.push({ label: "Токены", value: <NotRecorded /> });
+  if (l.spend)
+    more.push(
+      { label: "Вход", value: <span className="tabular-nums">{count(l.spend.input, NOUNS.token)}</span> },
+      { label: "Выход", value: <span className="tabular-nums">{count(l.spend.output, NOUNS.token)}</span> },
+      { label: "Запись в кэш", value: <span className="tabular-nums">{count(l.spend.cacheWrite, NOUNS.token)}</span> },
+      { label: "Чтение кэша", value: <span className="tabular-nums">{count(l.spend.cacheRead, NOUNS.token)}</span> },
+    );
   const noColumn = <NotRecorded cause="в записи запуска нет этой колонки" />;
   more.push({ label: "Первый запрос", value: l.boot !== undefined ? <span className="tabular-nums">{count(l.boot, NOUNS.token)}</span> : noColumn });
   const kids = l.children ? tokens(l.children) : null;
@@ -215,19 +246,12 @@ function Finished({ run, launch: l, item, tab, onTab, now }: { run: LoadedRun; l
   // The frames of the report's surface; a report without one shows the frames its findings cite.
   const names = item.surfaces.length ? [...new Set(run.surfaces.filter((s) => item.surfaces.includes(s.key)).flatMap((s) => s.frames))] : [...new Set(findings.flatMap((f) => f.frames))];
   const frames: Frame[] = names.map((name) => ({ src: frameSrc(run.key, name), name }));
+  const framesTitle = `Кадры ${item.surfaces.length ? `раздела ${item.surfaces.join(", ")}` : "из находок отчёта"}`;
   const error = l.reportMissing ? run.errors.find((e) => e.file === l.report || e.file === l.id) : null;
 
   return (
     <>
       <FactList facts={facts} more={more} foldKey="report" label="Запуск агента" />
-      {frames.length > 0 && (
-        <section aria-labelledby="report-frames" className="flex flex-col gap-1.5">
-          <h3 id="report-frames" className="m-0 text-xs font-normal text-muted-foreground">
-            Кадры {item.surfaces.length ? `раздела ${item.surfaces.join(", ")}` : "из находок отчёта"}
-          </h3>
-          <FrameStrip frames={frames} limit={16} />
-        </section>
-      )}
       {l.reportMissing ? (
         <PartFailed what={`Отчёт ${basename(l.report ?? l.id)}`} cause={error?.cause ?? NOT_RECORDED} />
       ) : (
@@ -238,28 +262,41 @@ function Finished({ run, launch: l, item, tab, onTab, now }: { run: LoadedRun; l
               {unparsedText(l.unparsed.length)}
             </p>
           )}
-          <Sections run={run} launch={l} findings={findings} tab={tab} onTab={onTab} now={now} />
+          <Sections run={run} launch={l} findings={findings} frames={frames} framesTitle={framesTitle} tab={tab} onTab={onTab} now={now} />
         </>
       )}
     </>
   );
 }
 
-function Sections({ run, launch: l, findings, tab, onTab, now }: { run: LoadedRun; launch: Launch; findings: Finding[]; tab: string | null; onTab: (tab: string) => void; now: number }) {
-  const tabs = reportTabs(l, findings.length);
+interface SectionsProps {
+  run: LoadedRun;
+  launch: Launch;
+  findings: Finding[];
+  frames: Frame[];
+  framesTitle: string;
+  tab: string | null;
+  onTab: (tab: string) => void;
+  now: number;
+}
+
+/** The section tabs. The strip sticks to the reader's top on the page's ground while its panel scrolls under it, so
+ * another section is one click away at any depth; its height is the tab list's own, fixed. */
+function Sections({ run, launch: l, findings, frames, framesTitle, tab, onTab, now }: SectionsProps) {
+  const tabs = reportTabs(l, findings.length, frames.length);
   const active = tabs.find((t) => t.id === tab) ?? tabs[0];
   return (
-    <section data-slot="report-sections" aria-label="Разделы отчёта" className="flex min-w-0 flex-col">
+    <section data-slot="report-sections" aria-label={SECTIONS_LABEL} className="flex min-w-0 flex-col">
       <CountTabs
         value={active.id}
         onValueChange={onTab}
-        label="Разделы отчёта"
+        label={SECTIONS_LABEL}
         tabs={tabs.map((t) => ({ value: t.id, label: t.label, count: t.id === FILE_TAB ? null : t.count }))}
-        className="min-w-0 [&>[role=tablist]]:max-w-full [&>[role=tablist]]:overflow-x-auto [&>[role=tablist]]:border-b"
+        className="min-w-0 [&>[role=tablist]]:sticky [&>[role=tablist]]:top-0 [&>[role=tablist]]:z-10 [&>[role=tablist]]:max-w-full [&>[role=tablist]]:overflow-x-auto [&>[role=tablist]]:border-b [&>[role=tablist]]:bg-background"
       >
         {tabs.map((t) => (
           <CountTabsContent key={t.id} value={t.id} className="pt-4">
-            <Body run={run} launch={l} tab={t} findings={findings} now={now} />
+            <Body run={run} launch={l} tab={t} findings={findings} frames={frames} framesTitle={framesTitle} now={now} />
           </CountTabsContent>
         ))}
       </CountTabs>
@@ -267,10 +304,21 @@ function Sections({ run, launch: l, findings, tab, onTab, now }: { run: LoadedRu
   );
 }
 
-function Body({ run, launch: l, tab, findings, now }: { run: LoadedRun; launch: Launch; tab: ReportTab; findings: Finding[]; now: number }) {
+function Body({ run, launch: l, tab, findings, frames, framesTitle, now }: { run: LoadedRun; launch: Launch; tab: ReportTab; findings: Finding[]; frames: Frame[]; framesTitle: string; now: number }) {
   const body: TabBody = tab.body;
   const resolve = resolverFor(run);
   if (body.kind === "file") return <FileBody run={run} launch={l} />;
+  if (body.kind === "frames")
+    return frames.length ? (
+      <section aria-labelledby="report-frames" className="flex flex-col gap-1.5">
+        <h3 id="report-frames" className="m-0 text-xs font-normal text-muted-foreground">
+          {framesTitle}
+        </h3>
+        <FrameStrip frames={frames} limit={16} />
+      </section>
+    ) : (
+      <p className="m-0 max-w-measure text-muted-foreground">{NO_FRAMES}</p>
+    );
   if (tab.count === 0) return <p className="m-0 text-muted-foreground">{emptyTabText(reportKind(l))}</p>;
   if (body.kind === "findings") return <FindingsBody run={run} findings={findings} now={now} />;
   if (body.kind === "parts")
@@ -346,13 +394,26 @@ function ReportFile({ run, file }: { run: LoadedRun; file: string }) {
 
 const ALL = "all";
 
-/** «Находки»: a severity filter over the report's findings, then each as the shared finding article. */
+/** A click on a row's own text toggles it; a link or a button inside the row keeps its own action. */
+const ownClick = (e: MouseEvent<HTMLElement>) => !(e.target as HTMLElement).closest("a, button");
+
+/** «Находки»: a severity filter over the report's findings, each one 32 px `FindingRow` that expands in place into
+ * the shared article — several may stay open, so the list reads like «Находки» and the whole report scans in a
+ * screen (rules/ui → Tables 3). The expansion is the user's own click and opens under the row, never above it. */
 function FindingsBody({ run, findings, now }: { run: LoadedRun; findings: Finding[]; now: number }) {
   const [severity, setSeverity] = useState(ALL);
+  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const base = useId();
   const counts = severityCounts(findings);
   const shown = severity === ALL ? findings : findings.filter((f) => (f.severity ?? "none") === severity);
+  const toggle = (id: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
   return (
-    <div className="flex min-w-0 flex-col gap-4">
+    <div className="flex min-w-0 flex-col gap-3">
       {counts.length > 1 && (
         <ToggleGroup type="single" variant="outline" size="sm" spacing={0} value={severity} onValueChange={(v) => v && setSeverity(v)} aria-label="Серьёзность находок">
           {[{ severity: ALL, n: findings.length }, ...counts].map((c) => (
@@ -363,18 +424,39 @@ function FindingsBody({ run, findings, now }: { run: LoadedRun; findings: Findin
           ))}
         </ToggleGroup>
       )}
-      <ol data-slot="report-findings" className="m-0 flex list-none flex-col p-0">
-        {shown.map((f) => (
-          <li key={f.id} data-finding={f.id} className={cn("flex flex-col gap-2 border-t py-4 first:border-t-0 first:pt-0")}>
-            <h3 className="m-0 flex min-w-0 items-baseline gap-3 text-sm font-normal">
-              <span className="font-mono text-xs">{f.local}</span>
-              <ObjectLink run={run} kind="finding" id={f.id} className="ml-auto shrink-0 text-xs">
-                {OPEN_IN_FINDINGS}
-              </ObjectLink>
-            </h3>
-            <FindingArticle run={run} finding={f} now={now} />
-          </li>
-        ))}
+      <ol data-slot="report-findings" className="m-0 flex list-none flex-col border-t p-0">
+        {shown.map((f, i) => {
+          const isOpen = open.has(f.id);
+          const panel = `${base}-${i}`;
+          const name = `${isOpen ? "Свернуть" : "Развернуть"} находку ${f.local}`;
+          return (
+            <li key={f.id} data-finding={f.id} className="border-b">
+              <div
+                data-slot="report-finding-line"
+                data-state={isOpen ? "open" : "closed"}
+                onClick={(e) => ownClick(e) && toggle(f.id)}
+                className="grid cursor-default grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-x-1 pr-2 hover:bg-muted data-[state=open]:bg-muted/40"
+              >
+                <Hint label={name}>
+                  <Button variant="ghost" size="icon-xs" aria-expanded={isOpen} aria-controls={panel} aria-label={name} onClick={() => toggle(f.id)}>
+                    <ChevronRightIcon aria-hidden="true" className={cn("transition-transform motion-reduce:transition-none", isOpen && "rotate-90")} />
+                  </Button>
+                </Hint>
+                <FindingRow run={run} finding={f} />
+              </div>
+              {isOpen && (
+                <div id={panel} data-slot="report-finding-detail" className="flex flex-col gap-2 bg-muted/40 pt-1 pr-4 pb-4 pl-7">
+                  <p className="m-0 flex justify-end">
+                    <ObjectLink run={run} kind="finding" id={f.id} className="text-xs">
+                      {OPEN_IN_FINDINGS}
+                    </ObjectLink>
+                  </p>
+                  <FindingArticle run={run} finding={f} now={now} inRow />
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ol>
     </div>
   );
