@@ -12,7 +12,7 @@ import { runKey as viewKey, type RunPrefs } from "../../table/view-state.ts";
 import { runPath } from "../../app/routes.ts";
 import { COLUMNS, STATE_GLOSSARY } from "./columns.tsx";
 import { BAR_ORDER } from "./index.tsx";
-import { DEFAULT_SORT, emptyFor, filtersFor, SEARCH, stateDetail, statesOf, stripStates, unitRows, type UnitRow } from "./query.ts";
+import { closingIds, DEFAULT_SORT, emptyFor, filtersFor, PRESETS, SEARCH, stateDetail, statesOf, stripStates, unitRows, type UnitRow } from "./query.ts";
 import { fixtureApp, keyOf, loadedRun, NOW, renderRun, renderUnits } from "./testing.tsx";
 import { CANDIDATES_WIDEST, candidatesText, UNDECIDED_WIDEST, undecidedText, unitNotFound } from "./words.ts";
 
@@ -105,20 +105,60 @@ describe("the view's configuration at the production shape", () => {
     expect(sorted).toEqual(expected);
   });
 
-  test("search: ids, shas and the closed findings' ids OR-matched; the title as free text", () => {
+  test("search: ids and shas OR-matched, the title as free text — what the placeholder names, and nothing it does not", () => {
     const q = (search: string) => runQuery({ rows, rowId: (u) => u.id, columns: [], filters: [], search: SEARCH, state: { sort: null, filters: {}, search } }).rows.map((u) => u.id);
     expect(q("c0ffee05")).toEqual(["u5"]);
     expect(q("c0ffee05 f1f1f103")).toEqual(["u5", "f3"]);
-    const closed = run.units.find((u) => u.id === "u1")?.closes[0] as string;
-    expect(q(closed)).toContain("u1");
     expect(q("fixes")).toEqual(Array.from({ length: 10 }, (_, k) => `f${k + 1}`));
+    // a finding's id is searched in «Находки», where its row names its units; here it would match a row with no hit
+    const closed = run.units.find((u) => u.id === "u1")?.closes[0] as string;
+    expect(q(closed)).toEqual([]);
   });
 
-  test("craft-6: the placeholder names the four fields searched in the brief's words, within the field's cap", () => {
-    expect(SEARCH.placeholder).toBe("Юнит, коммит, находка, название");
-    expect(SEARCH.placeholder?.split(" ")).toHaveLength(4);
-    // p1-final-units.png: the field at its 20 rem cap showed 33 characters («Юнит, коммит, находка или текст з»)
-    expect(SEARCH.placeholder?.length).toBeLessThanOrEqual(31);
+  test("craft-6, craft-10: the placeholder names the fields searched by the columns' own words and fits the search at 1280 and 1440", () => {
+    expect(SEARCH.placeholder).toBe("Юнит, коммит, что делает");
+    // each field by its column's header (ux 1: one concept, one word — «Что делает», never «название»)
+    expect(SEARCH.placeholder.split(", ")).toEqual(["Юнит", "коммит", "что делает"]);
+    expect(SEARCH.placeholder.split(", ").map((w) => COLUMNS.find((c) => c.label.toLowerCase() === w.toLowerCase())?.id)).toEqual(["id", "sha", "title"]);
+    // p1-verdict-units-1280.png: 21 characters («Юнит, коммит, находка») took 140 px of a 148 px text room, 6.7 px each. With
+    // «Вид» in the toolbar the search's text room is about 168 px at 1440 (a 271 px field less its 103 px of icon,
+    // «/», clear and history) and about 209 px at 1280 (both filters folded into «…»): 25 characters at most
+    expect(SEARCH.placeholder.length).toBeLessThanOrEqual(25);
+  });
+
+  test("p1-review cand-1: «Вид» presets — Все · В работе · Не начаты · Заблокированы · Закоммичены — over the states, counted on the 42 units", () => {
+    expect(PRESETS.map((p) => p.label)).toEqual(["Все", "В работе", "Не начаты", "Заблокированы", "Закоммичены"]);
+    expect(Object.fromEntries(PRESETS.map((p) => [p.id, p.filters]))).toEqual({
+      all: {},
+      work: { state: ["implement", "verify", "debug", "land"] },
+      unstarted: { state: ["drafted", "ready"] },
+      blocked: { state: ["blocked"] },
+      committed: { state: ["committed"] },
+    });
+    const q = runQuery({ rows, rowId: (u) => u.id, columns: [], filters: filtersFor(run), search: SEARCH, state: { sort: null, filters: {}, search: "" }, presets: PRESETS });
+    // the fixture: 1 implement and 1 verify; 4 drafted and 5 ready; 1 blocked; 30 committed
+    expect(Object.fromEntries(PRESETS.map((p) => [p.label, q.presetCounts[p.id]]))).toEqual({ Все: 42, "В работе": 2, "Не начаты": 9, Заблокированы: 1, Закоммичены: 30 });
+    // every state but «не записано» falls in one named slice: the slices add up to the whole
+    expect(PRESETS.slice(1).flatMap((p) => p.filters.state ?? []).sort()).toEqual(["blocked", "committed", "debug", "drafted", "implement", "land", "ready", "verify"]);
+  });
+
+  test("verdict cand-1: one set of findings per unit — the counts, the menu and «Закрывает N» read the findings that name the unit", () => {
+    // u22's brief closes none, but the run's decision names it on a finding: its row counted it, its detail did not
+    const u22 = run.units.find((u) => u.id === "u22") as (typeof run.units)[number];
+    expect(u22.closes).toEqual([]);
+    const naming = run.findings.filter((f) => f.units.includes("u22")).map((f) => f.id);
+    expect(naming.length).toBeGreaterThan(0);
+    expect(closingIds(run, u22)).toEqual(naming);
+    const row22 = rows.find((u) => u.id === "u22") as UnitRow;
+    expect(row22.majorUp + row22.minor).toBe(naming.length);
+    // every unit: the brief's own ids first, then the decision's; an id the run does not hold stays, to read «не найдена»
+    for (const u of run.units) {
+      const ids = closingIds(run, u);
+      expect(new Set(ids).size, u.id).toBe(ids.length);
+      expect(ids.slice(0, u.closes.length), u.id).toEqual(u.closes);
+      expect(ids.filter((id) => run.findings.some((f) => f.id === id)).sort(), u.id).toEqual(run.findings.filter((f) => f.units.includes(u.id)).map((f) => f.id).sort());
+    }
+    expect(closingIds({ findings: [] }, { id: "u1", closes: ["p1-review-critic-code#code-999"] })).toEqual(["p1-review-critic-code#code-999"]);
   });
 
   test("the state cell: «state · age · cause», the cause last; no age without the model's `since`", () => {
@@ -166,8 +206,8 @@ describe("the task walk over u1's handler (surfaces/units.md → WALK)", () => {
     expect([...strip.querySelectorAll("[data-slot=state-count]")].map((s) => s.textContent)).toEqual(["заблокирован1", "проверяется1", "пишется1", "готов к работе5", "черновик4", "закоммичен30"]);
     expect(strip.querySelector("[data-slot=state-count] [data-tone]")).toHaveAttribute("data-tone", "warning");
     for (const n of strip.querySelectorAll("[data-slot=state-count] > span:last-child")) expect(n).toHaveClass("min-w-count", "tabular-nums");
-    expect([...container.querySelectorAll<HTMLElement>("[data-toolbar-item]")].map((el) => el.dataset.toolbarItem)).toEqual(["search", "filter-state", "filter-pass", "facts", "columns"]);
-    expect(screen.getByRole("searchbox")).toHaveAttribute("placeholder", "Юнит, коммит, находка, название");
+    expect([...container.querySelectorAll<HTMLElement>("[data-toolbar-item]")].map((el) => el.dataset.toolbarItem)).toEqual(["preset", "search", "filter-state", "filter-pass", "facts", "columns"]);
+    expect(screen.getByRole("searchbox")).toHaveAttribute("placeholder", "Юнит, коммит, что делает");
 
     // a row: id · pass · state · title · commit · counts
     expect(cell("u23", "state")).toHaveTextContent("заблокирован · waits for the user — the empty state's wording (j140)");
@@ -226,6 +266,34 @@ describe("the task walk over u1's handler (surfaces/units.md → WALK)", () => {
     expect(screen.getByText("Фильтры: Поиск: «ни-одного-юнита»")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Сбросить фильтры" }));
     await loaded();
+  });
+
+  test("p1-review cand-1: «Вид» stands first in the toolbar; choosing «Заблокированы» sets the state filter and leaves the blocked unit", async () => {
+    const user = userEvent.setup();
+    renderUnits(fx, KEY, runPath(KEY, { view: "units" }));
+    await loaded();
+    const preset = screen.getByRole("combobox", { name: "Вид" });
+    expect(preset).toHaveTextContent(/^Вид:Все$/);
+    preset.focus();
+    await user.keyboard("{Enter}");
+    // each preset with its count over the units, in the open list only
+    expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual(["Все42", "В работе2", "Не начаты9", "Заблокированы1", "Закоммичены30"]);
+    await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{Enter}");
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Вид" })).toHaveTextContent(/^Вид:Заблокированы$/));
+    expect(ids()).toEqual(["u23"]);
+    expect(readPref<RunPrefs | null>(viewKey("units", KEY), null)?.filters).toEqual({ state: ["blocked"] });
+  });
+
+  test("craft-3: the counts strip is the table kit's `StripCount` — each entry's word goes to its title and the screen reader in a narrow bar", async () => {
+    const { container } = renderUnits(fx, KEY, runPath(KEY, { view: "units" }));
+    await loaded();
+    const entries = [...container.querySelectorAll<HTMLElement>("[data-slot=counts-strip] [data-slot=state-count]")];
+    expect(entries.map((e) => e.getAttribute("title"))).toEqual(["заблокирован 1", "проверяется 1", "пишется 1", "готов к работе 5", "черновик 4", "закоммичен 30"]);
+    for (const e of entries) {
+      expect(e.querySelector("[data-slot=strip-label]")).toHaveClass("@max-5xl/bar:sr-only");
+      expect(e.querySelector("[data-slot=strip-count]")).toHaveClass("min-w-count", "tabular-nums");
+      expect(e).toHaveClass("shrink-0");
+    }
   });
 
   test("4: rows expand in place, several at once; the URL names the last one, replaced", async () => {
@@ -317,7 +385,7 @@ describe("the empty states and the production shape (done-criteria 4, 6)", () =>
     const fourteen = { ...run, units: run.units.filter((u) => u.pass === 1).slice(0, 14) };
     const { container } = renderRun(fx, fourteen, runPath(KEY, { view: "units" }));
     expect(bodyRows()).toHaveLength(14);
-    expect([...container.querySelectorAll<HTMLElement>("[data-toolbar-item]")].map((el) => el.dataset.toolbarItem)).toEqual(["search", "filter-state", "facts", "columns"]);
+    expect([...container.querySelectorAll<HTMLElement>("[data-toolbar-item]")].map((el) => el.dataset.toolbarItem)).toEqual(["preset", "search", "filter-state", "facts", "columns"]);
     expect(container.querySelector("[data-slot=status-bar]")).toHaveTextContent("14 юнитов");
   });
 

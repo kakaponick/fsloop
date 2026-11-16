@@ -21,7 +21,8 @@ const path = runPath(KEY, { view: "units" });
 const bodyRows = () => [...document.querySelectorAll<HTMLTableRowElement>("tr[data-row-id]")];
 const ids = () => bodyRows().map((r) => r.dataset.rowId as string);
 const row = (id: string) => bodyRows().find((r) => r.dataset.rowId === id) as HTMLTableRowElement;
-const strip = () => document.querySelector("[data-slot=held-strip]") as HTMLElement;
+// the table's own strip, under the table: an open detail holds strips of its own in its sections' heading lines
+const strip = () => [...document.querySelectorAll<HTMLElement>("[data-slot=held-strip]")].find((s) => !s.closest("[data-slot=unit-detail]")) as HTMLElement;
 const STATE = (id: string) => row(id).querySelector("td[data-col=state]") as HTMLElement;
 
 /** A fresh fixture root per case: each case writes the run folder as fsloop would. */
@@ -55,6 +56,21 @@ describe("live updates of «Юниты»", () => {
     expect(document.querySelector('tr[data-detail-for="u1"]')).toBeTruthy();
     expect(row("u1")).toHaveFocus();
     expect(strip()).toBeEmptyDOMElement();
+  });
+
+  test("craft-5: an open unit committed live keeps its detail's fact rows — what emptied reads «—» in place", async () => {
+    const user = userEvent.setup({ delay: null });
+    const { fx, units, writeUnits } = setup();
+    apps.push(fx);
+    renderUnits(fx, KEY, path);
+    await waitFor(() => expect(bodyRows().length).toBeGreaterThan(0), { timeout: 4000 });
+    const dts = () => [...(document.querySelector('tr[data-detail-for="u1"] [data-slot=fact-list]') as HTMLElement).querySelectorAll("dt")].map((d) => d.textContent);
+    await user.click(row("u1").querySelector("td[data-col=title]") as HTMLElement);
+    const opened = dts();
+    expect(opened).toContain("Бриф юнита");
+    writeUnits(units().replace(/\| u1 \| 1 \| implement \|/, "| u1 | 1 | committed c0ffee99 |"));
+    await waitFor(() => expect(STATE("u1")).toHaveTextContent("закоммичен"), { timeout: 4000 });
+    expect(dts()).toEqual(opened);
   });
 
   test("a new unit waits in the strip, «1 новый юнит · показать», and is placed on click", async () => {

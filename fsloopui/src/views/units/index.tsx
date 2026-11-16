@@ -12,7 +12,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { UNIT_STATE, type UnitState } from "../../../shared/states.ts";
 import { NOUNS } from "../../../shared/text.ts";
 import { CountLink, Dot, NotFound, type HeldNoun } from "@/ui";
-import { copyAction, DataTable, type BarOrder, type RowAction } from "@/table";
+import { copyAction, DataTable, StripCount, type BarOrder, type RowAction } from "@/table";
 // From the files, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
 import { countFindings, type FindingFilter } from "@/finding/facets.ts";
 import { openFindings } from "@/finding/open.ts";
@@ -23,7 +23,7 @@ import type { LoadedRun, ViewProps } from "../index.ts";
 import { COLUMNS } from "./columns.tsx";
 import { UnitDetail } from "./detail.tsx";
 import { useUnitMarks } from "./marks.ts";
-import { checksOf, DEFAULT_SORT, emptyFor, filtersFor, SEARCH, statesOf, stripStates, unitRows, unitsFailure, UNITS_TABLE, type UnitRow } from "./query.ts";
+import { checksOf, DEFAULT_SORT, emptyFor, filtersFor, PRESETS, SEARCH, statesOf, stripStates, unitRows, unitsFailure, UNITS_TABLE, type UnitRow } from "./query.ts";
 import {
   CANDIDATES,
   CANDIDATES_TITLE,
@@ -86,22 +86,14 @@ function ToolbarFacts({ run }: { run: LoadedRun }) {
  * data's age stay packed at the right end, apart from the strip's width. */
 export const BAR_ORDER: BarOrder = { start: ["shown", "paging"], end: ["selected", "age"] };
 
-/** The counts strip (table #8): a dot, the state and its count for every state the run's units have been in since
- * the view opened, each count in a three-digit box; a state the filters or a live change leave empty reads a muted
- * 0, so the strip keeps its entries in their places. */
+/** The counts strip (table #8): the table kit's entry — a dot, the state and its count in a three-digit box — for
+ * every state the run's units have been in since the view opened; a state the filters or a live change leave empty
+ * reads a muted 0, so the strip keeps its entries in their places. In a narrow bar (1280 px) each entry drops its
+ * word to its title and the screen reader, so the strip fits beside the total and the age (craft-3). */
 function UnitCounts({ rows, states }: { rows: readonly UnitRow[]; states: readonly UnitState[] }) {
   const by = new Map<UnitState, number>();
   for (const r of rows) by.set(r.state, (by.get(r.state) ?? 0) + 1);
-  return states.map((s) => {
-    const n = by.get(s) ?? 0;
-    return (
-      <span key={s} data-slot="state-count" className="inline-flex items-center gap-1.5">
-        <Dot tone={n ? UNIT_STATE[s].tone : "neutral"} />
-        {UNIT_STATE[s].compact}
-        <span className={n ? "inline-block min-w-count text-foreground tabular-nums" : "inline-block min-w-count tabular-nums"}>{n}</span>
-      </span>
-    );
-  });
+  return states.map((s) => <StripCount key={s} tone={UNIT_STATE[s].tone} label={UNIT_STATE[s].compact} count={by.get(s) ?? 0} />);
 }
 
 function Units({ run }: { run: LoadedRun }) {
@@ -191,6 +183,7 @@ function Units({ run }: { run: LoadedRun }) {
         noun={NOUN}
         columns={COLUMNS}
         filters={filters}
+        presets={PRESETS}
         search={SEARCH}
         actions={actions}
         detail={(u) => <UnitDetail run={run} unit={u} checks={checksOf(u)} now={now} />}

@@ -2,7 +2,7 @@
 // literal): the detail's section headings, a check's outcome and its attempts, the toolbar facts, a missing unit, the
 // cell's cause. State words come from shared/states.ts; the plural, durations and Moscow time from shared/text.ts.
 import { count, NOUNS, type Forms } from "../../../shared/text.ts";
-import { notFoundText, type GlossaryEntry } from "@/ui";
+import { notFoundText, type GlossaryEntry, type HeldNoun } from "@/ui";
 
 /** The detail's sections, in reading order (surfaces/units.md → BLOCKS → expanded detail). */
 export const SECTION = {
@@ -64,6 +64,18 @@ export const UNDECIDED_WIDEST = undecidedText(888);
 /** The facts' titles: what the count is and where it leads (ux 1: one step away). */
 export const CANDIDATES_TITLE = "Находки-кандидаты: прогон их не исправляет — открыть в «Находках»";
 export const UNDECIDED_TITLE = "Находки без решения прогона — открыть в «Находках»";
+
+/** What a section of an open detail holds while a live change brings more: the held-order strip's noun in its
+ * heading line — «1 новый запуск агента · показать», «2 новых проверки · показать». */
+export const HELD_NOUN: Record<"finding" | "launch" | "check", HeldNoun> = {
+  finding: { forms: NOUNS.finding, gender: "f" },
+  launch: { forms: NOUNS.launch, gender: "m" },
+  check: { forms: ["проверка", "проверки", "проверок"], gender: "f" },
+};
+
+/** A finding the unit closes, expanded in place: its chevron's name and the step to its own place (as in «Отчёты»). */
+export const findingToggle = (local: string, open: boolean): string => `${open ? "Свернуть" : "Развернуть"} находку ${local}`;
+export const OPEN_IN_FINDINGS = "Открыть в находках";
 
 /** The row menu's item beyond «Открыть» and the copies; it is listed only for a unit that closes findings. */
 export const OPEN_FINDINGS = "Открыть находки юнита";

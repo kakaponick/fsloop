@@ -4,12 +4,13 @@
 // не найдена», «не записано», «Бриф units/u3/brief.md не прочитан: …». Strict 1: every list line is one fixed row.
 import "../../ui/test-setup.ts";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterAll, describe, expect, test } from "vitest";
 import type { Unit, UnitCheck } from "../../../shared/model.ts";
 import { UiProvider } from "@/ui";
 import { runPath } from "../../app/routes.ts";
-import { ROW_TITLE_CHARS, UnitDetail, unitFacts } from "./detail.tsx";
+import { ROW_TITLE_CHARS, UnitDetail, unitFacts, type UnitDetailProps } from "./detail.tsx";
 import { checkGroups, checksOf, launchRows } from "./query.ts";
 import { fixtureApp, keyOf, loadedRun, MIN, NOW } from "./testing.tsx";
 import { attemptsText, CHECK_HEAD, checkOutcome, closesTitle, LAUNCH_HEAD, logName } from "./words.ts";
@@ -41,6 +42,8 @@ const runningStart = new Date(NOW - 12 * MIN).toISOString();
 const run = {
   ...base,
   units: base.units.map((u) => (u.id === "u24" ? unit : u)),
+  // the findings name u24 as the server would for this brief: exactly the ones it closes
+  findings: base.findings.map((f) => ({ ...f, units: [...f.units.filter((id) => id !== "u24"), ...(closes.includes(f.id) ? ["u24"] : [])] })),
   running: [{ agentId: "a0c1", description: "u24 implement", agent: "fsloop-implement", name: "u24 · исполнитель", startedAt: runningStart, lastAt: runningStart }],
   errors: [...base.errors, { file: "units/u3/brief.md", cause: "файла нет" }],
 };
@@ -55,7 +58,7 @@ const checks: UnitCheck[] = [
   { file: "land.log.lines", n: 1, label: "push", exit: 0, line: "main", seconds: 4, endedAt: new Date(NOW - 5 * MIN).toISOString() },
 ];
 
-const mount = (u: Unit = unit, c: readonly UnitCheck[] | null = checks, r = run) =>
+const mount = (u: Unit = unit, c: readonly UnitCheck[] | null = checks, r: UnitDetailProps["run"] = run) =>
   render(
     <UiProvider>
       <MemoryRouter>
@@ -184,12 +187,61 @@ describe("a unit's detail at the production limits", () => {
   });
 
   test("the absent parts: no checks in the model read «не записано»; no closes, no launches read their own words", () => {
-    mount({ ...unit, closes: [], launches: [], blockedBy: [] }, null, { ...run, running: [], errors: base.errors });
+    // a unit that closes nothing: no finding names it either
+    mount({ ...unit, closes: [], launches: [], blockedBy: [] }, null, { ...run, findings: base.findings.map((f) => ({ ...f, units: f.units.filter((id) => id !== "u24") })), running: [], errors: base.errors });
     expect(screen.getByRole("heading", { name: "Не закрывает ни одной находки" })).toBeInTheDocument();
     expect(section("Запуски агентов")).toHaveTextContent("—");
     expect(section("Проверки юнита")).toHaveTextContent("не записано");
     const facts = document.querySelector("[data-slot=fact-list]") as HTMLElement;
     expect(facts).toHaveTextContent("units/u3/brief.md");
+  });
+
+  test("verdict cand-10: a finding it closes expands in place into the shared article, as in «Отчёты»; the chevron controls a panel only while it exists", async () => {
+    const user = userEvent.setup({ delay: null });
+    mount();
+    const items = section("Закрывает 28 находок").querySelectorAll("li");
+    const first = base.findings[0];
+    const toggle = within(items[0]).getByRole("button", { name: `Развернуть находку ${first.local}` });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).not.toHaveAttribute("aria-controls");
+    await user.click(toggle);
+    const open = within(items[0]).getByRole("button", { name: `Свернуть находку ${first.local}` });
+    expect(open).toHaveAttribute("aria-expanded", "true");
+    const panel = document.getElementById(open.getAttribute("aria-controls") as string) as HTMLElement;
+    expect(items[0]).toContainElement(panel);
+    expect(panel.querySelector("[data-slot=finding-article]")).toHaveAttribute("aria-label", `Находка ${first.id}`);
+    expect(within(panel).getByRole("link", { name: "Открыть в находках" })).toHaveAttribute("href", runPath(KEY, { view: "findings", finding: first.id }));
+    // the article opens under its own row: the next finding's row follows it
+    expect(items[0].nextElementSibling).toBe(items[1]);
+    // the verdict stays in «Находки» (Conventions 6)
+    expect(screen.queryByRole("radio")).toBeNull();
+    // the unknown id has nothing to expand
+    expect(within(items[27]).queryByRole("button")).toBeNull();
+    await user.click(open);
+    expect(items[0].querySelector("[data-slot=finding-article]")).toBeNull();
+  });
+
+  test("verdict cand-1: «Закрывает N» counts the findings the run gave the unit, the same set as its row's counts — u22's brief names none", () => {
+    const u22 = base.units.find((u) => u.id === "u22") as Unit;
+    const naming = base.findings.filter((f) => f.units.includes("u22"));
+    expect(u22.closes).toEqual([]);
+    expect(naming).toHaveLength(1);
+    mount(u22, null, base);
+    expect(screen.queryByRole("heading", { name: "Не закрывает ни одной находки" })).toBeNull();
+    const items = section("Закрывает 1 находку").querySelectorAll("li");
+    expect(items).toHaveLength(1);
+    expect(within(items[0]).getByRole("link", { name: naming[0].local })).toHaveAttribute("href", runPath(KEY, { view: "findings", finding: naming[0].id }));
+  });
+
+  test("verdict cand-12: a section's heading is the page's title type — 14 px, 600, ink — above its list's 12 px muted header row", () => {
+    mount();
+    for (const t of ["Закрывает 28 находок", "Запуски агентов", "Проверки юнита"]) {
+      const h = screen.getByRole("heading", { name: t });
+      expect(h).toHaveClass("text-sm", "font-semibold", "text-foreground");
+      expect(h).not.toHaveClass("text-xs", "text-muted-foreground");
+      // its line is reserved at 28 px, so the strip that may stand in it moves nothing
+      expect(h.parentElement).toHaveClass("h-7");
+    }
   });
 
   test("code-2: the checks are the model's own typed `Unit.checks`, absent while it carries none", () => {
@@ -211,5 +263,68 @@ describe("a unit's detail at the production limits", () => {
     expect(checkOutcome(null)).toBe("не записано");
     expect(logName("verify.log.lines")).toBe("verify");
     expect(logName("debug.lines")).toBe("debug");
+  });
+});
+
+describe("an open detail under a live run (rules/ui → Strict 1: a live update changes values in place, never inserts)", () => {
+  const tree = (u: Unit, c: readonly UnitCheck[] | null, r: typeof run) => (
+    <UiProvider>
+      <MemoryRouter>
+        <UnitDetail run={r} unit={u} checks={c} now={NOW} />
+      </MemoryRouter>
+    </UiProvider>
+  );
+  const labels = () => [...(document.querySelector("[data-slot=fact-list]") as HTMLElement).querySelectorAll("dt")].map((d) => d.textContent);
+  const value = (label: string) => [...(document.querySelector("[data-slot=fact-list]") as HTMLElement).querySelectorAll("dt")].find((d) => d.textContent === label)?.nextElementSibling as HTMLElement;
+  const strip = (title: string) => section(title).querySelector("[data-slot=held-strip]") as HTMLElement;
+
+  test("craft-5: a blocked unit committed while its detail is open keeps the fact rows it opened with — an emptied value reads «—» in place; the next open derives the set again", () => {
+    const stuck: Unit = { ...unit, state: "blocked", title: "part 24", blockedBy: ["u23"], blockedWhy: "tests stay red", tree: "C:/dev/wt/u24", sha: "c0ffee01", commits: ["c0ffee01", "c0ffee02"] };
+    const opened = ["Вид работы", "Ждёт юнитов", "Причина блокировки", "Рабочая копия", "Коммиты", "Бриф юнита"];
+    const view = render(tree(stuck, checks, run));
+    expect(labels()).toEqual(opened);
+    const committed: Unit = { ...stuck, state: "committed", blockedWhy: null, tree: null, sha: "c0ffee03", commits: ["c0ffee03"] };
+    view.rerender(tree(committed, checks, run));
+    expect(labels()).toEqual(opened);
+    for (const l of ["Ждёт юнитов", "Причина блокировки", "Рабочая копия"]) expect(value(l).querySelector("[data-slot=dash]"), l).toHaveTextContent(/^—нет значения$/);
+    // a value that holds still reads itself: the one commit the row now shows
+    expect(value("Коммиты")).toHaveTextContent("c0ffee03");
+    view.unmount();
+    render(tree(committed, checks, run));
+    expect(labels()).toEqual(["Вид работы", "Бриф юнита"]);
+  });
+
+  test("verdict cand-4: a launch, a check and a finding that arrive live wait in their section's heading line — «1 новый запуск агента · показать» — and are placed on click", async () => {
+    const user = userEvent.setup({ delay: null });
+    const view = render(tree(unit, checks, run));
+    const launches = () => section("Запуски агентов").querySelectorAll("[data-slot=unit-launch]");
+    const checkLines = () => section("Проверки юнита").querySelectorAll("[data-slot=unit-check]");
+    const closesItems = () => section(/^Закрывает/).querySelectorAll("li");
+    for (const t of ["Закрывает 28 находок", "Запуски агентов", "Проверки юнита"]) expect(strip(t)).toBeEmptyDOMElement();
+    expect([launches().length, checkLines().length, closesItems().length]).toEqual([6, 4, 28]);
+
+    const verifyStart = new Date(NOW - 2 * MIN).toISOString();
+    const next = {
+      ...run,
+      running: [...run.running, { agentId: "a0c2", description: "u24 verify", agent: "fsloop-implement", name: "u24 · проверка", startedAt: verifyStart, lastAt: verifyStart }],
+    };
+    const more: UnitCheck[] = [...checks, { file: "verify.log.lines", n: 32, label: "e2e", exit: 0, line: null, seconds: 20, endedAt: verifyStart }];
+    const grown: Unit = { ...unit, closes: [...closes.slice(0, 27), base.findings[27].id, MISSING] };
+    view.rerender(tree(grown, more, next));
+    // nothing moved: each list keeps the lines it had, the news stands in the heading's reserved line
+    expect([launches().length, checkLines().length, closesItems().length]).toEqual([6, 4, 28]);
+    expect(strip("Запуски агентов")).toHaveTextContent("1 новый запуск агента · показать");
+    expect(strip("Проверки юнита")).toHaveTextContent("1 новая проверка · показать");
+    expect(strip("Закрывает 29 находок")).toHaveTextContent("1 новая находка · показать");
+    // a value of a held line still changes in place: the running launch's age ticks, a retried check counts again
+    await user.click(within(strip("Запуски агентов")).getByRole("button", { name: /показать/ }));
+    expect(launches()).toHaveLength(7);
+    expect(launches()[6]).toHaveTextContent("u24 verify");
+    expect(strip("Запуски агентов")).toBeEmptyDOMElement();
+    await user.click(within(strip("Проверки юнита")).getByRole("button", { name: /показать/ }));
+    expect([...checkLines()].map((l) => l.querySelector("[role=cell]")?.textContent)).toEqual(["type-check", "lint", "tests", "e2e", "push"]);
+    await user.click(within(strip("Закрывает 29 находок")).getByRole("button", { name: /показать/ }));
+    expect(closesItems()).toHaveLength(29);
+    expect(closesItems()[28]).toHaveTextContent(`находка ${MISSING} не найдена`);
   });
 });

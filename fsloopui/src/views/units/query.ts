@@ -6,7 +6,7 @@ import type { Launch, Run, RunningLaunch, Unit, UnitCheck } from "../../../share
 import { UNIT_STATE, type UnitState } from "../../../shared/states.ts";
 import { duration } from "../../../shared/text.ts";
 import { emptyWhen, type EmptyWhen } from "@/ui";
-import type { FilterDef, SearchDef } from "@/table";
+import type { FilterDef, Preset, SearchDef } from "@/table";
 // From the file, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
 import { countFindings, MAJOR_UP } from "@/finding/facets.ts";
 import { checkOutcome, logName, waitsText } from "./words.ts";
@@ -67,14 +67,38 @@ export const stateText = (u: Parameters<typeof stateDetail>[0], now: number): st
 
 export const DEFAULT_SORT = { id: "pass", desc: true } as const;
 
+// ── «Вид» (rules/ui → Conventions 16): the slices of «Что прогон делает сейчас» ─────────────────
+
+export const PRESETS: readonly Preset[] = [
+  { id: "all", label: "Все", filters: {} },
+  { id: "work", label: "В работе", filters: { state: ["implement", "verify", "debug", "land"] } },
+  // drafted and ready: no implementer launched yet (cold-read: «Ждут» left «ждут чего?»)
+  { id: "unstarted", label: "Не начаты", filters: { state: ["drafted", "ready"] } },
+  { id: "blocked", label: "Заблокированы", filters: { state: ["blocked"] } },
+  { id: "committed", label: "Закоммичены", filters: { state: ["committed"] } },
+];
+
 // ── search (table #12) ──────────────────────────────────────────────────────────────────────────
 
 export const SEARCH: SearchDef<UnitRow> = {
-  identifiers: (u) => [u.id, u.sha, ...u.commits, ...u.closes],
+  identifiers: (u) => [u.id, u.sha, ...u.commits],
   text: (u) => [u.title],
-  // the fields searched, by the words of the columns and the detail (table #12), within the field's cap
-  placeholder: "Юнит, коммит, находка, название",
+  // the fields searched, each by its column's own header (table #12; ux 1), short enough for the search's room at
+  // 1280 and 1440 px with «Вид» beside it; a finding's id is searched in «Находки», where its row names its units
+  placeholder: "Юнит, коммит, что делает",
 };
+
+// ── the findings a unit closes: one set for the counts, the menu and the detail (Conventions 3) ──
+
+/** What the unit closes: the ids its brief names, in its order — one the run does not hold stays, to read «не
+ * найдена» — then each finding the run's decision gave it, in the run's order. The findings the run holds are
+ * exactly those whose `units` name the unit: what its counts count and «Находки» shows under the unit's filter. */
+export function closingIds(run: Pick<Run, "findings">, unit: Pick<Unit, "id" | "closes">): string[] {
+  const out = [...new Set(unit.closes)];
+  const listed = new Set(out);
+  for (const f of run.findings) if (f.units.includes(unit.id) && !listed.has(f.id)) out.push(f.id);
+  return out;
+}
 
 // ── filters (table #11): «Состояние» always, «Проход» only when the run has more than one ───────
 
