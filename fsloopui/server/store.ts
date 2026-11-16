@@ -14,10 +14,9 @@ import { targetsOf, walkAgain, walkRun, type Targets, type Walk } from "./walk.t
 
 interface Entry {
   found: FoundRun;
-  /** The stamp the model was read at; null for a model read at start-up, before its folder was walked. */
-  stamp: string | null;
-  /** When the model was read: a start-up read stands for the first walk's stamp if nothing was written since. */
-  readAt: number;
+  /** The stamp of the walk the model was read after: every model is read after its folder is walked, so nothing tells
+   * whether a write came after the read but the next walk's stamp — never a clock (f35). */
+  stamp: string;
   /** A newer stamp seen on the last tick and not read yet: the run is read once a tick finds it unchanged. */
   pending: string | null;
   /** Ticks in a row that found the folder changed and did not read it. */
@@ -78,20 +77,19 @@ export function createStore({ roots, git }: { roots: string[]; git?: Git }) {
     forget(key);
   }
 
-  /** The entry of a model just read; `at` — the walk that dates its card, null before the first. */
-  function entryOf(found: FoundRun, prev: Entry | undefined, run: Run, { stamp, readAt, at }: { stamp: string | null; readAt: number; at: Walk | null }): Entry {
+  /** The entry of a model just read; `at` — the walk that dates its card. */
+  function entryOf(found: FoundRun, prev: Entry | undefined, run: Run, { stamp, at }: { stamp: string; at: Walk }): Entry {
     const hash = createHash("sha1").update(JSON.stringify(versionedOf(run))).digest("hex");
     if (!run.closed) forget(found.key);
     else if (closedRuns.has(found.key)) remember(found.key, run);
     return {
       found,
       stamp,
-      readAt,
       pending: null,
       waits: 0,
       version: prev && prev.hash === hash ? prev.version : (prev?.version ?? 0) + 1,
       hash,
-      card: cardOf({ key: found.key, project: found.project, run, ...(at ? writtenOf(run, at) : { lastWriteAt: null }) }),
+      card: cardOf({ key: found.key, project: found.project, run, ...writtenOf(run, at) }),
       run: run.closed ? null : run,
       closed: run.closed,
       targets: targetsOf(run),
@@ -104,38 +102,30 @@ export function createStore({ roots, git }: { roots: string[]; git?: Git }) {
     const targets = prev?.targets ?? NO_TARGETS;
     const at = walked ?? (await walkRun(found.dir, targets));
     if (!at) return null;
-    const readAt = Date.now();
     let run = readRun(found.dir, { git });
     const recordFailed = run.errors.filter((e) => e.file === RECORD);
     if (recordFailed.length && prev?.card.recorded) {
       // run.json cannot be read right now (half-written, or locked while fsl.mjs renames it): the previous record
-      // stands, with the file's error (rules/ui → Conventions 14). On every such path the stamp and the read time stay
-      // the ones the record was read whole at, so the next ticks read the folder again even when its bytes never move
-      // (a lock that lifts): verdict-1 with no model kept, verdict-2 with one.
+      // stands, with the file's error (rules/ui → Conventions 14). On every such path the stamp stays the one the
+      // record was read whole at, so the next ticks read the folder again even when its bytes never move (a lock that
+      // lifts): verdict-1 with no model kept, verdict-2 with one.
       const before = prev.run ?? closedRuns.get(found.key) ?? null;
       // A closed run with no model kept: the card carries the error.
       if (!before) return { ...prev, pending: null, waits: 0, card: { ...prev.card, errors: prev.goodErrors + recordFailed.length } };
       run = { ...before, errors: [...before.errors.filter((e) => e.file !== RECORD), ...recordFailed] };
-      return entryOf(found, prev, run, { stamp: prev.stamp, readAt: prev.readAt, at });
+      return entryOf(found, prev, run, { stamp: prev.stamp, at });
     }
     // A record that names other transcripts than the walk read — a session, a launch, the run now closed: those
     // transcripts walked, the folder not again (code-24).
     const next = targetsOf(run);
     const walk = JSON.stringify(next) === JSON.stringify(targets) ? at : await walkAgain(at, next);
-    return entryOf(found, prev, run, { stamp: walk.stamp, readAt, at: walk });
+    return entryOf(found, prev, run, { stamp: walk.stamp, at: walk });
   }
 
-  /** The first read of the roots, at once: every run folder and its model, before the server answers anything. The
-   * first tick (`refresh`) walks the folders, dates each card and keeps each model unless its folder was written
-   * since; the server answers after it (http.ts). */
-  function prime() {
-    for (const f of discover(roots)) {
-      const readAt = Date.now();
-      entries.set(f.key, entryOf(f, undefined, readRun(f.dir, { git }), { stamp: null, readAt, at: null }));
-    }
-  }
-
-  /** Re-reads what changed. `full` also discovers new run folders and checks the closed runs. A run is re-read only
+  /** Re-reads what changed. The first tick finds every run folder new: it walks them all at once, then reads each
+   * after its walk, so a write that lands meanwhile moves the next walk's stamp and is read — no start-up read ever
+   * stands for a walk by the time it was taken, which a file's mtime and the wall clock cannot tell (f35). The server
+   * answers after that tick (http.ts). `full` also discovers new run folders and checks the closed runs. A run is re-read only
    * from settled bytes: a tick that finds its folder changed waits, and the next tick that finds it unchanged reads
    * it — a file caught half-written never replaces the last good model (rules/ui → Conventions 4, 14); a folder that
    * changes on every tick is read on the third. Every walk dates its card, read or not. */
@@ -172,11 +162,6 @@ export function createStore({ roots, git }: { roots: string[]; git?: Git }) {
       }
       // The run is writing or still: its liveness counts from this walk, read or not (verdict-2, rules/ui → Live data 4).
       e.card = { ...e.card, ...writtenOf(datedOf(e), at) };
-      // Read at start-up with no walk: this walk is its stamp, unless the folder was written after the read.
-      if (e.stamp === null && at.newest <= e.readAt) {
-        e.stamp = at.stamp;
-        continue;
-      }
       if (at.stamp === e.stamp) {
         e.pending = null;
         e.waits = 0;
@@ -201,7 +186,6 @@ export function createStore({ roots, git }: { roots: string[]; git?: Git }) {
   }
 
   return {
-    prime,
     refresh,
     has: (key: string) => entries.has(key),
     dirOf: (key: string) => entries.get(key)?.found.dir ?? null,

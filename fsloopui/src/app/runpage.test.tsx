@@ -2,18 +2,18 @@
 import "../ui/test-setup.ts";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import { glossaryLines } from "../ui/index.ts";
 import { PASS_OUTCOME } from "../../shared/states.ts";
 import { readPref } from "../ui/storage.ts";
-import { hiddenCauses } from "./facts.tsx";
+import { hiddenCauses, pathEnds } from "./facts.tsx";
 import { ObjectLink, objectHref, resolverFor } from "./links.tsx";
 import { commitsLine, dataAgeText, lostText, outcomeLine, passesLine, PASSES_GLOSSARY, runNotFoundText, emptyRootText, settingsGlossary, spendLine, tabTitle, waitsMoreText } from "./words.ts";
 import { fixtureApp, keyOf, MIN, NOW, renderShell, type FixtureApp } from "./testing.tsx";
-import { applyStylesheet, contentWidth, innerWidth, textWidth } from "./layout-testing.ts";
+import { applyStylesheet, contentWidth, flexRow, innerWidth, textWidth } from "./layout-testing.ts";
 
 const words = (s: string) => s.split(" ").length;
 const px = (value: string) => Number.parseFloat(value) || 0;
@@ -187,6 +187,36 @@ describe("the run page's frame", () => {
     // its own box, the settings wrap only between their parts.
     for (const [i, dd] of [...factList().querySelectorAll("dd")].entries())
       if (![2, 4].includes(i)) expect(dd.firstElementChild).toHaveClass("block", "truncate");
+  });
+
+  test("p3-verdict-critic-craft-verdict#craft-5 · «Папка прогона» is cut in its middle: the run's own «\\runs\\<id>» stands whole at its end, what comes before gives way, the whole path in its title, on one line", async () => {
+    // the production shape (tga a098a7d4), written with either separator
+    expect(pathEnds("C:/Users/op/dev/tga/.claude/fsloop/runs/a098a7d4")).toEqual(["C:/Users/op/dev/tga/.claude/fsloop", "/runs/a098a7d4"]);
+    expect(pathEnds("C:\\Users\\op\\dev\\tga\\.claude\\fsloop\\runs\\a098a7d4")).toEqual(["C:\\Users\\op\\dev\\tga\\.claude\\fsloop", "\\runs\\a098a7d4"]);
+    expect(pathEnds("a098a7d4")).toEqual(["", "a098a7d4"]);
+    const user = userEvent.setup();
+    renderShell(fx.transport, { path: `/r/${keyOf(40)}` });
+    await loaded();
+    if (!facts().some(([label]) => label === "Папка прогона")) await user.click(within(header()).getByRole("button", { name: "Подробнее" }));
+    const dd = [...factList().querySelectorAll("dt")].find((dt) => dt.textContent === "Папка прогона")?.nextElementSibling as HTMLElement;
+    const value = dd.firstElementChild as HTMLElement;
+    expect(value).toHaveAttribute("title", fx.dirOf(40));
+    expect(dd.textContent).toBe(fx.dirOf(40));
+    const path = value.querySelector("[data-slot=path]") as HTMLElement;
+    const [head, tail] = [...path.children] as HTMLElement[];
+    expect(tail.textContent).toBe(`${sep}runs${sep}a5b5ec85`);
+    await applyStylesheet();
+    // The fixture's folder (about 100 characters of 12 px mono) runs past the value column of the 40 rem facts: the
+    // column less the widest label and the gap, about 520 px.
+    const width = 520;
+    expect(contentWidth(path)).toBeGreaterThan(width);
+    const sizes = flexRow(path, width);
+    expect(sizes.get(tail)).toBe(contentWidth(tail));
+    expect(sizes.get(head)).toBe(width - contentWidth(tail));
+    expect(getComputedStyle(head).textOverflow).toBe("ellipsis");
+    // one line: the row never wraps, neither part breaks
+    expect(getComputedStyle(path).flexWrap).toBe("nowrap");
+    for (const part of [head, tail]) expect(getComputedStyle(part).whiteSpace).toBe("nowrap");
   });
 
   test("p2-verdict craft-7 · «Проходы» reads the finished passes from the card: before the run is read the row already holds them, never a loading state", async () => {

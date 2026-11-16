@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { criticReport, decisionTable, writeRecord, writeRun, writeRunningLaunch, writeTranscript } from "../fixtures/make.ts";
+import { createApp } from "./http.ts";
 import { createStore, type Store } from "./store.ts";
 
 /** Every folder the server lists while `on`, sync or not: the walks a tick makes, counted (improve-17). */
@@ -125,6 +126,29 @@ describe("createStore — a run re-read only from settled bytes (runtime-2)", ()
     expect(store.list().list[0].lastWriteAt).toBe(iso(NOW + 5000));
     expect(store.versions().runs[KEY]).toBe(version);
   });
+
+  test("f35 · start-up never asks the wall clock: a report written once the server is up, dated before it started (a test's fixed clock, a clock that drifts), is read by the ticks that follow — the wall clock before that date and after it", async () => {
+    // the critic's report, grown to `total` findings
+    const report = (total: number) => criticReport({ lens: "craft assess", findings: Array.from({ length: total }, (_, i) => `craft-${i + 1} [craft] major high local src/shell.tsx:${i + 1} — ux 2 — the toolbar is clipped — /impeccable adapt: wrap it.`) });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      for (const [wall, total] of [
+        [NOW - 60 * 60_000, 5],
+        [NOW + 60 * 60_000, 7],
+      ] as const) {
+        vi.setSystemTime(wall);
+        const app = createApp({ roots: [root], distDir: join(temp, "dist"), poll: false, git: () => null });
+        // written as the server starts, before its first tick, dated by the run's own clock
+        write("reports/p1-map-craft-shell.md", report(total), NOW);
+        await app.pulse();
+        await app.pulse();
+        expect(app.store.run(KEY)?.findings.length, `wall clock ${iso(wall)}`).toBe(total);
+        app.close();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("improve-17 · a live run with a launch running", () => {
@@ -199,12 +223,11 @@ describe("improve-17 · a live run with a launch running", () => {
     expect(s.versions().runs[LIVE_KEY]).toBe(version);
   });
 
-  test("start-up reads each run and the first tick walks its folder once: the card's last write comes from that walk", async () => {
+  test("start-up: the first tick walks each run's folder once and reads it after that walk: the card's last write comes from that walk", async () => {
     const live = liveRoot();
     reads.paths = [];
     reads.on = true;
     const s = createStore({ roots: [live.root], git: () => null });
-    s.prime();
     await s.refresh({ full: true });
     reads.on = false;
     expect(listed(live.runDir)).toBe(1);

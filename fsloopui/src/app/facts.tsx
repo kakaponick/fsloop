@@ -59,6 +59,28 @@ const text = (s: string, mono = false, title = s) => (
     {s}
   </One>
 );
+/** A path's two ends: its last two parts with the separator before them — a run folder's `\runs\<id>`, the part that
+ * names it — and what comes before; either separator. A path of one part is all end. */
+export function pathEnds(path: string): [head: string, tail: string] {
+  const last = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  const cut = Math.max(path.lastIndexOf("/", last - 1), path.lastIndexOf("\\", last - 1));
+  return cut > 0 ? [path.slice(0, cut), path.slice(cut)] : ["", path];
+}
+
+/** A path on one line, cut in its middle (p3-verdict craft-5; `ux 2`): its end stands whole, what comes before gives
+ * way with «…», the whole path in its title. */
+function PathValue({ path }: { path: string }) {
+  const [head, tail] = pathEnds(path);
+  return (
+    <One title={path} mono>
+      <span data-slot="path" className="flex min-w-0">
+        <span className="min-w-0 truncate">{head}</span>
+        <span className="shrink-0 whitespace-nowrap">{tail}</span>
+      </span>
+    </One>
+  );
+}
+
 const notRecorded = (
   <One>
     <NotRecorded />
@@ -250,7 +272,7 @@ export interface RunFactsOptions {
 export function runFacts(card: RunCard, now: number, { run = null, lost = false }: RunFactsOptions = {}): { facts: Fact[]; more: Fact[] } {
   const live = livenessShown(card, now, lost);
   const activity: Fact = { label: "Активность", outcome: true, glossary: LIVENESS_GLOSSARY, value: <Liveness live={live} lastWriteAt={card.lastWriteAt} now={now} /> };
-  const folder: Fact = { label: "Папка прогона", value: text(card.dir, true) };
+  const folder: Fact = { label: "Папка прогона", value: <PathValue path={card.dir} /> };
 
   if (!card.recorded)
     return {

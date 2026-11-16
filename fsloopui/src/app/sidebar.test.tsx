@@ -53,8 +53,8 @@ describe("the card's words, built once", () => {
 
   test("improve-6, p3-review-critic-code#code-8 · the head is built once, in the parts the sidebar renders: how many go, then the waiting part's count and verb; alone, the waiting part names its runs", () => {
     const head = sidebarHead(3, 0, 2);
+    // the head's words as the sidebar renders them are counted on its rendered line (improve-6 (1) below; code-4)
     expect(head).toEqual({ lead: "3 прогона идут", waiting: { count: 2, suffix: "ждут вас" } });
-    expect(words(`${head.lead} · ${head.waiting?.count} ${head.waiting?.suffix}`)).toBe(7);
     const widest = sidebarHead(2, 1, 1);
     expect(widest).toEqual({ lead: "2 прогона идут · 1 молчит", waiting: { count: 1, suffix: "ждёт вас" } });
     expect(words(widest.lead as string)).toBe(6);
@@ -286,6 +286,8 @@ describe("the sidebar over the fixture root of 63", () => {
     await ready();
     const head = sidebar().querySelector("[data-slot=running-count]") as HTMLElement;
     expect(head.textContent).toBe("3 прогона идут · 2 ждут вас");
+    // p3-verdict-critic-code-verdict-2#code-4 · the word count of the rendered head, never of a string the test joins
+    expect(words(head.textContent as string)).toBe(7);
     const link = within(head).getByRole("link", { name: "2 ждут вас" });
     expect(link).toHaveAttribute("data-slot", "count-link");
     expect(link.querySelector("[data-slot=dot]")).toHaveAttribute("data-tone", "warning");

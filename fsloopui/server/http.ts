@@ -107,9 +107,9 @@ const isJson = (req: Request) => (req.headers.get("content-type") ?? "").split("
 
 export function createApp({ roots, distDir, intervalMs = 2000, poll = true, now = Date.now, git }: AppOptions) {
   const store = createStore({ roots, git });
-  // The roots read once, then walked once by the first tick, before anything is answered (improve-17: the walk that
-  // dates each card is the tick's own); from there on every tick walks them without holding a request.
-  store.prime();
+  // The roots walked once and read by the first tick, each folder read after its walk, before anything is answered
+  // (improve-17: the walk that dates each card is the tick's own; f35: no clock decides what the walk missed); from
+  // there on every tick walks them without holding a request.
   const encoder = new TextEncoder();
   const clients = new Set<ReadableStreamDefaultController<Uint8Array>>();
   const tick = () => encoder.encode(`event: tick\ndata: ${JSON.stringify(store.versions())}\n\n`);

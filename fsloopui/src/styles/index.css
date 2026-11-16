@@ -125,7 +125,9 @@
   --code: #efefec;
   --border: #e2e2dd;
   --input: #e2e2dd;
-  --ring: #6d6d69;
+  /* The focus ring is ink: drawn at half strength — the library's halo, `ring-ring/50` — it still holds 3:1 on the
+     paper, a muted row, a popover and the code ground in both themes (DESIGN.md → Colors; tokens.test.ts, craft-2). */
+  --ring: #1b1b1a;
   --overlay: #000000d9;
   --chart-1: #2b68c9;
   --chart-2: #b17716;
@@ -139,7 +141,7 @@
   --sidebar-accent: #f0f0ed;
   --sidebar-accent-foreground: #1b1b1a;
   --sidebar-border: #e2e2dd;
-  --sidebar-ring: #6d6d69;
+  --sidebar-ring: #1b1b1a;
 }
 
 /* Dark — the prototype's template.html:9. */
@@ -166,7 +168,7 @@
     --code: #1c1d1d;
     --border: #2b2c2c;
     --input: #2b2c2c;
-    --ring: #98988f;
+    --ring: #e8e8e4;
     --overlay: #000000d9;
     --chart-1: #6ba3f6;
     --chart-2: #dfa53d;
@@ -180,7 +182,7 @@
     --sidebar-accent: #1b1c1c;
     --sidebar-accent-foreground: #e8e8e4;
     --sidebar-border: #2b2c2c;
-    --sidebar-ring: #98988f;
+    --sidebar-ring: #e8e8e4;
   }
 }
 

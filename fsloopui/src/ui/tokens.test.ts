@@ -146,6 +146,46 @@ describe("p3-review-critic-craft-2#craft-3: the tabs' inks, computed from the to
   }
 });
 
+/** `fg` at `alpha` over `ground`, as the browser composites it. */
+function over(fg: string, alpha: number, ground: string): string {
+  const [f, g] = [hex(fg), hex(ground)];
+  return `#${[0, 1, 2].map((i) => Math.round(f[i] * alpha + g[i] * (1 - alpha)).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** Every product source the stylesheet is built from — the theme and every component, the library's included. */
+const src = fileURLToPath(new URL("..", import.meta.url));
+const sources = (readdirSync(src, { recursive: true }) as string[])
+  .filter((f) => /\.(?:tsx?|css)$/.test(f) && !/\.test\.tsx?$/.test(f))
+  .map((f) => read(`../${f.replace(/\\/g, "/")}`));
+
+describe("p3-verdict-critic-craft-verdict#craft-2: the focus ring, computed from the tokens — every focus indicator holds 3:1 on every ground it is drawn on", () => {
+  // Every utility that draws in a ring token, at the strength the source writes it: the halo (`ring-ring/50`, the
+  // theme's `outline-ring/50`), the full ring and the focused field's border.
+  const drawn = new Set(sources.flatMap((text) => [...text.matchAll(/\b(?:ring|outline|border)-(ring|sidebar-ring)(?:\/(\d+))?(?![\w-])/g)].map((m) => `${m[1]}/${m[2] ?? 100}`)));
+  const GROUNDS = ["--background", "--muted", "--popover", "--code"];
+
+  test("the scan finds the halo at half strength, in the theme and in the controls", () => {
+    expect(drawn).toContain("ring/50");
+    expect(drawn).toContain("ring/100");
+    expect(drawn).toContain("sidebar-ring/100");
+  });
+
+  for (const [name, set] of [
+    ["light", light],
+    ["dark", dark],
+  ] as const) {
+    test(`${name}: each ring token at each strength the product draws it holds 3:1 on the page, a muted row, a popover and the code ground`, () => {
+      for (const use of drawn) {
+        const [token, strength] = use.split("/");
+        for (const ground of GROUNDS) {
+          const ink = over(set.get(`--${token}`)!, Number(strength) / 100, set.get(ground)!);
+          expect(contrast(ink, set.get(ground)!), `${token} at ${strength} % on ${ground}`).toBeGreaterThanOrEqual(3);
+        }
+      }
+    });
+  }
+});
+
 describe("contrast, computed from the tokens", () => {
   const TEXT: [fg: string, bg: string][] = [
     ["--foreground", "--background"],
