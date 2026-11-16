@@ -11,6 +11,7 @@ import {
   AppDialog,
   Clamp,
   copyItem,
+  copyLabel,
   CountCombobox,
   CountLink,
   CountSelect,
@@ -324,13 +325,17 @@ function OverlaysSection() {
           onValueChange={setUnits}
           options={Array.from({ length: 42 }, (_, i) => ({ value: `u${i + 1}`, label: `u${i + 1}`, count: (i * 7) % 23 }))}
         />
-        <Menu label="Действия с находкой" groups={[[{ label: "Открыть отчёт", onSelect: () => notify.success("Открыт отчёт") }], [copyItem("id", "p1-review-critic-craft#craft-3"), { label: "Скопировать место", onSelect: () => {}, blocked: "Критик не указал файл и строку находки" }]]}>
+        <Menu
+          label="Действия с находкой"
+          header={{ text: "p1-review-critic-craft#craft-3", title: "p1-review-critic-craft#craft-3 — The trigger repeats the count" }}
+          groups={[[{ label: "Открыть отчёт", onSelect: () => notify.success("Открыт отчёт"), shortcut: "Enter" }], [copyItem("id", "p1-review-critic-craft#craft-3"), { label: copyLabel("место"), onSelect: () => {}, blocked: "Файл ещё пишется: место появится, когда критик закончит" }]]}
+        >
           <Button variant="outline" size="icon-sm" aria-label="Действия с находкой">
             <EllipsisIcon />
           </Button>
         </Menu>
-        <Hint label="Скопировать ссылку">
-          <Button variant="ghost" size="icon-sm" aria-label="Скопировать ссылку" onClick={() => void copyText("http://127.0.0.1:4747/r/tga/a098a7d4", "ссылку")}>
+        <Hint label={copyLabel("ссылку")}>
+          <Button variant="ghost" size="icon-sm" aria-label={copyLabel("ссылку")} onClick={() => void copyText("http://127.0.0.1:4747/r/tga/a098a7d4", "ссылку")}>
             <CopyIcon />
           </Button>
         </Hint>

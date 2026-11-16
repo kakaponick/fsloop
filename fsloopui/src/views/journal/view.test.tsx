@@ -109,7 +109,7 @@ describe("search, «Этап», and a link to an entry", () => {
     writePref(`table:journal:run:${KEY}`, { filters: { stage: ["p2-review"] }, search: "" });
     renderView(fx, KEY, path(), JournalView);
     await loaded(44);
-    expect(screen.getByRole("combobox", { name: "Этап" })).toHaveTextContent("Этап:проход 2 · ревью44");
+    expect(screen.getByRole("combobox", { name: "Этап" })).toHaveTextContent(/^Этап:проход 2 · ревью$/);
     expect(bar()).toHaveTextContent("44 из 143 решений");
   });
 

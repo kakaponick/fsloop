@@ -10,7 +10,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { NOUNS } from "../../../shared/text.ts";
-import { CountCombobox, EmptyState, HeldStrip, NotFound, type HeldNoun } from "@/ui";
+import { CountCombobox, EmptyState, emptyWhen, HeldStrip, NotFound, type HeldNoun } from "@/ui";
 import { AdaptiveToolbar, FilterControl, filterSummary, isSelectFilter, pushHistory, runQuery, SearchBox, StatusBar, useRunView, useTableView, ANY_LABEL, type FilterDef, type ToolbarItem } from "@/table";
 import { useNow } from "../../app/clock.tsx";
 import { useUpdatedAt } from "../../app/live.tsx";
@@ -30,7 +30,7 @@ const scrolls = new Map<string, number>();
 
 /** Why the view is empty before any filter: a closed or init run never had launches; an open one names the map. */
 export function emptyFor(run: Pick<LoadedRun, "closed" | "mode">): "never" | "not-yet" {
-  return run.closed || run.mode === "init" ? "never" : "not-yet";
+  return emptyWhen(run, "map").form;
 }
 
 export function ReportsView({ run }: ViewProps) {

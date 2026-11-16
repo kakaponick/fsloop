@@ -8,6 +8,7 @@ export { ANY, ANY_LABEL, CUSTOM_LABEL, FilterControl, filterSummary, isSelectFil
 export { pack, type PackItem, type PackKind } from "./pack.ts";
 export {
   ALL_ROWS,
+  FILL_ROWS,
   hitRanges,
   nextSort,
   pageOf,
@@ -26,8 +27,8 @@ export {
   type SearchDef,
   type SortSpec,
 } from "./query.ts";
-export { copyAction, menuHeader, OPEN_ACTION, RowMenu, type ActionScope, type RowAction } from "./row-menu.tsx";
+export { actionsFor, copyAction, menuHeader, OPEN_ACTION, RowMenu, rowMenuGroups, type ActionScope, type RowAction } from "./row-menu.tsx";
 export { Highlight, SearchBox, type SearchBoxProps } from "./search.tsx";
-export { ageText, Pager, shownText, StatusBar, type PagerProps, type StatusBarProps } from "./status-bar.tsx";
+export { ageText, Pager, selectedText, shownText, StatusBar, type PagerProps, type StatusBarProps } from "./status-bar.tsx";
 export { AdaptiveToolbar, type ToolbarItem } from "./toolbar.tsx";
 export { pushHistory, useRunView, useTableView, type RunPrefs, type TablePrefs } from "./view-state.ts";

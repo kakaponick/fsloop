@@ -2,7 +2,7 @@
 // convention): not yet — what fills the view and at which stage, the stage word from the shared map, never a
 // literal; never — the run is past that stage or closed; filtered to none — the active filters and «Сбросить
 // фильтры». An empty state is never a false one: a failed load is the part-failed message, not this.
-import { STAGE_WORDS, type Step } from "../../shared/states.ts";
+import { STAGE_WORDS, stageOf, type Step } from "../../shared/states.ts";
 import type { Forms } from "../../shared/text.ts";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -39,6 +39,21 @@ export function emptyStateText(props: EmptyStateProps): { title: string; descrip
 }
 
 export const RESET_FILTERS = "Сбросить фильтры";
+
+/** The stages in a pass's order: the shared map's keys, the one order every view compares stages by. */
+export const STEPS = Object.keys(STAGE_WORDS) as Step[];
+
+/** Why a list is empty before any filter: not yet (the stage that fills it, with a view's own lead) or never. */
+export type EmptyWhen = { form: "not-yet"; step: Step; lead?: string; subject?: string } | { form: "never"; description?: string };
+
+/** The one rule of an empty view (Conventions 15): a closed run or an init run never had it; otherwise it is still
+ * to come, at the stage that fills it. A list its stage fills once a pass (`once`: the design check's conventions)
+ * never comes either when the run is already past that stage. */
+export function emptyWhen(run: { closed: boolean | null; mode: string | null; now?: { stage?: string | null } | null }, step: Step, { once = false } = {}): EmptyWhen {
+  if (run.closed || run.mode === "init") return { form: "never" };
+  const at = stageOf(run.now?.stage).step;
+  return once && at !== null && STEPS.indexOf(at) > STEPS.indexOf(step) ? { form: "never" } : { form: "not-yet", step };
+}
 
 export function EmptyState(props: EmptyStateProps) {
   const { title, description } = emptyStateText(props);

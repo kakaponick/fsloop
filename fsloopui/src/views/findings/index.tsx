@@ -9,9 +9,9 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import type { Finding, Run } from "../../../shared/model.ts";
-import { STAGE_WORDS, stageOf, type Step } from "../../../shared/states.ts";
+import { stageOf, type Step } from "../../../shared/states.ts";
 import { NOUNS } from "../../../shared/text.ts";
-import { NotFound, type HeldNoun } from "@/ui";
+import { emptyWhen, NotFound, STEPS, type HeldNoun } from "@/ui";
 import { copyAction, DataTable, type EmptyWhen, type RowAction } from "@/table";
 // From the files, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
 import { FindingArticle } from "@/finding/article.tsx";
@@ -34,7 +34,6 @@ const rowTitle = (f: Finding) => `${f.id} — ${f.summary}`;
 
 /** The stages whose critics write findings, in a pass's order. */
 const CRITIC_STEPS: readonly Step[] = ["map", "decompose", "review", "assess"];
-const STEPS = Object.keys(STAGE_WORDS) as Step[];
 
 /** The stage that will bring the first findings: the next one, from where the run stands, whose critics report. */
 export function nextCriticStep(stage: string | null | undefined): Step {
@@ -46,8 +45,8 @@ export const EMPTY_LEAD = "Критики ещё не писали отчёто�
 
 /** Why the table is empty before any filter: a closed or init run never had findings; an open one names the stage. */
 export function emptyFor(run: Pick<Run, "closed" | "mode" | "now">): EmptyWhen {
-  if (run.closed || run.mode === "init") return { form: "never" };
-  return { form: "not-yet", step: nextCriticStep(run.now?.stage), lead: EMPTY_LEAD, subject: "находки" };
+  const when = emptyWhen(run, nextCriticStep(run.now?.stage));
+  return when.form === "never" ? when : { ...when, lead: EMPTY_LEAD, subject: "находки" };
 }
 
 export function FindingsView({ run }: ViewProps) {

@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import "./test-setup.ts";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { NOUNS } from "../../shared/text.ts";
-import { EmptyState, emptyStateText } from "./empty-state.tsx";
+import { EmptyState, emptyStateText, emptyWhen, STEPS } from "./empty-state.tsx";
 import { Loading } from "./loading.tsx";
 import { PartFailed, partFailedText } from "./part-failed.tsx";
 
@@ -25,11 +25,28 @@ describe("loading", () => {
     expect(screen.getByRole("status")).toHaveClass("border", "rounded-lg", "size-full");
   });
 
-  test("no part of the product imports the library's skeleton (rules/ui → Strict 2)", () => {
-    for (const file of ["loading.tsx", "empty-state.tsx", "index.ts"]) {
-      const text = readFileSync(fileURLToPath(new URL(file, import.meta.url)), "utf8");
-      expect(text).not.toMatch(/components\/ui\/skeleton|Skeleton/);
-    }
+  test("no part of the product imports the library's skeleton (rules/ui → Strict 2): a walk over src/", () => {
+    const src = resolve(__dirname, "..");
+    const files: string[] = [];
+    const hits: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (statSync(p).isDirectory()) {
+          // the library's own source holds the component; the product never reaches for it
+          if (relative(src, p).replace(/\\/g, "/") !== "components/ui") walk(p);
+        } else if (/\.(tsx?|css)$/.test(name)) {
+          files.push(p);
+          if (readFileSync(p, "utf8").includes(["components", "ui", "skeleton"].join("/"))) hits.push(relative(src, p));
+        }
+      }
+    };
+    walk(src);
+    // the walk reaches every folder of the product, not three files of one
+    expect(files.length).toBeGreaterThan(100);
+    const tops = new Set(files.map((f) => relative(src, f).split(/[\\/]/)[0]));
+    for (const top of ["app", "finding", "kit", "styles", "table", "ui", "views"]) expect(tops.has(top), top).toBe(true);
+    expect(hits).toEqual([]);
   });
 });
 
@@ -40,6 +57,22 @@ describe("empty state", () => {
       "Критики ещё не писали отчётов — находки появятся на этапе «ревью»",
     );
     expect(emptyStateText({ form: "not-yet", noun: NOUNS.convention, step: "decompose" }).title.split(" ")).toHaveLength(9);
+  });
+
+  test("one rule for every view: closed or init — never; else not yet, naming the stage; a once-a-pass list past its stage — never", () => {
+    const at = (stage: string | null) => ({ closed: false, mode: "worktree", now: stage === null ? null : { stage } });
+    expect(emptyWhen({ closed: true, mode: "worktree", now: null }, "review")).toEqual({ form: "never" });
+    expect(emptyWhen({ closed: false, mode: "init", now: null }, "review")).toEqual({ form: "never" });
+    expect(emptyWhen({ closed: false, mode: "worktree" }, "map")).toEqual({ form: "not-yet", step: "map" });
+    // a list every stage after its own may still fill (decisions, reports): past it, still to come
+    expect(emptyWhen(at("p1-review"), "map")).toEqual({ form: "not-yet", step: "map" });
+    expect(emptyWhen(at(null), "decompose", { once: true })).toEqual({ form: "not-yet", step: "decompose" });
+    expect(emptyWhen(at("p1-map"), "decompose", { once: true })).toEqual({ form: "not-yet", step: "decompose" });
+    expect(emptyWhen(at("p1-decompose"), "decompose", { once: true })).toEqual({ form: "not-yet", step: "decompose" });
+    expect(emptyWhen(at("p1-review"), "decompose", { once: true })).toEqual({ form: "never" });
+    expect(emptyWhen({ closed: true, mode: "worktree", now: null }, "decompose", { once: true })).toEqual({ form: "never" });
+    // the stage order, exported once: the shared map's keys in a pass's order
+    expect(STEPS).toEqual(["init", "map", "spike", "decompose", "units", "review", "fix", "verdict", "assess", "integrate", "finish"]);
   });
 
   test("never: a run past the stage had none", () => {

@@ -5,7 +5,8 @@
 import type { Launch, Run, RunningLaunch, Unit } from "../../../shared/model.ts";
 import { UNIT_STATE, type UnitState } from "../../../shared/states.ts";
 import { duration } from "../../../shared/text.ts";
-import type { EmptyWhen, FilterDef, SearchDef } from "@/table";
+import { emptyWhen, type EmptyWhen } from "@/ui";
+import type { FilterDef, SearchDef } from "@/table";
 // From the file, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
 import { countFindings, MAJOR_UP } from "@/finding/facets.ts";
 import { checkOutcome, logName, waitsText } from "./words.ts";
@@ -97,8 +98,7 @@ export const statesOf = (units: readonly Pick<Unit, "state">[]): UnitState[] => 
 
 /** A closed or init run never had units; an open one names the stage that brings them. */
 export function emptyFor(run: Pick<Run, "closed" | "mode">): EmptyWhen {
-  if (run.closed || run.mode === "init") return { form: "never" };
-  return { form: "not-yet", step: "decompose" };
+  return emptyWhen(run, "decompose");
 }
 
 /** «Список юнитов не прочитан»: units.md or the run folder failed. */

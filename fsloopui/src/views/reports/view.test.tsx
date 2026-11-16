@@ -138,7 +138,7 @@ describe("the task walk (surfaces/reading.md → WALK «Отчёты»)", () => 
     renderView(fx, KEY, reportsPath(), ReportsView);
     await loaded();
     expect([...document.querySelectorAll<HTMLElement>("[data-toolbar-item]")].map((el) => el.dataset.toolbarItem)).toEqual(["search", "filter-agent", "filter-lens", "filter-surface"]);
-    expect(screen.getByRole("combobox", { name: "Агент" })).toHaveTextContent("Агент:все98");
+    expect(screen.getByRole("combobox", { name: "Агент" })).toHaveTextContent(/^Агент:все$/);
     expect(bar()).toHaveTextContent("98 запусков агента");
 
     await user.click(screen.getByRole("combobox", { name: "Раздел: все" }));

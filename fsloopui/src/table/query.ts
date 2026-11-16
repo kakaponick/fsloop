@@ -227,7 +227,12 @@ export function runQuery<R>({ rows, rowId, columns, filters, search, state, incl
 
 /** «все» as a page size: no split. */
 export const ALL_ROWS = "all";
-export type PageSize = number | typeof ALL_ROWS;
+/** «по экрану» as a page size (table #1 Fill): as many collapsed rows as the table's box shows, measured by the table
+ * and never stored; it reaches the paging below as that number. */
+export const FILL_ROWS = "fill";
+export type PageSize = number | typeof ALL_ROWS | typeof FILL_ROWS;
+/** A page size the paging works with: Fill already measured into its number. */
+export type RowsPerPage = number | typeof ALL_ROWS;
 
 export interface Page<T> {
   rows: T[];
@@ -240,7 +245,7 @@ export interface Page<T> {
 }
 
 /** One page of a list; `null` or «all» is one page of everything. */
-export function pageOf<T>(list: readonly T[], page: number, size: PageSize | null): Page<T> {
+export function pageOf<T>(list: readonly T[], page: number, size: RowsPerPage | null): Page<T> {
   if (size === null || size === ALL_ROWS || size <= 0) return { rows: [...list], page: 1, pageCount: 1, from: list.length ? 1 : 0, to: list.length };
   const pageCount = Math.max(1, Math.ceil(list.length / size));
   const p = Math.min(Math.max(1, Math.trunc(page) || 1), pageCount);
@@ -250,4 +255,4 @@ export function pageOf<T>(list: readonly T[], page: number, size: PageSize | nul
 }
 
 /** The page that holds the item at `index` (0-based). */
-export const pageOfIndex = (index: number, size: PageSize | null): number => (size === null || size === ALL_ROWS || size <= 0 || index < 0 ? 1 : Math.floor(index / size) + 1);
+export const pageOfIndex = (index: number, size: RowsPerPage | null): number => (size === null || size === ALL_ROWS || size <= 0 || index < 0 ? 1 : Math.floor(index / size) + 1);

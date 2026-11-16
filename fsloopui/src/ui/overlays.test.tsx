@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "./test-setup.ts";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SearchIcon } from "lucide-react";
 import { useState } from "react";
@@ -10,7 +10,7 @@ import { SEVERITY, UNIT_STATE } from "../../shared/states.ts";
 import { Button } from "@/components/ui/button";
 import { AppDialog } from "./dialog.tsx";
 import { keyLabel, Keys } from "./kbd.tsx";
-import { copyItem, Menu } from "./menu.tsx";
+import { copyItem, copyLabel, Menu } from "./menu.tsx";
 import { comboboxValueText, CountCombobox, CountSelect } from "./select.tsx";
 import { renderUi } from "./test-utils.tsx";
 import { copyText, notify, toastTitle } from "./toast.tsx";
@@ -148,13 +148,14 @@ describe("select and combobox", () => {
     }
     renderUi(<View />);
     const trigger = screen.getByRole("combobox", { name: "Вид" });
-    expect(trigger).toHaveTextContent("Вид:Все723");
+    // the closed trigger reads «Поле: значение»: the count stays in the options (table #11)
+    expect(trigger).toHaveTextContent(/^Вид:Все$/);
     trigger.focus();
     await user.keyboard("{Enter}");
     const options = await screen.findAllByRole("option");
     expect(options.map((o) => o.textContent)).toEqual(["Все723", "Без оценки723", "В исправление163", "Кандидаты506", "Закоммичены0"]);
     await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Вид" })).toHaveTextContent("Вид:В исправление163"));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Вид" })).toHaveTextContent(/^Вид:В исправление$/));
   });
 
   test("more than 7 options is not a select", () => {
@@ -210,6 +211,46 @@ describe("menu", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("p1-review-craft#craft-3"));
     expect(await screen.findByText("Скопировано: ссылку")).toBeInTheDocument();
     expect(open).not.toHaveBeenCalled();
+  });
+
+  test("one copy label: «Скопировать <что>»", () => {
+    expect(copyLabel("путь к отчёту")).toBe("Скопировать путь к отчёту");
+    expect(copyLabel("путь к отчёту").split(" ")).toHaveLength(4);
+    expect(copyItem("id", "u3").label).toBe("Скопировать id");
+  });
+
+  test("a context menu with a header, an item's id, shortcut and blocked reason, and a choice in a submenu", async () => {
+    const user = userEvent.setup();
+    const choose = vi.fn();
+    renderUi(
+      <Menu
+        kind="context"
+        label="Действия: находки"
+        header={{ text: "p1-review-critic-craft#craft-12 The row wraps", title: "p1-review-critic-craft#craft-12 The row wraps in full" }}
+        groups={[
+          [{ id: "open", label: "Открыть", onSelect: () => {}, shortcut: "Enter" }],
+          [{ id: "copy-location", label: "Скопировать место", onSelect: () => {}, blocked: "Место не записано" }],
+          [{ id: "pin", label: "Действие по клику", value: "open", onChoose: choose, choices: [{ value: "open", label: "Открыть" }, { value: "report", label: "Открыть отчёт" }] }],
+        ]}
+      >
+        <div data-testid="area">строка</div>
+      </Menu>,
+    );
+    fireEvent.contextMenu(screen.getByTestId("area"));
+    const menu = await screen.findByRole("menu");
+    const header = menu.querySelector("[data-slot=menu-header]") as HTMLElement;
+    expect(header).toHaveTextContent("p1-review-critic-craft#craft-12 The row wraps");
+    expect(header).toHaveAttribute("title", "p1-review-critic-craft#craft-12 The row wraps in full");
+    expect(header).toHaveClass("truncate");
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["ОткрытьEnter", "Скопировать место", "Действие по клику"]);
+    expect(within(menu).getByRole("menuitem", { name: /^Открыть/ })).toHaveAttribute("data-action", "open");
+    const blocked = within(menu).getByRole("menuitem", { name: "Скопировать место" });
+    expect(blocked).toHaveAttribute("aria-disabled", "true");
+    expect(blocked).toHaveAttribute("title", "Место не записано");
+    within(menu).getByRole("menuitem", { name: "Действие по клику" }).focus();
+    await user.keyboard("{ArrowRight}");
+    await user.click(await screen.findByRole("menuitemradio", { name: "Открыть отчёт" }));
+    expect(choose).toHaveBeenCalledWith("report");
   });
 });
 

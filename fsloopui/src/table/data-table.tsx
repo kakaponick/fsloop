@@ -7,16 +7,15 @@
 // sorting, filtering, searching and paging stay in query.ts, never in the table model.
 import { getCoreRowModel, useReactTable, type ColumnDef, type VisibilityState } from "@tanstack/react-table";
 import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent as ReactWheelEvent } from "react";
-import type { Step } from "../../shared/states.ts";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent as ReactWheelEvent } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { EmptyState, GlossaryTooltip, HeldStrip, Loading, markProps, OutOfFilter, PartFailed, WHEEL_GESTURE_GAP, type Gender, type GlossaryEntry, type HeldNoun, type MarkState } from "@/ui";
+import { EmptyState, GlossaryTooltip, HeldStrip, Loading, markProps, OutOfFilter, PartFailed, WHEEL_GESTURE_GAP, type EmptyWhen, type Gender, type GlossaryEntry, type HeldNoun, type MarkState } from "@/ui";
 import { clampWidth, mergeWidths, placeColumns, RESIZE_STEP, SELECT_WIDTH, sameColumns, sameWidths, tableMinWidth, type ColumnLayout } from "./columns.ts";
 import { ColumnsMenu } from "./columns-menu.tsx";
 import { ANY_LABEL, CUSTOM_LABEL, FilterControl, filterSummary, isSelectFilter, PRESET_LABEL, PresetSelect } from "./filters.tsx";
-import { nextSort, pageOf, pageOfIndex, runQuery, tokens as toTokens, type FilterDef, type PageSize, type Preset, type Rank, type SearchDef, type SortSpec } from "./query.ts";
+import { FILL_ROWS, nextSort, pageOf, pageOfIndex, runQuery, tokens as toTokens, type FilterDef, type Preset, type Rank, type RowsPerPage, type SearchDef, type SortSpec } from "./query.ts";
 import { OPEN_ACTION, pinnable, RowMenu, type RowAction } from "./row-menu.tsx";
 import { Highlight, SearchBox } from "./search.tsx";
 import { StatusBar } from "./status-bar.tsx";
@@ -41,8 +40,8 @@ export interface TableColumn<R> extends ColumnLayout {
   text?: (row: R) => string | null | undefined;
 }
 
-/** Why the table is empty before any filter: not yet (the stage that fills it) or never. */
-export type EmptyWhen = { form: "not-yet"; step: Step; lead?: string; subject?: string } | { form: "never"; description?: string };
+/** Why the table is empty before any filter: u2's one rule (`emptyWhen`) gives it. */
+export type { EmptyWhen };
 
 export interface PartFailure {
   what: string;
@@ -106,6 +105,11 @@ export const CLOSE_LABEL = "Свернуть";
 export const SELECT_ALL = "Выбрать все строки по фильтрам";
 export const SELECT_ROW = "Выбрать строку";
 
+/** A collapsed row's and the header's height (DESIGN.md → Data Table: h-8), until the table measures its own. */
+const ROW_HEIGHT = 32;
+/** «по экрану» before the table's box is measured (a test without layout). */
+const FILL_FALLBACK = 50;
+
 /** The events that end a drag over the selection column. */
 const ENDS = ["pointerup", "pointercancel", "blur"] as const;
 
@@ -156,8 +160,18 @@ export function DataTable<R>(props: DataTableProps<R>) {
   const display = held.display;
 
   // ── paging, open rows, selection: in memory; the page and open rows reported for the URL ───────
-  const size: PageSize | null = tprefs.paged ? tprefs.pageSize : null;
+  // «по экрану» (table #1 Fill): the rows the scroll box shows, measured from a collapsed row; until measured — a
+  // test without layout — 50 a page
+  const fillMode = tprefs.paged && tprefs.pageSize === FILL_ROWS;
+  const [fill, setFill] = useState<number | null>(null);
+  const size: RowsPerPage | null = !tprefs.paged ? null : tprefs.pageSize === FILL_ROWS ? (fill ?? FILL_FALLBACK) : tprefs.pageSize;
   const [pageState, setPageState] = useState(props.page ?? 1);
+  const [seenSize, setSeenSize] = useState(size);
+  if (size !== seenSize) {
+    // a new page size keeps the first row of the page in view
+    setSeenSize(size);
+    if (typeof seenSize === "number") setPageState(pageOfIndex((pageState - 1) * seenSize, size));
+  }
   const [seenPageProp, setSeenPageProp] = useState(props.page);
   if (props.page !== undefined && props.page !== seenPageProp) {
     setSeenPageProp(props.page);
@@ -183,13 +197,35 @@ export function DataTable<R>(props: DataTableProps<R>) {
     if (at >= 0) setPageState(pageOfIndex(at, size));
   }
   const pg = pageOf(display, pageState, size);
+  // The page reaches the caller's URL with the page itself: a page the user turns, or a query change that starts at
+  // page 1, is reported in the same event, so both land in one commit; a page the render derives (a link's target, a
+  // new page size, rows that shrank) is reported after its commit — a passive effect, because the caller's router
+  // ignores a navigation from a layout effect on its first commit.
   const reported = useRef(props.page ?? 1);
   const onPageChange = props.onPageChange;
+  const report = (p: number) => {
+    if (reported.current === p) return;
+    reported.current = p;
+    onPageChange?.(p);
+  };
   useEffect(() => {
     if (!rows || reported.current === pg.page) return;
     reported.current = pg.page;
     onPageChange?.(pg.page);
   }, [pg.page, rows, onPageChange]);
+  /** A search, filter or sort change starts at page 1 (table #7). */
+  const restart = () => {
+    setPageState(1);
+    if (rows) report(1);
+  };
+  const setQuery = (patch: Partial<typeof rprefs>) => {
+    setR(patch);
+    restart();
+  };
+  const setSort = (sort: SortSpec | null) => {
+    setT({ sort });
+    restart();
+  };
 
   const [openState, setOpenState] = useState<readonly string[]>(props.open ?? []);
   const [seenOpenProp, setSeenOpenProp] = useState(props.open);
@@ -217,6 +253,26 @@ export function DataTable<R>(props: DataTableProps<R>) {
   const rowEls = useRef(new Map<string, HTMLTableRowElement>());
   const pendingFocus = useRef<"first" | "last" | null>(null);
   const scroller = useRef<HTMLDivElement | null>(null);
+  const region = useRef<HTMLDivElement | null>(null);
+  const tableShown = Boolean(!failed && rows?.length && display.length);
+  useLayoutEffect(() => {
+    if (!fillMode || !tableShown) return;
+    const measure = () => {
+      const el = scroller.current;
+      // inside the frame, less a horizontal scrollbar: the room the rows have under the header
+      const inner = el?.clientHeight ?? 0;
+      if (!el || inner <= 0) return; // not laid out: keep the fallback
+      const head = el.querySelector("thead")?.getBoundingClientRect().height || ROW_HEIGHT;
+      const row = el.querySelector("tr[data-row-id]")?.getBoundingClientRect().height || ROW_HEIGHT;
+      const n = Math.max(1, Math.floor((inner - head) / row));
+      setFill((prev) => (prev === n ? prev : n));
+    };
+    // measured before the first paint, so the page never shows 50 rows and then shrinks (Strict 1)
+    measure();
+    const observer = new ResizeObserver(measure);
+    if (region.current) observer.observe(region.current);
+    return () => observer.disconnect();
+  }, [fillMode, tableShown]);
   const pageIds = pg.rows;
   const tabRow = focusId && pageIds.includes(focusId) ? focusId : (pageIds[0] ?? null);
   useEffect(() => {
@@ -230,6 +286,7 @@ export function DataTable<R>(props: DataTableProps<R>) {
     if (next === pg.page) return;
     pendingFocus.current = focus;
     setPageState(next);
+    report(next);
     if (scroller.current) scroller.current.scrollTop = focus === "last" ? scroller.current.scrollHeight : 0;
   };
   const focusRow = (rid: string) => {
@@ -279,6 +336,8 @@ export function DataTable<R>(props: DataTableProps<R>) {
   const filteredIds = resultIds;
   const allSelected = filteredIds.length > 0 && filteredIds.every((x) => selected.has(x));
   const someSelected = !allSelected && filteredIds.some((x) => selected.has(x));
+  /** The selected rows the data still holds: what the row menu acts on (table #4), counted in the status bar. */
+  const selectedCount = [...selected].filter((x) => byId.has(x)).length;
 
   // ── the row menu: the row it opened on, or every selected row the table knows (table #4) ───────
   const [menuFor, setMenuFor] = useState<readonly string[]>([]);
@@ -350,12 +409,12 @@ export function DataTable<R>(props: DataTableProps<R>) {
   // ── toolbar ────────────────────────────────────────────────────────────────────────────────
   const items: ToolbarItem[] = [];
   if (presets.length)
-    items.push({ id: "preset", kind: "sticky", values: [...presets.map((p) => `${PRESET_LABEL}: ${p.label}`), `${PRESET_LABEL}: ${CUSTOM_LABEL}`], node:<PresetSelect presets={presets} filters={rprefs.filters} counts={result?.presetCounts} onChoose={(p) => setR({ filters: p.filters })} /> });
+    items.push({ id: "preset", kind: "sticky", values: [...presets.map((p) => `${PRESET_LABEL}: ${p.label}`), `${PRESET_LABEL}: ${CUSTOM_LABEL}`], node: <PresetSelect presets={presets} filters={rprefs.filters} counts={result?.presetCounts} onChoose={(p) => setQuery({ filters: p.filters })} /> });
   items.push({
     id: "search",
     kind: "pinned",
     flex: true,
-    node: <SearchBox value={rprefs.search} onChange={(v) => setR({ search: v })} placeholder={search.placeholder} history={tprefs.history} onCommit={(term) => setT({ history: pushHistory(tprefs.history, term) })} shortcut={searchShortcut} />,
+    node: <SearchBox value={rprefs.search} onChange={(v) => setQuery({ search: v })} placeholder={search.placeholder} history={tprefs.history} onCommit={(term) => setT({ history: pushHistory(tprefs.history, term) })} shortcut={searchShortcut} />,
   });
   for (const f of filters)
     items.push({
@@ -363,7 +422,7 @@ export function DataTable<R>(props: DataTableProps<R>) {
       kind: "ordinary",
       active: Boolean(rprefs.filters[f.id]?.length),
       values: isSelectFilter(f as FilterDef<unknown>) ? [ANY_LABEL, ...f.options.map((o) => o.label)].map((v) => `${f.label}: ${v}`) : undefined,
-      node: <FilterControl def={f} value={rprefs.filters[f.id] ?? []} counts={result?.counts[f.id]} onChange={(v) => setR({ filters: { ...rprefs.filters, [f.id]: v } })} />,
+      node: <FilterControl def={f} value={rprefs.filters[f.id] ?? []} counts={result?.counts[f.id]} onChange={(v) => setQuery({ filters: { ...rprefs.filters, [f.id]: v } })} />,
     });
   if (toolbarEnd) items.push({ id: "facts", kind: "pinned", end: true, node: toolbarEnd });
   items.push({
@@ -462,7 +521,7 @@ export function DataTable<R>(props: DataTableProps<R>) {
   else if (!display.length)
     body = (
       <div className="flex size-full items-center justify-center rounded-lg border">
-        <EmptyState form="filtered" noun={noun.forms} filters={filterSummary(filters, rprefs.filters, rprefs.search)} onReset={() => setR({ filters: {}, search: "" })} />
+        <EmptyState form="filtered" noun={noun.forms} filters={filterSummary(filters, rprefs.filters, rprefs.search)} onReset={() => setQuery({ filters: {}, search: "" })} />
       </div>
     );
   else
@@ -487,7 +546,7 @@ export function DataTable<R>(props: DataTableProps<R>) {
                 <Checkbox aria-label={SELECT_ALL} checked={allSelected ? true : someSelected ? "indeterminate" : false} onCheckedChange={() => setSelected(allSelected ? new Set() : new Set(filteredIds))} />
               </TableHead>
               {ordered.map((c) => (
-                <HeaderCell key={c.id} column={c} sort={tprefs.sort} onSort={() => setT({ sort: nextSort(tprefs.sort, c.id) })} width={widths[c.id]} onResizeStart={startResize} onResizeKey={(delta) => setWidth(c, (widths[c.id] ?? 0) + delta)} onResizeReset={() => setWidth(c, null)} />
+                <HeaderCell key={c.id} column={c} sort={tprefs.sort} onSort={() => setSort(nextSort(tprefs.sort, c.id))} width={widths[c.id]} onResizeStart={startResize} onResizeKey={(delta) => setWidth(c, (widths[c.id] ?? 0) + delta)} onResizeReset={() => setWidth(c, null)} />
               ))}
               {!slack && <TableHead className="h-8 border-b" aria-hidden="true" />}
             </TableRow>
@@ -590,7 +649,7 @@ export function DataTable<R>(props: DataTableProps<R>) {
   return (
     <div data-slot="data-table" className={cn("@container flex size-full min-h-0 flex-col gap-2", className)}>
       <AdaptiveToolbar items={items} label={`Фильтры: ${label}`} />
-      <div data-slot="table-region" className="min-h-0 flex-1">
+      <div ref={region} data-slot="table-region" className="min-h-0 flex-1">
         {body}
       </div>
       <HeldStrip counts={held.counts} noun={noun} onApply={() => setFrozen({ key: queryKey, ids: resultIds })} className="-mt-2 border-t-0" />
@@ -600,6 +659,7 @@ export function DataTable<R>(props: DataTableProps<R>) {
         total={result?.total}
         pager={result && size ? { page: pg.page, pageCount: pg.pageCount, onPage: (p) => goPage(p), pageSize: tprefs.pageSize, onPageSize: (s) => setT({ pageSize: s }) } : null}
         counts={result && counts ? counts(result.rows.filter((r) => !result.outside.has(rowId(r)))) : undefined}
+        selected={{ count: selectedCount, noun }}
         updatedAt={updatedAt}
         now={now}
       />

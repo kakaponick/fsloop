@@ -8,7 +8,7 @@ import { Link } from "react-router-dom";
 import type { Finding } from "../../../shared/model.ts";
 import { num } from "../../../shared/text.ts";
 import { cn } from "@/lib/utils";
-import { copyItem, Dot, flatItem, FlatList, markProps, Menu, OutOfFilter, type MenuItem } from "@/ui";
+import { copyItem, copyLabel, Dot, flatItem, FlatList, markProps, Menu, OutOfFilter, type MenuItem } from "@/ui";
 import { groupsOf, groupTitle, itemState, type HeldItem } from "./model.ts";
 
 export interface RailProps {
@@ -54,7 +54,7 @@ export function Rail({ items, findings, current, outside, arrived, hrefOf, pathO
               {group.items.map((item) => {
                 const state = itemState(item, findings, now, { ended: ended.has(item.id) });
                 const path = pathOf(item.id);
-                const menu: MenuItem[] = [path ? copyItem(COPY_PATH, path) : { label: `Скопировать ${COPY_PATH}`, onSelect: () => {}, blocked: "Отчёта ещё нет: запуск работает — путь появится, когда он закончит" }];
+                const menu: MenuItem[] = [path ? copyItem(COPY_PATH, path) : { label: copyLabel(COPY_PATH), onSelect: () => {}, blocked: "Отчёта ещё нет: запуск работает — путь появится, когда он закончит" }];
                 const open = item.id === current;
                 const marks = markProps({ edge: arrived.has(item.id) && !open }, "");
                 return (

@@ -1,20 +1,31 @@
 // The status bar (table #8; ui → Page chrome; the design check): the one bottom strip of every view, with a table or
-// without — pagination or a counts strip, then «<shown> из <total noun>», then «обновлено <compact past>» with the
-// full Moscow time in its title, the age given by the caller's shared clock. It holds no actions but paging. Its
-// height is fixed and every number keeps its box, so it never moves what is above it (rules/ui → Strict 1).
+// without — pagination or a counts strip, then «<shown> из <total noun>», then the selection «Выбрано N <noun>» in a
+// place reserved before anything is selected (table #5), then «обновлено <compact past>» with the full Moscow time in
+// its title, the age given by the caller's shared clock. It holds no actions but paging. Its height is fixed and
+// every number keeps its box, so it never moves what is above it or beside it (rules/ui → Strict 1).
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { ago, count, mskDateTime, num, plural, type Forms } from "../../shared/text.ts";
 import { Button } from "@/components/ui/button";
 import { Pagination, PaginationContent, PaginationItem } from "@/components/ui/pagination";
 import { cn } from "@/lib/utils";
-import { CountSelect, Hint } from "@/ui";
-import { ALL_ROWS, type PageSize } from "./query.ts";
+import { CountSelect, Hint, type HeldNoun } from "@/ui";
+import { ALL_ROWS, FILL_ROWS, type PageSize } from "./query.ts";
 
 export const PREV_PAGE = "Предыдущая страница";
 export const NEXT_PAGE = "Следующая страница";
 export const PAGE_SIZE_LABEL = "Строк";
-export const PAGE_SIZES: readonly PageSize[] = [50, 100, ALL_ROWS];
+/** Rows per page (table #1): as many as the table's box shows, 50, 100, every row. */
+export const PAGE_SIZES: readonly PageSize[] = [FILL_ROWS, 50, 100, ALL_ROWS];
+const PAGE_SIZE_WORDS: Record<string, string> = { [FILL_ROWS]: "по экрану", [ALL_ROWS]: "все" };
+
+const SELECTED_ONE = { m: "Выбран", f: "Выбрана", n: "Выбрано" } as const;
+
+/** «Выбрано 3 находки», «Выбрана 21 находка», «Выбран 1 юнит»: the verb agrees with the number and the noun. */
+export const selectedText = (n: number, noun: HeldNoun): string => `${n % 10 === 1 && n % 100 !== 11 ? SELECTED_ONE[noun.gender] : "Выбрано"} ${count(n, noun.forms)}`;
+
+/** The selection's reserved width: its widest three-digit form at a Cyrillic letter's width (toolbar.tsx). */
+const selectedWidth = (noun: HeldNoun): string => `${(Math.max(...[111, 222, 555].map((n) => selectedText(n, noun).length)) * 1.1).toFixed(1)}ch`;
 
 /** «из 723 находок», «из 61 находки»: after «из» the noun is genitive — the singular after a number ending in 1
  * (not 11), the plural otherwise; a noun's 2–4 form is its genitive singular, so the shared plural picks it. */
@@ -61,8 +72,8 @@ export function Pager({ page, pageCount, onPage, pageSize, onPageSize }: PagerPr
       <CountSelect
         label={PAGE_SIZE_LABEL}
         value={String(pageSize)}
-        onValueChange={(v) => onPageSize(v === ALL_ROWS ? ALL_ROWS : Number(v))}
-        options={PAGE_SIZES.map((s) => ({ value: String(s), label: s === ALL_ROWS ? "все" : String(s) }))}
+        onValueChange={(v) => onPageSize(v === ALL_ROWS || v === FILL_ROWS ? v : Number(v))}
+        options={PAGE_SIZES.map((s) => ({ value: String(s), label: PAGE_SIZE_WORDS[s] ?? String(s) }))}
       />
     </div>
   );
@@ -77,19 +88,26 @@ export interface StatusBarProps {
   shown?: number;
   total?: number;
   noun: Forms;
+  /** The rows selected, for a list that selects: its place is reserved from the first paint, empty at 0. */
+  selected?: { count: number; noun: HeldNoun };
   /** The data's last update and the shared clock; absent — no age is shown. */
   updatedAt?: string | null;
   now?: string | number;
   className?: string;
 }
 
-export function StatusBar({ pager, counts, shown, total, noun, updatedAt, now, className }: StatusBarProps) {
+export function StatusBar({ pager, counts, shown, total, noun, selected, updatedAt, now, className }: StatusBarProps) {
   const loaded = shown !== undefined && total !== undefined;
   return (
     <div data-slot="status-bar" className={cn("flex h-8 shrink-0 items-center gap-4 overflow-hidden text-xs whitespace-nowrap text-muted-foreground tabular-nums", className)}>
       {loaded && pager && <Pager {...pager} />}
       {loaded && !pager && counts && <div data-slot="counts-strip" className="flex min-w-0 items-center gap-3">{counts}</div>}
       {loaded && <span data-slot="shown">{shownText(shown, total, noun)}</span>}
+      {selected && (
+        <span data-slot="selected" aria-live="polite" className="text-foreground" style={{ minWidth: selectedWidth(selected.noun) }}>
+          {selected.count > 0 ? selectedText(selected.count, selected.noun) : null}
+        </span>
+      )}
       {updatedAt && now !== undefined && (
         <span data-slot="age" className="ml-auto" title={mskDateTime(updatedAt)}>
           {ageText(updatedAt, now)}

@@ -6,7 +6,7 @@ import { Link } from "react-router-dom";
 import type { Convention, Launch } from "../../../shared/model.ts";
 import { STAGE_WORDS, stageOf } from "../../../shared/states.ts";
 import { count, NOUNS, type Forms } from "../../../shared/text.ts";
-import { EmptyState, RunningText } from "@/ui";
+import { EmptyState, emptyWhen, RunningText } from "@/ui";
 import { StatusBar } from "@/table";
 import { useNow } from "../../app/clock.tsx";
 import { LINK_CLASS, resolverFor, routerLink } from "../../app/links.tsx";
@@ -21,7 +21,6 @@ export const NONE_WRITTEN = "Эта проверка дизайна соглаш
 export const DESIGN_CHECK_NOUN: Forms = ["проверка дизайна", "проверки дизайна", "проверки дизайна"];
 export const NEVER_DESCRIPTION = `Проверку дизайна прогон запускает на этапе «${STAGE_WORDS.decompose}», когда интерфейс в этом проходе делают два юнита или больше.`;
 
-const STEPS = Object.keys(STAGE_WORDS);
 
 /** A convention as written, its pattern leading in bold (LEADS: each convention's pattern): «**Pattern 1** — …». */
 export function leadText(c: Pick<Convention, "text" | "pattern">): string {
@@ -34,9 +33,7 @@ export const isDesignCheck = (l: Pick<Launch, "description" | "sections">): bool
 
 /** Empty: before decompose the conventions are still to come; past it, or closed, the run had no design check. */
 export function emptyFor(run: Pick<LoadedRun, "closed" | "mode" | "now">): "not-yet" | "never" {
-  if (run.closed || run.mode === "init") return "never";
-  const step = stageOf(run.now?.stage).step;
-  return step === null || STEPS.indexOf(step) < STEPS.indexOf("decompose") ? "not-yet" : "never";
+  return emptyWhen(run, "decompose", { once: true }).form;
 }
 
 export interface ConventionGroup {

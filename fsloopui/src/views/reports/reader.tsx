@@ -13,7 +13,7 @@ import { ago, count, duration, mskDateTime, mskTime, NOUNS, num, tokens } from "
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
-import { copyText, CountLink, CountTabs, CountTabsContent, Dot, FactList, FrameStrip, Hint, Loading, NotRecorded, PartFailed, RunningText, StatusDot, type Fact, type Frame } from "@/ui";
+import { copyLabel, copyText, CountLink, CountTabs, CountTabsContent, Dot, FactList, FrameStrip, Hint, Loading, NotRecorded, PartFailed, RunningText, StatusDot, type Fact, type Frame } from "@/ui";
 // From the files, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
 import { FindingArticle, frameSrc } from "@/finding/article.tsx";
 import { openFindings } from "@/finding/open.ts";
@@ -85,7 +85,7 @@ function Identity({ run, item }: { run: LoadedRun; item: RailItem }) {
           {item.id}
         </span>
         {l?.report && path && (
-          <Hint label={`Скопировать ${COPY_PATH_WHAT}`}>
+          <Hint label={copyLabel(COPY_PATH_WHAT)}>
             <Button variant="ghost" size="sm" data-slot="report-path" className="h-6 max-w-full gap-1.5 px-1.5 font-mono text-xs font-normal" onClick={() => void copyText(path, COPY_PATH_WHAT)}>
               <span className="truncate">{l.report}</span>
               <CopyIcon aria-hidden="true" className="text-muted-foreground" />

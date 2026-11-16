@@ -10,7 +10,7 @@ import { useSearchParams } from "react-router-dom";
 import type { JournalEntry } from "../../../shared/model.ts";
 import { stageOf, type Step } from "../../../shared/states.ts";
 import { NOUNS } from "../../../shared/text.ts";
-import { EmptyState, HeldStrip, markProps, NotFound, OutOfFilter, RunningText, type HeldNoun } from "@/ui";
+import { EmptyState, emptyWhen, HeldStrip, markProps, NotFound, OutOfFilter, RunningText, type HeldNoun } from "@/ui";
 import { AdaptiveToolbar, ANY_LABEL, FilterControl, filterSummary, isSelectFilter, pushHistory, runQuery, SearchBox, StatusBar, useRunView, useTableView, type FilterDef, type SearchDef, type ToolbarItem } from "@/table";
 import { useNow } from "../../app/clock.tsx";
 import { resolverFor, routerLink } from "../../app/links.tsx";
@@ -82,7 +82,7 @@ function Journal({ run }: { run: LoadedRun }) {
   ];
 
   const missing = entry !== null && !target ? entry : null;
-  const never = run.closed || run.mode === "init";
+  const never = emptyWhen(run, FIRST).form === "never";
 
   return (
     <div data-slot="journal-view" className="absolute inset-0 flex flex-col gap-2 px-5 pt-3 pb-1">

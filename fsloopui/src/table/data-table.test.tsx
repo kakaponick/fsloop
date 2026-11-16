@@ -2,7 +2,7 @@
 import "../ui/test-setup.ts";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ReactElement } from "react";
+import { Profiler, useState, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { NOUNS } from "../../shared/text.ts";
 import { UiProvider } from "../ui/provider.tsx";
@@ -121,14 +121,15 @@ describe("states (rules/ui → Tables 2, Strict 1–2; Conventions 14, 15)", () 
     const strip = container.querySelector("[data-slot=held-strip]");
     expect(bar).toHaveClass("h-8", "shrink-0");
     expect(strip).toHaveClass("h-strip", "shrink-0");
-    // a select that shows its count keeps the box of its longest value with a three-digit count
+    // a select keeps the box of its longest value — the value alone, no count (table #11) — and its trigger fills it
     const preset = () => (container.querySelector('[data-toolbar-item="preset"]') as HTMLElement).style.minWidth;
     const severity = () => (container.querySelector('[data-toolbar-item="filter-severity"]') as HTMLElement).style.minWidth;
-    // «Вид: В исправление», 18 characters: 19.8ch + the count's 3ch; «Серьёзность: critical», 21: 23.1ch + 3ch
-    expect(preset()).toBe("calc(22.8ch + 2.75rem)");
-    expect(severity()).toBe("calc(26.1ch + 2.75rem)");
+    // «Вид: В исправление», 18 characters: 19.8ch; «Серьёзность: critical», 21: 23.1ch
+    expect(preset()).toBe("calc(19.8ch + 2.75rem)");
+    expect(severity()).toBe("calc(23.1ch + 2.75rem)");
+    expect(container.querySelector('[data-toolbar-item="preset"]')).toHaveClass("[&>*]:w-full");
     rerender(view());
-    expect(preset()).toBe("calc(22.8ch + 2.75rem)");
+    expect(preset()).toBe("calc(19.8ch + 2.75rem)");
     // the loaded table lands in the same boxes
     expect(container.querySelector("[data-slot=status-bar]")).toHaveClass("h-8");
     expect(screen.queryByText("Загрузка…")).toBeNull();
@@ -323,6 +324,23 @@ describe("the row menu and the pin (table #4, #13; rules/ui → Tables 4)", () =
     expect(row("f-002")).toHaveAttribute("data-menu");
   });
 
+  test("an item hides on a row whose object can never exist, and shows on a row that has it (table #4)", async () => {
+    const openUnit = vi.fn();
+    const withUnit: RowAction<F> = { id: "unit", label: "Открыть юнит", scope: "single", group: 2, hidden: (rows) => rows.every((r) => !r.units.length), run: (rows) => openUnit(rows[0].id) };
+    renderUi(view({ actions: [...ACTIONS, withUnit] }));
+    // f-002 (i = 1) has no unit; f-005 (i = 4) has u5
+    fireEvent.contextMenu(row("f-002"));
+    let menu = await screen.findByRole("menu");
+    expect(within(menu).queryByRole("menuitem", { name: "Открыть юнит" })).toBeNull();
+    expect(within(menu).queryAllByRole("menuitem", { hidden: true }).filter((i) => i.getAttribute("aria-disabled") === "true")).toEqual([]);
+    fireEvent.keyDown(menu, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    fireEvent.contextMenu(row("f-005"));
+    menu = await screen.findByRole("menu");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Открыть юнит" }));
+    expect(openUnit).toHaveBeenCalledWith("f-005");
+  });
+
   test("a selection: the count in the header, the multi items, every selected row the table knows", async () => {
     const user = userEvent.setup();
     const { rerender } = renderUi(view());
@@ -420,7 +438,7 @@ describe("the adaptive toolbar (table #11, #12, #14; rules/ui → Conventions 16
   test("in order: «Вид», search, filters, the columns menu", () => {
     const { container } = renderUi(view());
     expect([...container.querySelectorAll<HTMLElement>("[data-toolbar-item]")].map((el) => el.dataset.toolbarItem)).toEqual(["preset", "search", "filter-severity", "filter-status", "filter-unit", "columns"]);
-    expect(screen.getByRole("combobox", { name: "Вид" })).toHaveTextContent("Вид:Все60");
+    expect(screen.getByRole("combobox", { name: "Вид" })).toHaveTextContent(/^Вид:Все$/);
     expect(screen.getByRole("searchbox")).toHaveAttribute("placeholder", "Текст, id, юнит");
   });
 
@@ -432,7 +450,7 @@ describe("the adaptive toolbar (table #11, #12, #14; rules/ui → Conventions 16
     await user.keyboard("{Enter}");
     expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual(["Все60", "В исправление40", "Кандидаты20"]);
     await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Вид" })).toHaveTextContent("Вид:Кандидаты20"));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Вид" })).toHaveTextContent(/^Вид:Кандидаты$/));
     expect(screen.getByRole("searchbox")).toHaveValue("row");
     expect(screen.getByRole("combobox", { name: "Состояние" })).toHaveTextContent("candidate");
     screen.getByRole("combobox", { name: "Серьёзность" }).focus();
@@ -516,7 +534,8 @@ describe("the status bar (table #8; the design check)", () => {
     const bar = container.querySelector("[data-slot=status-bar]") as HTMLElement;
     expect(within(bar).getByText("60 находок")).toBeInTheDocument();
     expect(within(bar).getByRole("navigation", { name: "Страницы" })).toHaveTextContent("стр. 1 из 2");
-    expect(within(bar).getByRole("combobox", { name: "Строк" })).toHaveTextContent("Строк:50");
+    // «по экрану» by default; unmeasured (jsdom lays nothing out) it holds 50 rows
+    expect(within(bar).getByRole("combobox", { name: "Строк" })).toHaveTextContent(/^Строк:по экрану$/);
     expect(within(bar).getByText("обновлено 5 мин назад")).toHaveAttribute("title", "16.11.2026 07:00 МСК");
     await user.click(within(bar).getByRole("button", { name: "Следующая страница" }));
     expect(onPageChange).toHaveBeenLastCalledWith(2);
@@ -524,6 +543,70 @@ describe("the status bar (table #8; the design check)", () => {
     await user.type(screen.getByRole("searchbox"), "f-00");
     expect(within(bar).getByText("9 из 60 находок")).toBeInTheDocument();
     expect(onPageChange).toHaveBeenLastCalledWith(1);
+  });
+
+  test("«Выбрано N» in the bar's line, in a place reserved before anything is selected (table #5; Strict 1)", async () => {
+    const user = userEvent.setup();
+    const { container } = renderUi(view({ updatedAt: "2026-11-16T04:00:00Z", now: "2026-11-16T04:05:00Z" }));
+    const bar = container.querySelector("[data-slot=status-bar]") as HTMLElement;
+    const slot = () => bar.querySelector("[data-slot=selected]") as HTMLElement;
+    expect(slot()).toBeEmptyDOMElement();
+    // «Выбрано 723 находки» at a Cyrillic letter's width: the widest it gets, so a count that grows moves nothing
+    expect(slot().style.minWidth).toBe("20.9ch");
+    expect(slot()).toHaveAttribute("aria-live", "polite");
+    const order = () => [...bar.children].map((el) => (el as HTMLElement).dataset.slot);
+    expect(order()).toEqual(["pager", "shown", "selected", "age"]);
+    await user.click(within(row("f-001")).getByRole("checkbox"));
+    expect(slot()).toHaveTextContent(/^Выбрана 1 находка$/);
+    await user.click(screen.getByRole("checkbox", { name: "Выбрать все строки по фильтрам" }));
+    expect(slot()).toHaveTextContent(/^Выбрано 60 находок$/);
+    expect(order()).toEqual(["pager", "shown", "selected", "age"]);
+  });
+
+  test("«по экрану»: the page holds as many collapsed rows as the table's box shows, measured; a resize keeps the first row", async () => {
+    const callbacks: (() => void)[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(cb: () => void) {
+          callbacks.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    let box = 354;
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.slot === "table-scroll" ? box : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      // the header and a collapsed row are 32 px; a row's detail is taller and never counts
+      const h = this.tagName === "THEAD" || (this.tagName === "TR" && this.dataset.rowId) ? 32 : this.tagName === "TR" ? 120 : 0;
+      return { width: 0, height: h, x: 0, y: 0, top: 0, left: 0, right: 0, bottom: h, toJSON: () => ({}) } as DOMRect;
+    });
+    const user = userEvent.setup();
+    const { container } = renderUi(view());
+    const bar = container.querySelector("[data-slot=status-bar]") as HTMLElement;
+    // (354 − 32) / 32 = 10 rows
+    expect(pageIds()).toHaveLength(10);
+    expect(within(bar).getByRole("navigation", { name: "Страницы" })).toHaveTextContent("стр. 1 из 6");
+    await user.click(within(bar).getByRole("button", { name: "Следующая страница" }));
+    await user.click(within(bar).getByRole("button", { name: "Следующая страница" }));
+    expect(pageIds()[0]).toBe("f-021");
+    // the box grows to 20 rows: the page that holds f-021 is shown, f-021 still on it
+    box = 674;
+    act(() => callbacks.forEach((cb) => cb()));
+    expect(pageIds()).toHaveLength(20);
+    expect(pageIds()).toContain("f-021");
+    expect(within(bar).getByRole("navigation", { name: "Страницы" })).toHaveTextContent("стр. 2 из 3");
+    // a fixed size is still there: 100 shows every row
+    within(bar).getByRole("combobox", { name: "Строк" }).focus();
+    await user.keyboard("{Enter}");
+    expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual(["по экрану", "50", "100", "все"]);
+    await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+    await waitFor(() => expect(pageIds()).toHaveLength(60));
+    // the measured row height is never stored (table #7)
+    expect(stored("table:findings").pageSize).toBe(100);
   });
 
   test("no split: the counts strip takes the pager's slot", () => {
@@ -557,6 +640,34 @@ describe("view state (table #7; rules/ui → Tables 4, Conventions 12)", () => {
     renderUi(view({ runKey: "tga/other" }));
     expect(screen.getByRole("searchbox")).toHaveValue("");
     expect(header("Отчёт")).toHaveAttribute("aria-sort", "descending");
+  });
+
+  test("a page the user turns reaches the caller in the same commit as the page: no commit shows one page under another's URL", async () => {
+    const user = userEvent.setup();
+    const commits: [number, string | undefined][] = [];
+    const url = { page: 1 };
+    function Host() {
+      const [page, setPage] = useState(1);
+      url.page = page;
+      // the profiler reports every commit of the table, the caller's or its own, with the DOM in place
+      return (
+        <Profiler id="table" onRender={() => commits.push([url.page, pageIds()[0]])}>
+          {view({ page, onPageChange: setPage })}
+        </Profiler>
+      );
+    }
+    renderUi(<Host />);
+    const first = (p: number) => (p === 1 ? "f-001" : "f-051");
+    await user.click(screen.getByRole("button", { name: "Следующая страница" }));
+    expect(pageIds()[0]).toBe("f-051");
+    expect(commits.at(-1)).toEqual([2, "f-051"]);
+    // a search starts at page 1, in the same commit too
+    await user.type(screen.getByRole("searchbox"), "f");
+    expect(commits.at(-1)).toEqual([1, "f-001"]);
+    row("f-001").focus();
+    await user.keyboard("{ArrowRight}");
+    expect(commits.at(-1)).toEqual([2, "f-051"]);
+    for (const [page, top] of commits) expect(top, `page ${page}`).toBe(first(page));
   });
 
   test("the page comes from the caller's URL and changes are reported back", () => {

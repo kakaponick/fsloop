@@ -9,7 +9,7 @@
 import { useCallback } from "react";
 import { readPref, usePref, writePref } from "@/ui";
 import type { ColumnsState } from "./columns.ts";
-import type { Filters, PageSize, SortSpec } from "./query.ts";
+import { FILL_ROWS, type Filters, type PageSize, type SortSpec } from "./query.ts";
 
 export interface TablePrefs {
   sort: SortSpec | null;
@@ -32,7 +32,8 @@ export interface RunPrefs {
 export const tableKey = (id: string) => `table:${id}`;
 export const runKey = (id: string, run: string) => `table:${id}:run:${run}`;
 
-export const TABLE_DEFAULTS: TablePrefs = { sort: null, columns: null, widths: {}, pageSize: 50, paged: true, pin: null, history: [] };
+/** Pages fill the table's box by default (table #1 Fill: «по экрану»). */
+export const TABLE_DEFAULTS: TablePrefs = { sort: null, columns: null, widths: {}, pageSize: FILL_ROWS, paged: true, pin: null, history: [] };
 export const RUN_DEFAULTS: RunPrefs = { filters: {}, search: "" };
 
 /** A stored object merged over its defaults: a field a stored value lacks takes its default. */

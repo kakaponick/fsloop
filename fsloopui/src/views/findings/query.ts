@@ -2,7 +2,8 @@
 // rank functions, the «Вид» presets, the search's fields and the filters with their options. The query itself —
 // sort, filters, counts, search, pages — is the table kit's (src/table/query.ts); nothing here filters a row.
 import type { Finding, Run } from "../../../shared/model.ts";
-import { FINDING_STATUS, NOT_RECORDED, SEVERITY, STAGE_WORDS, stageOf, VERDICT, type FindingStatus, type Verdict } from "../../../shared/states.ts";
+import { FINDING_STATUS, NOT_RECORDED, SEVERITY, stageOf, VERDICT, type FindingStatus, type Verdict } from "../../../shared/states.ts";
+import { STEPS } from "@/ui";
 import type { FilterDef, Preset, SearchDef } from "@/table";
 // From the file, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
 import { DONE_STATES, FACETS, FIX_STATES, MAJOR_UP, NONE, OWN } from "@/finding/facets.ts";
@@ -14,7 +15,6 @@ import { DONE_STATES, FACETS, FIX_STATES, MAJOR_UP, NONE, OWN } from "@/finding/
 export const severityRank = (f: Pick<Finding, "severity" | "effectiveStatus">): number => SEVERITY[f.severity ?? "none"].rank * 100 + FINDING_STATUS[f.effectiveStatus].rank;
 export const stateRank = (f: Pick<Finding, "effectiveStatus">): number => FINDING_STATUS[f.effectiveStatus].rank;
 export const verdictRank = (f: Pick<Finding, "verdict">): number | null => (f.verdict ? VERDICT[f.verdict.verdict].rank : null);
-const STEPS = Object.keys(STAGE_WORDS);
 export const stageRank = (f: Pick<Finding, "stage">): number | null => {
   const s = stageOf(f.stage);
   return s.step ? (s.pass ?? 0) * 100 + STEPS.indexOf(s.step) : null;

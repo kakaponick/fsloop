@@ -2,7 +2,44 @@
 // last minutes, a neutral bar on its leading edge; the target mark — the object a link opened, framed in ink on the
 // muted ground, visibly not the edge mark. Neither carries a signal tone, and both are drawn inside the row's box
 // (an inset shadow), so marking moves nothing. A linked object the filters hide shows anyway, «вне фильтра».
+//
+// Which rows carry the edge mark is one hook for every live list: a view passes its rows, their id and its own sign —
+// what a change of the run moves on a row (never the user's own verdict); the first read marks nothing, and a mark
+// ages out on the shared clock after the same «last minutes» as a fresh write.
+import { useState } from "react";
+import { THRESHOLDS } from "../../shared/liveness.ts";
 import { cn } from "@/lib/utils";
+
+/** How long a change stays marked: the same «last minutes» as a fresh write (shared/liveness.ts). */
+export const EDGE_MS = THRESHOLDS.quiet;
+
+interface Seen {
+  version: number;
+  signs: ReadonlyMap<string, string>;
+  changed: Readonly<Record<string, number>>;
+}
+
+/** Whether a row carries the edge mark now; recomputed when the run's version moves. `id` and `sign` are read only
+ * then, so a view may pass them inline. */
+export function useEdgeMarks<R>(version: number, rows: readonly R[], id: (row: R) => string, sign: (row: R) => string, now: number): (rowId: string) => boolean {
+  const signsOf = () => new Map(rows.map((r) => [id(r), sign(r)]));
+  const [seen, setSeen] = useState<Seen>(() => ({ version, signs: signsOf(), changed: {} }));
+  let current = seen;
+  if (seen.version !== version) {
+    const signs = signsOf();
+    const changed: Record<string, number> = { ...seen.changed };
+    for (const [key, s] of signs) {
+      const before = seen.signs.get(key);
+      if (before !== undefined && before !== s) changed[key] = now;
+    }
+    current = { version, signs, changed };
+    setSeen(current);
+  }
+  return (rowId) => {
+    const at = current.changed[rowId];
+    return at !== undefined && now - at < EDGE_MS;
+  };
+}
 
 export interface MarkState {
   /** Changed in the last minutes. */

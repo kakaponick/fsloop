@@ -1,7 +1,7 @@
 // Choosing from a list (ui → Choosing from a list, Widths; table #11): a fixed set of at most 7 options is a select,
 // a longer set or one that grows with the data is a combobox searched in its field, at most 10 rows in view. Both
-// triggers hug their content and show their field and value; each option carries its count over the unfiltered
-// set in a reserved tabular slot, a muted «0».
+// triggers show «Поле: значение» and nothing else; each option carries its count over the unfiltered set in a
+// reserved tabular slot, a muted «0» — in the list only, never copied into the closed trigger (table #11).
 import { ChevronDownIcon } from "lucide-react";
 import { useState } from "react";
 import { num } from "../../shared/text.ts";
@@ -41,8 +41,11 @@ export function CountSelect({ label, value, onValueChange, options, className }:
   return (
     <Select value={value} onValueChange={onValueChange}>
       <SelectTrigger size="sm" aria-label={label} className={cn("w-fit", className)}>
-        <span className="text-muted-foreground">{label}:</span>
-        <SelectValue />
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="text-muted-foreground">{label}:</span>
+          {/* the value's own label: the library would copy the whole item, its count included */}
+          <SelectValue>{options.find((o) => o.value === value)?.label ?? value}</SelectValue>
+        </span>
       </SelectTrigger>
       <SelectContent position="popper" align="start">
         <SelectGroup>

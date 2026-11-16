@@ -105,8 +105,10 @@ const FINDING_ACTIONS: RowAction<KitFinding>[] = [
   { id: "rate", label: "Оценить…", scope: "both", group: 1, run: (rows) => notify.success(rows.length === 1 ? "Открыта оценка находки" : `Открыта оценка ${rows.length} находок`) },
   copyAction<KitFinding>("copy-link", "ссылку", (r) => `http://127.0.0.1:4747/r/tga/a098a7d4?view=findings&finding=${encodeURIComponent(r.id)}`, "single", 2),
   copyAction<KitFinding>("copy-id", "id", (r) => r.id, "both", 2),
-  copyAction<KitFinding>("copy-path", "путь", (r) => r.location, "both", 2),
+  // a finding with no file and line has no path to copy, ever: the item is not listed on it (table #4)
+  { ...copyAction<KitFinding>("copy-path", "путь", (r) => r.location, "both", 2), hidden: (rows) => rows.every((r) => !r.location) },
   { id: "report", label: "Открыть отчёт", scope: "single", group: 3, run: (rows) => notify.success(`Открыт отчёт ${rows[0].launchName}`) },
+  { id: "unit", label: "Открыть юнит", scope: "single", group: 3, hidden: (rows) => !rows[0]?.units.length, run: (rows) => notify.success(`Открыт юнит ${rows[0].units[0]}`) },
 ];
 
 const FINDING_ROW_ID = (r: KitFinding) => r.id;

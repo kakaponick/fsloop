@@ -23,14 +23,16 @@ export interface ToolbarItem {
   active?: boolean;
   /** Starts the right cluster: pushed to the line's end. */
   end?: boolean;
-  /** The values the control can show: its box is reserved for the longest with its count, so neither the first
-   * load nor a live count moves the items after it (rules/ui → Strict 1). */
+  /** The values the control can show, «<field>: <value>»: its box is reserved for the longest and the trigger fills
+   * it, so choosing a shorter value never moves the items after it and the gaps between controls stay even
+   * (rules/ui → Strict 1). */
   values?: readonly string[];
 }
 
-/** The reserved width of a select trigger that shows «<field>: <value> <count>»: the longest value at a Cyrillic
- * letter's width (about 1.1 of the «0» that `ch` measures), the three-digit count, the chevron and the padding. */
-export const reserveWidth = (values: readonly string[]): string => `calc(${(Math.max(0, ...values.map((v) => v.length)) * 1.1).toFixed(1)}ch + 3ch + 2.75rem)`;
+/** The reserved width of a select trigger that shows «<field>: <value>» — no count, which stays in the options
+ * (table #11): the longest value at a Cyrillic letter's width (about 1.1 of the «0» that `ch` measures), the chevron
+ * and the padding. */
+export const reserveWidth = (values: readonly string[]): string => `calc(${(Math.max(0, ...values.map((v) => v.length)) * 1.1).toFixed(1)}ch + 2.75rem)`;
 
 export const GAP = 8;
 /** The search's floor and cap (ui → Widths: a toolbar search is flexible with a cap). */
@@ -133,7 +135,7 @@ function ItemSlot({ item, hidden, after }: { item: ToolbarItem; hidden: boolean;
           data-toolbar-item={item.id}
           data-flex={item.flex ? "" : undefined}
           style={item.values ? { minWidth: reserveWidth(item.values) } : undefined}
-          className={cn("flex shrink-0 items-center", item.flex && "max-w-80 min-w-48 flex-1 shrink", item.end && "ml-auto")}
+          className={cn("flex shrink-0 items-center", item.values && "[&>*]:w-full", item.flex && "max-w-80 min-w-48 flex-1 shrink", item.end && "ml-auto")}
         >
           {item.node}
         </div>
