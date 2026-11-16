@@ -32,4 +32,14 @@ describe("the kit's tables at the production shape (Done-criterion 4)", () => {
     expect(screen.getAllByRole("status").some((s) => s.textContent === "Загрузка…")).toBe(true);
     expect(screen.getByText("Юнитов ещё нет — они появятся на этапе «декомпозиция»")).toBeInTheDocument();
   });
+
+  test("improve-4: both tables carry the kit's «Свернуть все» at the toolbar's end, blocked while no row is open", () => {
+    const { container } = render(<TableSection />, { wrapper: UiProvider });
+    const [findings, units] = [...container.querySelectorAll<HTMLElement>("[data-slot=data-table]")];
+    for (const [table, name] of [
+      [findings, "Свернуть все находки"],
+      [units, "Свернуть все юниты"],
+    ] as const)
+      expect(within(table.querySelector("[data-toolbar-item=facts]") as HTMLElement).getByRole("button", { name })).toHaveAttribute("aria-disabled", "true");
+  });
 });

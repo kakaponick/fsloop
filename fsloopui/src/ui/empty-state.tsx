@@ -21,7 +21,15 @@ export type EmptyStateProps = (
       subject?: string;
     }
   | { form: "never"; noun: Forms; description?: string }
-  | { form: "filtered"; noun: Forms; filters: readonly string[]; onReset: () => void }
+  | {
+      form: "filtered";
+      noun: Forms;
+      filters: readonly string[];
+      onReset: () => void;
+      /** The named view («Вид») the list is in, when it is one with filters of its own (rules/ui → Conventions 16):
+       * its label and what fills it — its states, from its own definition in the view's query. */
+      view?: { label: string; fills: string };
+    }
 ) & { className?: string };
 
 const capital = (s: string) => s[0].toUpperCase() + s.slice(1);
@@ -33,8 +41,12 @@ export function emptyStateText(props: EmptyStateProps): { title: string; descrip
       return { title: `${props.lead ?? `${capital(props.noun[2])} ещё нет`} — ${props.subject ?? "они"} появятся на этапе «${STAGE_WORDS[props.step]}»` };
     case "never":
       return { title: `В этом прогоне не было ${props.noun[2]}`, description: props.description };
-    case "filtered":
-      return { title: `Нет ${props.noun[2]}, подходящих под фильтры`, description: props.filters.length ? `Фильтры: ${props.filters.join(" · ")}` : undefined };
+    case "filtered": {
+      const filters = props.filters.length ? `Фильтры: ${props.filters.join(" · ")}` : null;
+      if (!props.view) return { title: `Нет ${props.noun[2]}, подходящих под фильтры`, description: filters ?? undefined };
+      // a named view names itself and what fills it, then the search or filters beside it
+      return { title: `В виде «${props.view.label}» нет ${props.noun[2]}`, description: [`В вид входят: ${props.view.fills}`, filters].filter(Boolean).join(". ") };
+    }
   }
 }
 

@@ -9,23 +9,20 @@
 //
 // The reading pace: keys 1–4 set the verdict of the finding in focus — its row, or anything in its detail — and move
 // on to the next row of the page without a verdict, its detail opened in place of the rated one's when that was
-// open; «Свернуть все находки» in the toolbar's right cluster closes every detail — blocked, with its reason, while
-// none is open.
-import { ChevronsDownUpIcon } from "lucide-react";
+// open; «Свернуть все находки» — the table kit's part — in the toolbar's right cluster closes every detail, blocked,
+// with its reason, while none is open.
 import { useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import type { Finding, Run } from "../../../shared/model.ts";
 import { stageOf, STEPS, type Step, type Verdict } from "../../../shared/states.ts";
 import { NOUNS } from "../../../shared/text.ts";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import { emptyWhen, Hint, NotFound, PLACE_WHAT, type HeldNoun } from "@/ui";
+import { emptyWhen, NotFound, PLACE_WHAT, type HeldNoun } from "@/ui";
 import { copyAction, DataTable, type EmptyWhen, type RowAction } from "@/table";
 // From the files, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
 import { FindingArticle } from "@/finding/article.tsx";
 import { stateUnit } from "@/finding/cells.tsx";
 import { FINDINGS_TABLE } from "@/finding/facets.ts";
-import { COLLAPSE_ALL, NOT_FOUND_NEXT, RATE_ACTION } from "@/finding/words.ts";
+import { NOT_FOUND_NEXT, RATE_ACTION } from "@/finding/words.ts";
 import { useNow } from "../../app/clock.tsx";
 import { objectHref } from "../../app/links.tsx";
 import { useUpdatedAt } from "../../app/live.tsx";
@@ -51,9 +48,11 @@ export function nextCriticStep(stage: string | null | undefined): Step {
 
 export const EMPTY_LEAD = "Критики ещё не писали отчётов";
 
-/** «Свернуть все находки» while no row is open: why it cannot run, then what would let it (ui → Tooltip). «строк»,
- * not «находок»: «открыта» is also a finding's state in this table (cold-read; ux 1, one word one concept). */
-export const COLLAPSE_BLOCKED = "Нет открытых строк — откройте строку";
+/** «Свернуть все находки» while no row is open: the kit's one reason (`src/table/collapse-all.tsx`). */
+export { COLLAPSE_BLOCKED } from "@/table";
+
+/** The rows' noun after «Свернуть все». */
+const COLLAPSE_WHAT = "находки";
 
 /** Why the table is empty before any filter: a closed or init run never had findings; an open one names the stage. */
 export function emptyFor(run: Pick<Run, "closed" | "mode" | "now">): EmptyWhen {
@@ -182,25 +181,6 @@ function Findings({ run }: { run: LoadedRun }) {
 
   const missing = param !== null && !holds(param) ? param : null;
 
-  // ── «Свернуть все находки» (u4-shape cand-1): always in its box (Strict 1); with no row open it cannot run, so it is
-  // the blocked action — shown, focusable, inert, its reason in its tooltip — never hidden (ui → Blocked action; p2 craft-4)
-  const anyOpen = open.length > 0;
-  const collapseAll = (
-    <Hint label={anyOpen ? COLLAPSE_ALL : COLLAPSE_BLOCKED}>
-      <Button
-        variant="outline"
-        size="icon-sm"
-        aria-label={COLLAPSE_ALL}
-        aria-disabled={anyOpen ? undefined : "true"}
-        data-slot="collapse-all"
-        className={cn(!anyOpen && "text-muted-foreground opacity-50")}
-        onClick={() => anyOpen && onOpenChange([])}
-      >
-        <ChevronsDownUpIcon />
-      </Button>
-    </Hint>
-  );
-
   return (
     <div ref={root} data-slot="findings-view" className="absolute inset-0 flex flex-col gap-2 px-5 pt-3 pb-1">
       {missing && (
@@ -222,7 +202,7 @@ function Findings({ run }: { run: LoadedRun }) {
         presets={PRESETS}
         search={SEARCH}
         actions={actions}
-        toolbarEnd={collapseAll}
+        collapseAll={COLLAPSE_WHAT}
         detail={(f) => <FindingDetail run={run} finding={f} verdicts={verdicts} now={now} />}
         defaultSort={DEFAULT_SORT}
         empty={empty}

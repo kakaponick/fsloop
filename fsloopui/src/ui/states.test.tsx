@@ -92,6 +92,21 @@ describe("empty state", () => {
     await user.click(screen.getByRole("button", { name: "Сбросить фильтры" }));
     expect(onReset).toHaveBeenCalledOnce();
   });
+
+  test("improve-4 (2), design-1: a named view filtered to none names the view and what fills it (rules/ui → Conventions 16), then the search and «Сбросить фильтры»", async () => {
+    const onReset = vi.fn();
+    const named = { form: "filtered", noun: NOUNS.unit, filters: ["Поиск: «zzz»"], view: { label: "Заблокированы", fills: "заблокирован" }, onReset } as const;
+    expect(emptyStateText(named)).toEqual({ title: "В виде «Заблокированы» нет юнитов", description: "В вид входят: заблокирован. Фильтры: Поиск: «zzz»" });
+    expect(emptyStateText({ ...named, noun: NOUNS.finding, filters: [], view: { label: "С возражением", fills: "не согласен, не та серьёзность, ложная находка" } })).toEqual({
+      title: "В виде «С возражением» нет находок",
+      description: "В вид входят: не согласен, не та серьёзность, ложная находка",
+    });
+    render(<EmptyState {...named} />);
+    expect(screen.getByText("В виде «Заблокированы» нет юнитов")).toBeInTheDocument();
+    expect(screen.getByText("В вид входят: заблокирован. Фильтры: Поиск: «zzz»")).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Сбросить фильтры" }));
+    expect(onReset).toHaveBeenCalledOnce();
+  });
 });
 
 describe("a part that failed", () => {

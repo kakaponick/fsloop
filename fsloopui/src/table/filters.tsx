@@ -49,10 +49,11 @@ export interface PresetSelectProps {
   className?: string;
 }
 
-/** «Вид» (Conventions 16): the named slices with their counts, «Свой набор» while the filters match none. */
+/** «Вид» (Conventions 16): the named slices with their counts, each with what it holds as its muted second part where
+ * its label does not say it (improve-4); «Свой набор» while the filters match none. */
 export function PresetSelect({ presets, filters, counts, onChoose, className }: PresetSelectProps) {
   const current = presetOf(filters, presets);
-  const options: CountOption[] = presets.map((p) => ({ value: p.id, label: p.label, count: counts?.[p.id] }));
+  const options: CountOption[] = presets.map((p) => ({ value: p.id, label: p.label, detail: p.detail, count: counts?.[p.id] }));
   if (!current) options.push({ value: CUSTOM_PRESET, label: CUSTOM_LABEL });
   return (
     <CountSelect
@@ -66,6 +67,19 @@ export function PresetSelect({ presets, filters, counts, onChoose, className }: 
       className={className}
     />
   );
+}
+
+/** What fills a named view, for its empty state (rules/ui → Conventions 16): its own `detail`, else the values its
+ * filters keep in their options' words — «кандидат». */
+export function presetFills<R>(preset: Preset, defs: readonly FilterDef<R>[]): string {
+  if (preset.detail) return preset.detail;
+  const active = normalizeFilters(preset.filters);
+  return defs
+    .flatMap((def) => {
+      const values = active[def.id];
+      return values ? def.options.filter((o) => values.includes(o.value)).map((o) => o.label) : [];
+    })
+    .join(", ");
 }
 
 /** The active filters and the search in words, for the filtered-to-none state: «Серьёзность: major, critical». */

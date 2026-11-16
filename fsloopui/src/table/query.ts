@@ -56,6 +56,9 @@ export interface Preset {
   id: string;
   label: string;
   filters: Filters;
+  /** What the slice holds, when its label does not say it alone — its states, from the view's own state map: «пишется,
+   * проверяется, отладка, вливается». The «Вид» option's muted second part, and what fills it when it is empty. */
+  detail?: string;
 }
 
 export interface QueryState {

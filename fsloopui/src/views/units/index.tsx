@@ -185,6 +185,8 @@ function Units({ run }: { run: LoadedRun }) {
         counts={(kept) => unitStrip(states, kept)}
         barOrder={BAR_ORDER}
         toolbarEnd={<ToolbarFacts run={run} />}
+        // the kit's «Свернуть все юниты», blocked with the same reason as in «Находки» (improve-4; design-11)
+        collapseAll="юниты"
         open={open}
         onOpenChange={onOpenChange}
         target={link.target}

@@ -25,14 +25,18 @@ export const DEFAULT_SORT = { id: "severity", desc: false } as const;
 
 // ── «Вид» (rules/ui → Conventions 16) ───────────────────────────────────────────────────────────
 
+/** A slice's second part (improve-4): the words of the states or verdicts it holds, from their maps. */
+const states = (keys: readonly FindingStatus[]): string => keys.map((k) => FINDING_STATUS[k].compact).join(", ");
+const DISPUTING = (Object.keys(VERDICT) as Verdict[]).filter((v) => v !== "agree");
+
 export const PRESETS: readonly Preset[] = [
   { id: "all", label: "Все", filters: {} },
   { id: "unrated", label: "Без оценки", filters: { verdict: [NONE] } },
   // the three verdicts that dispute a finding, together: «…и с чем я не согласен?» (PRODUCT.md → Surfaces; cand-7)
-  { id: "objected", label: "С возражением", filters: { verdict: [OBJECTED] } },
-  { id: "fix", label: "В исправление", filters: { state: [...FIX_STATES] } },
+  { id: "objected", label: "С возражением", filters: { verdict: [OBJECTED] }, detail: DISPUTING.map((v) => VERDICT[v].compact).join(", ") },
+  { id: "fix", label: "В исправление", filters: { state: [...FIX_STATES] }, detail: states(FIX_STATES) },
   { id: "candidates", label: "Кандидаты", filters: { state: ["candidate"] } },
-  { id: "done", label: "Закоммичены", filters: { state: [...DONE_STATES] } },
+  { id: "done", label: "Закоммичены", filters: { state: [...DONE_STATES] }, detail: states(DONE_STATES) },
 ];
 
 // ── search (table #12) ──────────────────────────────────────────────────────────────────────────

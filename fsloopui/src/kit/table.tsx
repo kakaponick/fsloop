@@ -1,6 +1,7 @@
 // The kit's data-table section: the shared table of src/table at production's sizes — the findings of the largest
 // run (723 rows, 50 a page, 15 pages) in the 964 px region beside the 316 px sidebar at 1280 px, the units of the
-// largest run (42 rows, one unsplit list with the counts strip), and the table's first-load and empty states. Rows
+// largest run (42 rows, one unsplit list with the counts strip), each with «Вид» naming a slice's states and the kit's
+// «Свернуть все», and the table's first-load and empty states. Rows
 // are shaped after u1's run model (shared/model.ts) with the counts of surfaces/findings.md and units.md → RANGES.
 import { useState, type ReactNode } from "react";
 import type { Finding, Unit } from "../../shared/model.ts";
@@ -91,9 +92,9 @@ const FINDING_FILTERS: FilterDef<KitFinding>[] = [
 const FINDING_PRESETS: Preset[] = [
   { id: "all", label: "Все", filters: {} },
   { id: "unrated", label: "Без оценки", filters: { verdict: ["none"] } },
-  { id: "fix", label: "В исправление", filters: { state: ["queued", "in-progress", "blocked"] } },
+  { id: "fix", label: "В исправление", filters: { state: ["queued", "in-progress", "blocked"] }, detail: (["queued", "in-progress", "blocked"] as const).map((s) => FINDING_STATUS[s].compact).join(", ") },
   { id: "candidates", label: "Кандидаты", filters: { state: ["candidate"] } },
-  { id: "fixed", label: "Закоммичены", filters: { state: ["fixed", "closed"] } },
+  { id: "fixed", label: "Закоммичены", filters: { state: ["fixed", "closed"] }, detail: (["fixed", "closed"] as const).map((s) => FINDING_STATUS[s].compact).join(", ") },
 ];
 
 const FINDING_SEARCH: SearchDef<KitFinding> = {
@@ -228,6 +229,7 @@ export function TableSection() {
             search={FINDING_SEARCH}
             actions={FINDING_ACTIONS}
             detail={(r) => <FindingDetail row={r} />}
+            collapseAll="находки"
             defaultSort={{ id: "severity", desc: false }}
             empty={{ form: "not-yet", step: "review", lead: "Критики ещё не писали отчётов", subject: "находки" }}
             updatedAt={updated}
@@ -254,6 +256,7 @@ export function TableSection() {
             search={UNIT_SEARCH}
             actions={UNIT_ACTIONS}
             detail={(r) => <RunningText text={`${r.title}\n\nЗакрывает: ${r.closes.join(", ") || "—"}`} />}
+            collapseAll="юниты"
             defaultSort={{ id: "pass", desc: true }}
             defaultPaged={false}
             empty={{ form: "not-yet", step: "decompose" }}

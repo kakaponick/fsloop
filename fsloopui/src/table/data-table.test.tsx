@@ -7,7 +7,10 @@ import userEvent from "@testing-library/user-event";
 import { Profiler, useState, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { NOUNS } from "../../shared/text.ts";
+import { applyStylesheet, usedBlockSize } from "../app/layout-testing.ts";
+import { OPEN_FRAME } from "../ui/marks.tsx";
 import { UiProvider } from "../ui/provider.tsx";
+import { COLLAPSE_BLOCKED, collapseAllLabel } from "./collapse-all.tsx";
 import { DataTable, type DataTableProps, type TableColumn } from "./data-table.tsx";
 import type { FilterDef, Preset, SearchDef } from "./query.ts";
 import { copyAction, type RowAction } from "./row-menu.tsx";
@@ -114,7 +117,12 @@ beforeEach(() => {
   openReport.mockReset();
   rate.mockReset();
 });
-afterEach(() => vi.restoreAllMocks());
+// a stubbed ResizeObserver (the toolbar's and «по экрану»'s measuring tests) never reaches the next test: the library's
+// tooltip calls `unobserve`, which the stubs lack
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("states (rules/ui → Tables 2, Strict 1–2; Conventions 14, 15)", () => {
   test("first load: «Загрузка…» with a spinner framed over the table's place; the strip's and the status bar's lines are already there", () => {
@@ -450,16 +458,17 @@ describe("rows expand in place (rules/ui → Tables 3, Live data 3)", () => {
   test("p1 cand-11 (partial in p2): an open row and its detail are one block, told from the table in dark — a 1 px muted-ink frame around both; a link's target framed in ink", () => {
     renderUi(view({ open: ["f-001", "f-003"], target: "f-003" }));
     const cell = (id: string) => document.querySelector(`tr[data-detail-for="${id}"] > td`) as HTMLElement;
-    // the open row draws the frame's top and sides, its detail the sides and the bottom
-    expect(row("f-001")).toHaveClass("[--frame:var(--muted-foreground)]");
-    expect(row("f-001").className).toContain("shadow-[inset_0_1px_0_0_var(--frame),inset_1px_0_0_0_var(--frame),inset_-1px_0_0_0_var(--frame)]");
-    expect(cell("f-001")).toHaveClass("bg-muted", "[--frame:var(--muted-foreground)]");
-    expect(cell("f-001").className).toContain("shadow-[inset_0_-1px_0_0_var(--frame),inset_1px_0_0_0_var(--frame),inset_-1px_0_0_0_var(--frame)]");
+    // design-4: the open row's frame is the one export of `@/ui` that `ExpandingFindings` draws too — the row its top
+    // and sides, its detail the sides and the bottom
+    expect(row("f-001")).toHaveClass(OPEN_FRAME.muted, OPEN_FRAME.row);
+    expect(cell("f-001")).toHaveClass("bg-muted", OPEN_FRAME.muted, OPEN_FRAME.detail);
+    expect(OPEN_FRAME).toEqual({ muted: "[--frame:var(--muted-foreground)]", target: "[--frame:var(--foreground)]", row: "shadow-open-row", detail: "shadow-open-detail" });
     // a closed row has none
     expect(row("f-002").className).not.toContain("--frame");
+    expect(row("f-002")).not.toHaveClass(OPEN_FRAME.row);
     // a link's target: its row keeps the target mark, and the mark's ink frames its detail too
     expect(row("f-003")).toHaveAttribute("data-target");
-    expect(cell("f-003")).toHaveClass("[--frame:var(--foreground)]");
+    expect(cell("f-003")).toHaveClass(OPEN_FRAME.target, OPEN_FRAME.detail);
 
     // the dark theme's values: the muted ground alone is about 1.1:1 on the paper (p2-verdict-findings.png); the
     // frame's muted ink clears the 3:1 a boundary needs (WCAG 1.4.11) on both
@@ -1066,5 +1075,214 @@ describe("live data (rules/ui → Live data 2–3; Conventions 12)", () => {
     renderUi(view({ target: "f-055", onPageChange }));
     expect(pageIds()).toContain("f-055");
     expect(onPageChange).toHaveBeenCalledWith(2);
+  });
+});
+
+describe("p2-assess-critic-improve#improve-3: the table kit, read at a glance", () => {
+  test("improve-3 (1): an idle sort icon is drawn at the muted ink's full strength, never dimmed", async () => {
+    renderUi(view());
+    await applyStylesheet();
+    const idle = within(header("Отчёт")).getByRole("button").querySelector("svg") as SVGElement;
+    expect(getComputedStyle(idle).opacity || "1").toBe("1");
+    // the header's own muted ink (light #6d6d69, DESIGN.md → Colors), which the icon takes
+    expect(getComputedStyle(header("Отчёт")).color).toBe("rgb(109, 109, 105)");
+  });
+
+  test("improve-3 (2): a row clicked with the mouse shows its focus ring — the row keys 1–4 will rate; it leaves with the focus", async () => {
+    const user = userEvent.setup();
+    renderUi(view());
+    await user.click(within(row("f-002")).getByText("f-002"));
+    expect(row("f-002")).toHaveFocus();
+    // A browser never matches :focus-visible on a focus the mouse gave (its heuristic); jsdom matches it on any
+    // focus — so the stylesheet is read as the mouse user's browser applies it.
+    const asAfterClick = async () => {
+      await applyStylesheet();
+      const style = document.head.querySelector("style[data-product-stylesheet]") as HTMLStyleElement;
+      style.textContent = (style.textContent ?? "").replaceAll(":focus-visible", ":not(*)");
+    };
+    await asAfterClick();
+    expect(getComputedStyle(row("f-002")).getPropertyValue("--tw-ring-shadow")).toMatch(/2px/);
+    act(() => row("f-002").blur());
+    await asAfterClick();
+    expect(getComputedStyle(row("f-002")).getPropertyValue("--tw-ring-shadow")).not.toMatch(/2px/);
+  });
+
+  test("improve-3 (3): a hairline cue at the box's bottom edge exactly while its rows or a detail run past it (scrollHeight > clientHeight); drawn over the box, it takes no room", async () => {
+    let content = 900;
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.slot === "table-scroll" ? 450 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.slot === "table-scroll" ? content : 0;
+    });
+    const { container, rerender } = renderUi(view());
+    const cue = () => container.querySelector("[data-slot=overflow-cue]") as HTMLElement;
+    const box = container.querySelector("[data-slot=table-scroll]") as HTMLElement;
+    await applyStylesheet();
+    const s = getComputedStyle(cue());
+    expect(s.visibility).toBe("visible");
+    expect([s.position, s.top, s.right, s.bottom, s.left, s.pointerEvents]).toEqual(["absolute", "0px", "0px", "0px", "0px", "none"]);
+    // one inset hairline under the box's content, in the muted ink (light #6d6d69, DESIGN.md → Colors); nothing else
+    expect(s.boxShadow.replace(/rgba\(0, 0, 0, 0\) 0px 0px, /g, "")).toBe("rgb(109, 109, 105) 0px -1px inset");
+    expect(cue()).toHaveAttribute("aria-hidden", "true");
+    expect(getComputedStyle(container.querySelector("[data-slot=table-region]") as HTMLElement).position).toBe("relative");
+    // scrolled to the end: nothing runs past the bottom edge any more
+    box.scrollTop = 450;
+    fireEvent.scroll(box);
+    await applyStylesheet();
+    expect(getComputedStyle(cue()).visibility).toBe("hidden");
+    box.scrollTop = 0;
+    fireEvent.scroll(box);
+    await applyStylesheet();
+    expect(getComputedStyle(cue()).visibility).toBe("visible");
+    // the rows fit the box: no cue
+    content = 450;
+    rerender(view({ rows: FEW }));
+    await applyStylesheet();
+    expect(getComputedStyle(cue()).visibility).toBe("hidden");
+  });
+
+  test("improve-3 (4): ↑/↓ move focus inside the table's own box through `revealIn` — under the sticky header, by as little as brings the row in — and never call scrollIntoView", async () => {
+    const into = vi.fn();
+    const proto = HTMLElement.prototype as unknown as { scrollIntoView: unknown };
+    const before = proto.scrollIntoView;
+    proto.scrollIntoView = into;
+    try {
+      // the box at 100 px, 450 px inside, its sticky header 32 px; rows 32 px each, moving as the box scrolls
+      const box = () => document.querySelector("[data-slot=table-scroll]") as HTMLElement;
+      vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
+        return this.dataset.slot === "table-scroll" ? 450 : 0;
+      });
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+        const rect = (top: number, height: number) => ({ top, bottom: top + height, height, width: 0, x: 0, y: top, left: 0, right: 0, toJSON: () => ({}) }) as DOMRect;
+        if (this.dataset.slot === "table-scroll") return rect(100, 450);
+        if (this.tagName === "THEAD") return rect(100, 32);
+        if (this.tagName === "TR" && this.parentElement?.tagName === "TBODY") return rect(132 + [...this.parentElement.children].indexOf(this) * 32 - box().scrollTop, 32);
+        return rect(0, 0);
+      });
+      const user = userEvent.setup();
+      renderUi(view({ defaultPaged: false, rows: FEW }));
+      // f-013 ends at 548, inside the box's 550; f-014 ends at 580 → 30 px past it, plus the 8 px gap
+      act(() => row("f-013").focus());
+      await user.keyboard("{ArrowDown}");
+      expect(row("f-014")).toHaveFocus();
+      expect(box().scrollTop).toBe(38);
+      // a row inside the box moves nothing
+      await user.keyboard("{ArrowUp}");
+      expect(row("f-013")).toHaveFocus();
+      expect(box().scrollTop).toBe(38);
+      // f-010 under the sticky header (its top at 100 when scrolled by 320): to 8 px under the header's bottom
+      box().scrollTop = 320;
+      act(() => row("f-011").focus());
+      await user.keyboard("{ArrowUp}");
+      expect(row("f-010")).toHaveFocus();
+      expect(box().scrollTop).toBe(280);
+      expect(row("f-010").getBoundingClientRect().top).toBe(140);
+      expect(into).not.toHaveBeenCalled();
+    } finally {
+      proto.scrollIntoView = before;
+    }
+  });
+
+  test("design-22: the columns menu's list, drawn `list-none`, keeps its list role", async () => {
+    const user = userEvent.setup();
+    renderUi(view());
+    await user.click(screen.getByRole("button", { name: "Столбцы" }));
+    expect(await screen.findByRole("list", { name: "Столбцы" })).toHaveAttribute("role", "list");
+  });
+});
+
+describe("p2-assess-critic-improve#improve-4: «Вид» with its states and «Свернуть все» in the kit; the notice slot (design-17)", () => {
+  const NAMED: Preset[] = [
+    { id: "all", label: "Все", filters: {} },
+    { id: "fix", label: "В исправление", filters: { status: ["in-progress", "fixed"] }, detail: "исправляется, исправлена" },
+    { id: "cand", label: "Кандидаты", filters: { status: ["candidate"] } },
+  ];
+  const choose = async (user: ReturnType<typeof userEvent.setup>, steps: number) => {
+    screen.getByRole("combobox", { name: "Вид" }).focus();
+    await user.keyboard("{Enter}");
+    await screen.findAllByRole("option");
+    await user.keyboard(`${"{ArrowDown}".repeat(steps)}{Enter}`);
+  };
+
+  test("improve-4 (1): each «Вид» option shows its states as a muted second part; the trigger and its box's sizers read the labels alone", async () => {
+    const user = userEvent.setup();
+    const { container } = renderUi(view({ presets: NAMED }));
+    expect([...container.querySelectorAll<HTMLElement>("[data-toolbar-item=preset] [data-slot=toolbar-sizer]")].map((s) => s.dataset.value)).toEqual(["Все", "В исправление", "Кандидаты", "Свой набор"]);
+    screen.getByRole("combobox", { name: "Вид" }).focus();
+    await user.keyboard("{Enter}");
+    expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual(["Все60", "В исправление— исправляется, исправлена40", "Кандидаты20"]);
+    await user.keyboard("{ArrowDown}{Enter}");
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Вид" })).toHaveTextContent(/^Вид:В исправление$/));
+  });
+
+  test("improve-4 (2): a named view filtered to none names the view and what fills it, then the search; «Сбросить фильтры» returns to «Все»", async () => {
+    const user = userEvent.setup();
+    renderUi(view({ presets: NAMED }));
+    await choose(user, 1);
+    await user.type(screen.getByRole("searchbox"), "zzz");
+    expect(screen.getByText("В виде «В исправление» нет находок")).toBeInTheDocument();
+    expect(screen.getByText("В вид входят: исправляется, исправлена. Фильтры: Поиск: «zzz»")).toBeInTheDocument();
+    // a view with no second part of its own: what fills it in its filter's own words
+    await choose(user, 1);
+    expect(await screen.findByText("В виде «Кандидаты» нет находок")).toBeInTheDocument();
+    expect(screen.getByText("В вид входят: candidate. Фильтры: Поиск: «zzz»")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Сбросить фильтры" }));
+    expect(pageIds()).toHaveLength(50);
+    expect(screen.getByRole("combobox", { name: "Вид" })).toHaveTextContent(/^Вид:Все$/);
+    // «Все» holds no filter of its own: a search empties it into the plain form
+    await user.type(screen.getByRole("searchbox"), "zzz");
+    expect(screen.getByText("Нет находок, подходящих под фильтры")).toBeInTheDocument();
+  });
+
+  test("improve-4 (3), design-11: «Свернуть все <noun>» is one kit part — an icon-only 28 px button always in its box at the toolbar's end, blocked with the one reason while no row is open", async () => {
+    expect(collapseAllLabel("находки")).toBe("Свернуть все находки");
+    expect(collapseAllLabel("юниты")).toBe("Свернуть все юниты");
+    expect(COLLAPSE_BLOCKED).toBe("Нет открытых строк — откройте строку");
+    expect(COLLAPSE_BLOCKED.split(" ")).toHaveLength(6);
+    const onOpenChange = vi.fn();
+    const user = userEvent.setup();
+    const { container } = renderUi(view({ collapseAll: "находки", onOpenChange }));
+    expect([...container.querySelectorAll<HTMLElement>("[data-toolbar-item]")].map((el) => el.dataset.toolbarItem).slice(-2)).toEqual(["facts", "columns"]);
+    const button = within(container.querySelector("[data-toolbar-item=facts]") as HTMLElement).getByRole("button", { name: "Свернуть все находки" });
+    const box = async () => {
+      await applyStylesheet();
+      const s = getComputedStyle(button);
+      return [s.width, s.height, s.visibility];
+    };
+    // nothing open: the blocked action — in view, focusable, inert, its reason in its tooltip
+    expect(await box()).toEqual(["28px", "28px", "visible"]);
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).not.toBeDisabled();
+    fireEvent.focus(button);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/^Нет открытых строк — откройте строку$/);
+    fireEvent.blur(button);
+    await user.click(button);
+    expect(onOpenChange).not.toHaveBeenCalled();
+    await user.click(within(row("f-001")).getByText("f-001"));
+    await user.click(within(row("f-003")).getByText("f-003"));
+    expect(button).not.toHaveAttribute("aria-disabled");
+    // the same box, now an action: a click never moves what was clicked (Strict 1)
+    expect(await box()).toEqual(["28px", "28px", "visible"]);
+    await user.click(button);
+    expect(document.querySelectorAll("tr[data-detail-for]")).toHaveLength(0);
+    expect(onOpenChange).toHaveBeenLastCalledWith([]);
+    expect(button).toHaveAttribute("aria-disabled", "true");
+  });
+
+  test("improve-4 (3): a table whose rows do not expand draws no «Свернуть все»", () => {
+    renderUi(view({ collapseAll: "находки", detail: undefined }));
+    expect(screen.queryByRole("button", { name: "Свернуть все находки" })).toBeNull();
+  });
+
+  test("design-17: the notice slot — a line under the toolbar, its 28 px reserved while it holds a notice; none drawn without one", async () => {
+    const { container, rerender } = renderUi(view());
+    expect(container.querySelector("[data-slot=table-notice]")).toBeNull();
+    rerender(view({ notice: <span>Находка f-999 не найдена</span> }));
+    const notice = container.querySelector("[data-slot=table-notice]") as HTMLElement;
+    expect(notice.previousElementSibling).toHaveAttribute("data-slot", "adaptive-toolbar");
+    expect(notice).toHaveTextContent(/^Находка f-999 не найдена$/);
+    await applyStylesheet();
+    expect(usedBlockSize(notice)).toBe(28);
   });
 });

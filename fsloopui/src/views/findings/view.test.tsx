@@ -118,6 +118,17 @@ describe("the view's configuration at the production shape", () => {
     expect(pack(items, REGION_1440, { gap: GAP, overflow: OVERFLOW_WIDTH })).toEqual(["filter-unit", "filter-cause", "filter-command"]);
   });
 
+  test("improve-4 (1): «Вид» names what a slice of several values holds, from its own definition — every string against a literal", () => {
+    expect(PRESETS.map((p) => [p.label, p.detail ?? null])).toEqual([
+      ["Все", null],
+      ["Без оценки", null],
+      ["С возражением", "не согласен, не та серьёзность, ложная находка"],
+      ["В исправление", "ждёт юнита, исправляется, заблокирована, не исправлена, повторилась"],
+      ["Кандидаты", null],
+      ["Закоммичены", "исправлена, закрыта"],
+    ]);
+  });
+
   test("cand-7: «С возражением» — the three verdicts that dispute a finding, one «Вид» and one «Оценка» option", () => {
     expect(PRESETS.map((p) => p.label)).toEqual(["Все", "Без оценки", "С возражением", "В исправление", "Кандидаты", "Закоммичены"]);
     // «Вид» stays a select: six presets and «Свой набор»

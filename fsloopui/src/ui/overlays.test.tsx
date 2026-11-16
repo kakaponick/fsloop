@@ -10,6 +10,7 @@ import { describe, expect, test, vi } from "vitest";
 import { LIVENESS } from "../../shared/liveness.ts";
 import { SEVERITY, UNIT_STATE } from "../../shared/states.ts";
 import { Button } from "@/components/ui/button";
+import { applyStylesheet } from "../app/layout-testing.ts";
 import { AppDialog } from "./dialog.tsx";
 import { keyLabel, Keys } from "./kbd.tsx";
 import { copyItem, copyLabel, Menu, PLACE_WHAT } from "./menu.tsx";
@@ -202,6 +203,37 @@ describe("select and combobox", () => {
     expect(trigger).toHaveTextContent(/^Отчёт:critic craft$/);
     await user.click(trigger);
     expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual(["critic craft · ревью, проход 1 · 5 critical · 10 major · 15 minor", "map · карта, проход 1 · итог: done"]);
+  });
+
+  test("improve-4 (1), design-1: an option's muted second part follows its label — never part of the label, never in the closed trigger; one line, truncated, whole in its title", async () => {
+    const user = userEvent.setup();
+    renderUi(
+      <CountSelect
+        label="Вид"
+        value="work"
+        onValueChange={() => {}}
+        options={[
+          { value: "all", label: "Все", count: 42 },
+          { value: "work", label: "В работе", detail: "пишется, проверяется, отладка, вливается", count: 2 },
+        ]}
+      />,
+    );
+    const trigger = screen.getByRole("combobox", { name: "Вид" });
+    expect(trigger).toHaveTextContent(/^Вид:В работе$/);
+    await user.click(trigger);
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Все42", "В работе— пишется, проверяется, отладка, вливается2"]);
+    expect(options[0].querySelector("[data-slot=option-detail]")).toBeNull();
+    const second = options[1].querySelector("[data-slot=option-detail]") as HTMLElement;
+    expect(second).toHaveTextContent(/^— пишется, проверяется, отладка, вливается$/);
+    expect(second).toHaveAttribute("title", "пишется, проверяется, отладка, вливается");
+    // the highlight on another option: a highlighted one takes the library's ink throughout
+    await user.keyboard("{ArrowUp}");
+    await applyStylesheet();
+    const s = getComputedStyle(second);
+    // one line in muted ink (light #6d6d69), cut at its 18 rem cap with an ellipsis — its box is the option's one line
+    expect([s.whiteSpace, s.overflow, s.textOverflow, s.color, s.maxWidth]).toEqual(["nowrap", "hidden", "ellipsis", "rgb(109, 109, 105)", "288px"]);
+    expect(getComputedStyle(second.previousElementSibling as HTMLElement).color).not.toBe("rgb(109, 109, 105)");
   });
 });
 

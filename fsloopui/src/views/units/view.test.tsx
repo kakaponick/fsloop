@@ -8,8 +8,10 @@ import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
 import { NOUNS } from "../../../shared/text.ts";
 import { emptyStateText, glossaryLines, readPref } from "@/ui";
-import { assertLayout, fitsRegion, FRAME, headerWidth, isSelectFilter, mergeWidths, runQuery, StatusBar, tableMinWidth, type FilterDef } from "@/table";
+import { assertLayout, fitsRegion, FRAME, headerWidth, isSelectFilter, mergeWidths, pack, runQuery, StatusBar, tableMinWidth, type FilterDef, type PackItem } from "@/table";
+import { GAP, OVERFLOW_WIDTH } from "../../table/toolbar.tsx";
 import { runKey as viewKey, type RunPrefs } from "../../table/view-state.ts";
+import { textWidth } from "../../app/layout-testing.ts";
 import { runPath } from "../../app/routes.ts";
 import { COLUMNS, STATE_GLOSSARY } from "./columns.tsx";
 import { BAR_ORDER } from "./index.tsx";
@@ -130,11 +132,11 @@ describe("the view's configuration at the production shape", () => {
   // p2-fix-f13-implement#open-1 (table #12: the placeholder names the fields searched, whole). The toolbar's real
   // packing over the view's real items, laid out at estimates of their boxes at the body face (13 px): «Вид» at its
   // widest «Вид: Заблокированы» 179, «Состояние: все» 144, «Проход: все» 122, the facts at their reserved
-  // «888 кандидатов» and «888 находок без решения» 305, the columns menu 28. The search's chrome — its icon, the «/»
-  // cap, the clear and history buttons — is 91 px around a field whose own padding is 12; the placeholder, 25
-  // characters at the 6.7 px p1-verdict-units-1280.png measured, needs 168 px of text.
+  // «888 кандидатов» and «888 находок без решения» 305 with «Свернуть все юниты» 8 px after them (improve-4), the columns
+  // menu 28. The search's chrome — its icon, the «/» cap, the clear and history buttons — is 91 px around a field whose
+  // own padding is 12; the placeholder, 25 characters at the 6.7 px p1-verdict-units-1280.png measured, needs 168 px of text.
   describe("p2-fix-f13-implement#open-1: the search shows its placeholder whole, the toolbar's other items folding first", () => {
-    const WIDTHS: Record<string, number> = { preset: 179, search: 192, "filter-state": 144, "filter-pass": 122, facts: 305, columns: 28 };
+    const WIDTHS: Record<string, number> = { preset: 179, search: 192, "filter-state": 144, "filter-pass": 122, facts: 305 + 8 + 28, columns: 28 };
     const CHROME = 91;
     const PADDING = 12;
     const TEXT = 168;
@@ -189,6 +191,36 @@ describe("the view's configuration at the production shape", () => {
         });
   });
 
+  test("improve-4 (4): «280 кандидатов» leaves «Проход» whole at 1440 px beside «Свернуть все юниты» — nothing folds into «…»", () => {
+    // The boxes p2-final-units.png measures at 1440 (the toolbar at x 336–1404, 1068 px): «Вид» 167, «Состояние: все»
+    // 124, the facts 345 at «888 находок-кандидатов», the columns menu 28; the search's 319 px box holds 107 px of chrome
+    // around its placeholder, 155 px of text. The new word's saving and «Проход: все» are taken from those boxes by the
+    // platform face's measure (layout-testing → textWidth), which errs wide; «Свернуть все юниты» is 28 px, 8 px after.
+    const toolbar = 1068;
+    const facts = (word: string) => 345 - (textWidth("888 находок-кандидатов") - textWidth(word)) + GAP + 28;
+    const items = (word: string): PackItem[] => [
+      { id: "preset", kind: "sticky", width: 167 },
+      { id: "search", kind: "pinned", width: 107 + 155 },
+      { id: "filter-state", kind: "ordinary", width: 124 },
+      { id: "filter-pass", kind: "ordinary", width: 124 - (textWidth("Состояние: все") - textWidth("Проход: все")) },
+      { id: "facts", kind: "pinned", width: facts(word) },
+      { id: "columns", kind: "pinned", width: 28 },
+    ];
+    expect(pack(items(CANDIDATES_WIDEST), toolbar, { gap: GAP, overflow: OVERFLOW_WIDTH })).toEqual([]);
+    // the old word, with the same button, folded «Проход» into «…»
+    expect(pack(items("888 находок-кандидатов"), toolbar, { gap: GAP, overflow: OVERFLOW_WIDTH })).toEqual(["filter-pass"]);
+  });
+
+  test("improve-4 (1): «Вид» names the states of each slice that holds several, from its own definition — every string against a literal", () => {
+    expect(PRESETS.map((p) => [p.label, p.detail ?? null])).toEqual([
+      ["Все", null],
+      ["В работе", "пишется, проверяется, отладка, вливается"],
+      ["Не начаты", "черновик, готов к работе"],
+      ["Заблокированы", null],
+      ["Закоммичены", null],
+    ]);
+  });
+
   test("p1-review cand-1: «Вид» presets — Все · В работе · Не начаты · Заблокированы · Закоммичены — over the states, counted on the 42 units", () => {
     expect(PRESETS.map((p) => p.label)).toEqual(["Все", "В работе", "Не начаты", "Заблокированы", "Закоммичены"]);
     expect(Object.fromEntries(PRESETS.map((p) => [p.id, p.filters]))).toEqual({
@@ -241,9 +273,10 @@ describe("the view's configuration at the production shape", () => {
     expect(emptyStateText({ form: "never", noun: ["юнит", "юнита", "юнитов"] }).title).toBe("В этом прогоне не было юнитов");
     expect(unitNotFound("u99")).toBe("Юнит u99 не найден: в этом прогоне его нет — проверьте ссылку");
     expect(unitNotFound("u99").split(" ")).toHaveLength(12);
-    expect(candidatesText(1)).toBe("1 находка-кандидат");
-    expect(candidatesText(3)).toBe("3 находки-кандидата");
-    expect(CANDIDATES_WIDEST).toBe("888 находок-кандидатов");
+    expect(candidatesText(1)).toBe("1 кандидат");
+    expect(candidatesText(3)).toBe("3 кандидата");
+    expect(candidatesText(280)).toBe("280 кандидатов");
+    expect(CANDIDATES_WIDEST).toBe("888 кандидатов");
     expect(undecidedText(1)).toBe("1 находка без решения");
     expect(undecidedText(12)).toBe("12 находок без решения");
     expect(UNDECIDED_WIDEST).toBe("888 находок без решения");
@@ -287,11 +320,11 @@ describe("the task walk over u1's handler (surfaces/units.md → WALK)", () => {
     const view = renderUnits(fx, KEY, runPath(KEY, { view: "units" }));
     await loaded();
     const facts = [...document.querySelectorAll<HTMLElement>("[data-slot=toolbar-fact]")];
-    expect(facts.map((f) => f.querySelector("[data-slot=fact-reserve]")?.textContent)).toEqual(["888 находок-кандидатов", "888 находок без решения"]);
+    expect(facts.map((f) => f.querySelector("[data-slot=fact-reserve]")?.textContent)).toEqual(["888 кандидатов", "888 находок без решения"]);
     for (const f of facts) expect(f.querySelector("[data-slot=fact-reserve]")).toHaveClass("invisible");
     const candidates = run.findings.filter((f) => f.effectiveStatus === "candidate").length;
     const undecided = run.findings.filter((f) => f.effectiveStatus === "undecided").length;
-    expect(facts[0]).toHaveTextContent(new RegExp(`${candidates} наход\\S+-кандидат`));
+    expect(facts[0]).toHaveTextContent(new RegExp(`(^|\\D)${candidates} кандидат`));
     expect(facts[1]).toHaveTextContent(new RegExp(`${undecided} наход\\S* без решения`));
     expect(candidates).toBeGreaterThan(0);
     await user.click(within(facts[0]).getByRole("link"));
@@ -331,6 +364,43 @@ describe("the task walk over u1's handler (surfaces/units.md → WALK)", () => {
     await loaded();
   });
 
+  test("improve-4 (2): «Вид: Заблокированы» and a search that matches nothing — the view named with what fills it, then the search and «Сбросить фильтры»", async () => {
+    const user = userEvent.setup();
+    renderUnits(fx, KEY, runPath(KEY, { view: "units" }));
+    await loaded();
+    screen.getByRole("combobox", { name: "Вид" }).focus();
+    await user.keyboard("{Enter}");
+    await screen.findAllByRole("option");
+    await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{Enter}");
+    await waitFor(() => expect(ids()).toEqual(["u23"]));
+    await user.click(screen.getByRole("searchbox"));
+    await user.paste("ни-одного-юнита");
+    expect(await screen.findByText("В виде «Заблокированы» нет юнитов")).toBeInTheDocument();
+    expect(screen.getByText("В вид входят: заблокирован. Фильтры: Поиск: «ни-одного-юнита»")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Сбросить фильтры" }));
+    await loaded();
+    expect(screen.getByRole("combobox", { name: "Вид" })).toHaveTextContent(/^Вид:Все$/);
+  });
+
+  test("improve-4 (3), design-11: «Свернуть все юниты» — the kit's part, blocked with the same reason while no row is open; it closes every open unit", async () => {
+    const user = userEvent.setup({ delay: null });
+    const view = renderUnits(fx, KEY, runPath(KEY, { view: "units" }));
+    await loaded();
+    const item = view.container.querySelector("[data-toolbar-item=facts]") as HTMLElement;
+    const button = within(item).getByRole("button", { name: "Свернуть все юниты" });
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    fireEvent.focus(button);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/^Нет открытых строк — откройте строку$/);
+    fireEvent.blur(button);
+    await user.click(cell("u23", "title"));
+    await user.click(cell("u24", "title"));
+    expect(button).not.toHaveAttribute("aria-disabled");
+    await user.click(button);
+    expect(document.querySelectorAll("tr[data-detail-for]")).toHaveLength(0);
+    await waitFor(() => expect(new URLSearchParams(view.probe.location?.search).get("unit")).toBeNull());
+    expect(button).toHaveAttribute("aria-disabled", "true");
+  });
+
   test("p1-review cand-1: «Вид» stands first in the toolbar; choosing «Заблокированы» sets the state filter and leaves the blocked unit", async () => {
     const user = userEvent.setup();
     renderUnits(fx, KEY, runPath(KEY, { view: "units" }));
@@ -339,8 +409,8 @@ describe("the task walk over u1's handler (surfaces/units.md → WALK)", () => {
     expect(preset).toHaveTextContent(/^Вид:Все$/);
     preset.focus();
     await user.keyboard("{Enter}");
-    // each preset with its count over the units, in the open list only
-    expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual(["Все42", "В работе2", "Не начаты9", "Заблокированы1", "Закоммичены30"]);
+    // each preset with its count over the units, in the open list only; a slice of several states names them (improve-4)
+    expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual(["Все42", "В работе— пишется, проверяется, отладка, вливается2", "Не начаты— черновик, готов к работе9", "Заблокированы1", "Закоммичены30"]);
     await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{Enter}");
     await waitFor(() => expect(screen.getByRole("combobox", { name: "Вид" })).toHaveTextContent(/^Вид:Заблокированы$/));
     expect(ids()).toEqual(["u23"]);

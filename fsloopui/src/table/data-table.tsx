@@ -11,11 +11,12 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type K
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { EmptyState, GlossaryTooltip, HeldStrip, Loading, markProps, OutOfFilter, PartFailed, WHEEL_GESTURE_GAP, type EmptyWhen, type Gender, type GlossaryEntry, type HeldNoun, type MarkState } from "@/ui";
+import { EmptyState, GlossaryTooltip, HeldStrip, Loading, markProps, OPEN_FRAME, OutOfFilter, PartFailed, REVEAL_GAP, revealIn, WHEEL_GESTURE_GAP, type EmptyWhen, type Gender, type GlossaryEntry, type HeldNoun, type MarkState } from "@/ui";
 import { clampWidth, mergeWidths, placeColumns, RESIZE_STEP, SELECT_WIDTH, sameColumns, sameWidths, tableMinWidth, type ColumnLayout } from "./columns.ts";
 import { ColumnsMenu } from "./columns-menu.tsx";
-import { CUSTOM_LABEL, FilterControl, filterSummary, PRESET_LABEL, PresetSelect } from "./filters.tsx";
-import { FILL_ROWS, nextSort, pageOf, pageOfIndex, runQuery, tokens as toTokens, type FilterDef, type Preset, type Rank, type RowsPerPage, type SearchDef, type SortSpec } from "./query.ts";
+import { CollapseAll } from "./collapse-all.tsx";
+import { CUSTOM_LABEL, FilterControl, filterSummary, PRESET_LABEL, presetFills, PresetSelect } from "./filters.tsx";
+import { FILL_ROWS, nextSort, normalizeFilters, pageOf, pageOfIndex, presetOf, runQuery, tokens as toTokens, type FilterDef, type Preset, type Rank, type RowsPerPage, type SearchDef, type SortSpec } from "./query.ts";
 import { OPEN_ACTION, pinnable, RowMenu, type RowAction } from "./row-menu.tsx";
 import { Highlight, SearchBox } from "./search.tsx";
 import { StatusBar, type BarOrder, type StripForms } from "./status-bar.tsx";
@@ -84,6 +85,11 @@ export interface DataTableProps<R> {
   barOrder?: BarOrder;
   /** Toolbar facts, at the right end. */
   toolbarEnd?: ReactNode;
+  /** The rows' noun after «Свернуть все» («находки», «юниты»): a table whose rows expand draws the kit's
+   * «Свернуть все» in its right cluster, after the facts (improve-4; the design check's convention). */
+  collapseAll?: string;
+  /** One line under the toolbar — the list's not-found line (design-17): its 28 px reserved while it holds one. */
+  notice?: ReactNode;
   /** The page from the URL; changes are reported to `onPageChange` for the URL (Conventions 12). */
   page?: number;
   onPageChange?: (page: number) => void;
@@ -112,18 +118,23 @@ const ROW_HEIGHT = 32;
 /** «по экрану» before the table's box is measured (a test without layout). */
 const FILL_FALLBACK = 50;
 
-/** An open row and its detail read as one block (p1 cand-11): the muted ground alone is about 1.1:1 on the dark
- * paper, so a 1 px frame in muted ink (over 3:1 on both) runs round them — the row draws its top and sides, the
- * detail its sides and bottom; a link's target keeps its ink mark on the row, and the ink frames its detail too. */
-const FRAME_MUTED = "[--frame:var(--muted-foreground)]";
-const FRAME_TARGET = "[--frame:var(--foreground)]";
-const OPEN_ROW_FRAME = "shadow-[inset_0_1px_0_0_var(--frame),inset_1px_0_0_0_var(--frame),inset_-1px_0_0_0_var(--frame)]";
-const DETAIL_FRAME = "shadow-[inset_0_-1px_0_0_var(--frame),inset_1px_0_0_0_var(--frame),inset_-1px_0_0_0_var(--frame)]";
+// An open row and its detail read as one block (p1 cand-11) inside `@/ui`'s one `OPEN_FRAME`, the frame
+// `ExpandingFindings` draws too (design-4): the row its top and sides, the detail its sides and bottom; a link's
+// target keeps its ink mark on the row, and the ink frames its detail too.
 
 /** The events that end a drag over the selection column. */
 const ENDS = ["pointerup", "pointercancel", "blur"] as const;
 
-const sortIcon = (dir: false | "asc" | "desc") => (dir === "desc" ? <ArrowDownIcon /> : dir === "asc" ? <ArrowUpIcon /> : <ArrowUpDownIcon className="opacity-40" />);
+/** The sort icon in the header's muted ink at full strength (improve-3): a dimmed idle icon fell to about 2:1 on the
+ * dark paper, so a column's sort read only on hover. */
+const sortIcon = (dir: false | "asc" | "desc") => (dir === "desc" ? <ArrowDownIcon /> : dir === "asc" ? <ArrowUpIcon /> : <ArrowUpDownIcon />);
+
+/** The cue that rows or a detail run past the box's bottom edge (the design check's convention): a hairline of muted
+ * ink drawn as an inset shadow over the box — never a border or padding, so it takes no room (Strict 1). */
+const OVERFLOW_CUE = "pointer-events-none absolute inset-0 rounded-lg shadow-[inset_0_-1px_0_0_var(--muted-foreground)]";
+/** Whether the box's content runs past its bottom edge: it scrolls (`scrollHeight > clientHeight`) and is not at its
+ * end. */
+const pastEnd = (el: HTMLElement | null): boolean => el !== null && el.scrollHeight - el.scrollTop - el.clientHeight > 1;
 
 /** An element inside a row that handles its own click. */
 const ownClick = (target: EventTarget | null, row: HTMLElement): boolean => {
@@ -132,7 +143,7 @@ const ownClick = (target: EventTarget | null, row: HTMLElement): boolean => {
 };
 
 export function DataTable<R>(props: DataTableProps<R>) {
-  const { id, runKey, label, rows, failed, rowId, rowTitle, noun, columns, filters = [], presets = [], search, actions = [], detail, defaultSort = null, defaultPaged = true, empty, counts, barOrder, toolbarEnd, marks, updatedAt, now, searchShortcut = true, className } = props;
+  const { id, runKey, label, rows, failed, rowId, rowTitle, noun, columns, filters = [], presets = [], search, actions = [], detail, defaultSort = null, defaultPaged = true, empty, counts, barOrder, toolbarEnd, collapseAll, notice, marks, updatedAt, now, searchShortcut = true, className } = props;
   const [tprefs, setT] = useTableView(id, { sort: defaultSort, paged: defaultPaged });
   const [rprefs, setR] = useRunView(id, runKey);
   const target = props.target ?? null;
@@ -301,11 +312,23 @@ export function DataTable<R>(props: DataTableProps<R>) {
   }, [fillMode, tableShown]);
   const pageIds = pg.rows;
   const tabRow = focusId && pageIds.includes(focusId) ? focusId : (pageIds[0] ?? null);
+  /** Focus moved to a row by the keyboard (improve-3): only the table's own box scrolls, through `revealIn` — a row
+   * under the sticky header to just under it, a row past the box's end by as little as brings it in, a row in view
+   * not at all — never `scrollIntoView`, which also scrolls the page around the table. */
+  const revealRow = (rid: string) => {
+    const el = rowEls.current.get(rid);
+    const box = scroller.current;
+    if (!el) return;
+    if (!box) return el.focus({ preventScroll: true });
+    const head = box.querySelector("thead")?.getBoundingClientRect().height || ROW_HEIGHT;
+    if (el.getBoundingClientRect().top < box.getBoundingClientRect().top + head) revealIn(box, el, { gap: head + REVEAL_GAP });
+    else revealIn(box, el, { nearest: true });
+  };
   useEffect(() => {
     if (!pendingFocus.current) return;
     const rid = pendingFocus.current === "first" ? pageIds[0] : pageIds[pageIds.length - 1];
     pendingFocus.current = null;
-    if (rid) rowEls.current.get(rid)?.focus();
+    if (rid) revealRow(rid);
   });
   const goPage = (p: number, focus: "first" | "last" | null = null) => {
     const next = Math.min(Math.max(1, p), pg.pageCount);
@@ -317,10 +340,21 @@ export function DataTable<R>(props: DataTableProps<R>) {
   };
   const focusRow = (rid: string) => {
     setFocusId(rid);
-    const el = rowEls.current.get(rid);
-    el?.focus();
-    el?.scrollIntoView?.({ block: "nearest" });
+    revealRow(rid);
   };
+
+  // ── the cue of rows or a detail past the box's bottom edge (improve-3; the design check's convention) ────
+  const [past, setPast] = useState(false);
+  const measurePast = () => setPast(pastEnd(scroller.current));
+  // after every commit — a page, an opened detail, a live row change what the box holds — on a scroll and a resize
+  useLayoutEffect(measurePast);
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => setPast(pastEnd(scroller.current)));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [tableShown]);
 
   // ── selection (table #5; the design check: a checkbox column, Shift range, drag, Space; never a plain click) ─
   const toggleSelect = (rid: string) => {
@@ -450,11 +484,19 @@ export function DataTable<R>(props: DataTableProps<R>) {
       // a filter's trigger hugs the value the user picked (table #11): no reserve
       node: <FilterControl def={f} value={rprefs.filters[f.id] ?? []} counts={result?.counts[f.id]} onChange={(v) => setQuery({ filters: { ...rprefs.filters, [f.id]: v } })} />,
     });
-  if (toolbarEnd) items.push({ id: "facts", kind: "pinned", end: true, node: toolbarEnd });
+  // the right cluster: the view's facts, then «Свернуть все» where rows expand — always in its box (Strict 1)
+  const collapse = detail && collapseAll ? <CollapseAll what={collapseAll} open={openState.length > 0} onCollapse={() => setOpen([])} /> : null;
+  const end = toolbarEnd && collapse ? (
+    <span className="flex items-center gap-2">
+      {toolbarEnd}
+      {collapse}
+    </span>
+  ) : (toolbarEnd ?? collapse);
+  if (end) items.push({ id: "facts", kind: "pinned", end: true, node: end });
   items.push({
     id: "columns",
     kind: "pinned",
-    end: !toolbarEnd,
+    end: !end,
     node: (
       <ColumnsMenu
         id={id}
@@ -580,18 +622,23 @@ export function DataTable<R>(props: DataTableProps<R>) {
         {empty.form === "not-yet" ? <EmptyState form="not-yet" noun={noun.forms} step={empty.step} lead={empty.lead} subject={empty.subject} /> : <EmptyState form="never" noun={noun.forms} description={empty.description} />}
       </div>
     );
-  else if (!display.length)
+  else if (!display.length) {
+    // a named view with filters of its own names itself and what fills it; its filters are the view, so only the
+    // search is listed beside it (rules/ui → Conventions 16; improve-4)
+    const named = presetOf(rprefs.filters, presets);
+    const view = named && Object.keys(normalizeFilters(named.filters)).length ? { label: named.label, fills: presetFills(named, filters) } : undefined;
     body = (
       <div className="flex size-full items-center justify-center rounded-lg border">
-        <EmptyState form="filtered" noun={noun.forms} filters={filterSummary(filters, rprefs.filters, rprefs.search)} onReset={() => setQuery({ filters: {}, search: "" })} />
+        <EmptyState form="filtered" noun={noun.forms} filters={filterSummary(filters, view ? {} : rprefs.filters, rprefs.search)} view={view} onReset={() => setQuery({ filters: {}, search: "" })} />
       </div>
     );
-  else
+  } else
     body = (
       <div
         ref={scroller}
         data-slot="table-scroll"
         onWheel={onWheel}
+        onScroll={measurePast}
         className="size-full scroll-pt-8 overflow-auto rounded-lg border [scrollbar-gutter:stable] [&>[data-slot=table-container]]:overflow-visible"
       >
         <Table aria-label={label} className="table-fixed border-separate border-spacing-0" style={{ minWidth }}>
@@ -651,7 +698,7 @@ export function DataTable<R>(props: DataTableProps<R>) {
                       onClick={(e) => onRowClick(e, row)}
                       onFocus={(e) => e.target === e.currentTarget && setFocusId(rid)}
                       onContextMenu={() => onContextMenu(rid)}
-                      className={cn("h-8 outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset data-[menu]:bg-muted", pin ? "cursor-pointer" : "cursor-default", isOpen && [FRAME_MUTED, OPEN_ROW_FRAME], mp.className)}
+                      className={cn("h-8 outline-none focus:ring-2 focus:ring-ring focus:ring-inset data-[menu]:bg-muted", pin ? "cursor-pointer" : "cursor-default", isOpen && [OPEN_FRAME.muted, OPEN_FRAME.row], mp.className)}
                     >
                       <TableCell
                         className="border-b px-2 py-0"
@@ -704,7 +751,7 @@ export function DataTable<R>(props: DataTableProps<R>) {
                     </TableRow>
                     {isOpen && detail && (
                       <TableRow data-detail-for={rid} className="hover:bg-transparent">
-                        <TableCell colSpan={ordered.length + (slack ? 1 : 2)} className={cn("border-b bg-muted p-0 whitespace-normal", rid === target ? FRAME_TARGET : FRAME_MUTED, DETAIL_FRAME)}>
+                        <TableCell colSpan={ordered.length + (slack ? 1 : 2)} className={cn("border-b bg-muted p-0 whitespace-normal", rid === target ? OPEN_FRAME.target : OPEN_FRAME.muted, OPEN_FRAME.detail)}>
                           <div className="px-4 py-3">{detail(row)}</div>
                         </TableCell>
                       </TableRow>
@@ -721,8 +768,14 @@ export function DataTable<R>(props: DataTableProps<R>) {
   return (
     <div data-slot="data-table" className={cn("@container flex size-full min-h-0 flex-col gap-2", className)}>
       <AdaptiveToolbar items={items} label={`Фильтры: ${label}`} />
-      <div ref={region} data-slot="table-region" className="min-h-0 flex-1">
+      {notice != null && (
+        <div data-slot="table-notice" className="flex h-7 shrink-0 items-center overflow-hidden text-sm whitespace-nowrap">
+          {notice}
+        </div>
+      )}
+      <div ref={region} data-slot="table-region" className="relative min-h-0 flex-1">
         {body}
+        {tableShown && <span aria-hidden="true" data-slot="overflow-cue" className={cn(OVERFLOW_CUE, !past && "invisible")} />}
       </div>
       <HeldStrip counts={held.counts} noun={noun} onApply={() => setFrozen({ key: queryKey, ids: resultIds })} className="-mt-2 border-t-0" />
       <StatusBar

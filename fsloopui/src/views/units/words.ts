@@ -73,7 +73,9 @@ export const UNITS_PART = "Список юнитов";
 export const briefPart = (path: string): string => `Бриф ${path}`;
 
 /** The toolbar facts (surfaces/units.md → ACTIONS): what no unit takes, as counts that open «Находки». */
-export const CANDIDATES: Forms = ["находка-кандидат", "находки-кандидата", "находок-кандидатов"];
+/** «280 кандидатов»: the run's word for a finding it does not fix (improve-4: «находок-кандидатов» cut «Проход» into
+ * «…» at 1440); what the count is and where it leads stay in its title. */
+export const CANDIDATES: Forms = ["кандидат", "кандидата", "кандидатов"];
 export const UNDECIDED = "без решения";
 export const candidatesText = (n: number): string => count(n, CANDIDATES);
 export const undecidedText = (n: number): string => `${count(n, NOUNS.finding)} ${UNDECIDED}`;

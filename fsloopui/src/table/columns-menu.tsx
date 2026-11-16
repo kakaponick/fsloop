@@ -58,7 +58,7 @@ export function ColumnsMenu({ columns, state, onChange, paged, onPagedChange, ch
         <PopoverHeader className="px-1">
           <PopoverTitle className="text-sm">{COLUMNS_LABEL}</PopoverTitle>
         </PopoverHeader>
-        <ul aria-label={COLUMNS_LABEL} className="m-0 flex list-none flex-col p-0">
+        <ul role="list" aria-label={COLUMNS_LABEL} className="m-0 flex list-none flex-col p-0">
           {placed.map(({ column, visible }) => {
             const control = `${id}-col-${column.id}`;
             return (

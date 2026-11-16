@@ -69,13 +69,22 @@ export const DEFAULT_SORT = { id: "pass", desc: true } as const;
 
 // ── «Вид» (rules/ui → Conventions 16): the slices of «Что прогон делает сейчас» ─────────────────
 
+/** A slice of the units' states: its filter, and — where it holds several — their words from the state map as its
+ * second part (improve-4), the same words that title its group in the status bar. */
+const slice = (id: string, label: string, states: readonly UnitState[]): Preset => ({
+  id,
+  label,
+  filters: { state: [...states] },
+  ...(states.length > 1 ? { detail: states.map((s) => UNIT_STATE[s].compact).join(", ") } : {}),
+});
+
 export const PRESETS: readonly Preset[] = [
   { id: "all", label: "Все", filters: {} },
-  { id: "work", label: "В работе", filters: { state: ["implement", "verify", "debug", "land"] } },
+  slice("work", "В работе", ["implement", "verify", "debug", "land"]),
   // drafted and ready: no implementer launched yet (cold-read: «Ждут» left «ждут чего?»)
-  { id: "unstarted", label: "Не начаты", filters: { state: ["drafted", "ready"] } },
-  { id: "blocked", label: "Заблокированы", filters: { state: ["blocked"] } },
-  { id: "committed", label: "Закоммичены", filters: { state: ["committed"] } },
+  slice("unstarted", "Не начаты", ["drafted", "ready"]),
+  slice("blocked", "Заблокированы", ["blocked"]),
+  slice("committed", "Закоммичены", ["committed"]),
 ];
 
 // ── search (table #12) ──────────────────────────────────────────────────────────────────────────

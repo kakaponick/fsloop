@@ -20,6 +20,24 @@ export interface CountOption {
    * report picker's option names the stage and the state the reader shows under it, its trigger the report alone
    * (ux 2). The label by default. */
   short?: string;
+  /** The option's muted second part, after its label in the open list only — a «Вид» preset's states: «В работе —
+   * пишется, проверяется, отладка, вливается» (the design check's convention). Never part of `label`, so the closed
+   * trigger and a box sized to the labels read the label alone; one line, cut at its cap, whole in its title. */
+  detail?: string;
+}
+
+/** An option's label in ink, then its second part in muted ink, cut at its cap. */
+function OptionText({ option }: { option: CountOption }) {
+  return (
+    <span className="flex min-w-0 items-baseline gap-1">
+      <span className="shrink-0">{option.label}</span>
+      {option.detail && (
+        <span data-slot="option-detail" title={option.detail} className="max-w-72 truncate text-muted-foreground">
+          — {option.detail}
+        </span>
+      )}
+    </span>
+  );
 }
 
 /** An option's count in its reserved slot. */
@@ -56,7 +74,7 @@ export function CountSelect({ label, value, onValueChange, options, className }:
           {options.map((option) => (
             <SelectItem key={option.value} value={option.value}>
               <span className="flex w-full items-baseline gap-4">
-                <span>{option.label}</span>
+                <OptionText option={option} />
                 <OptionCount n={option.count} />
               </span>
             </SelectItem>
