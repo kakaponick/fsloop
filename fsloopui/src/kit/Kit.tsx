@@ -40,6 +40,7 @@ import {
   type HeldCounts,
 } from "@/ui";
 import { FINDING_TEXT, frames, GOAL, REPORT_TEXT, RUNS } from "./fixtures.ts";
+import { TableSection } from "./table.tsx";
 
 function Section({ id, title, rule, children }: { id: string; title: string; rule: string; children: ReactNode }) {
   return (
@@ -380,6 +381,7 @@ export const SECTIONS: { id: string; title: string; Body: () => ReactNode }[] = 
   { id: "view-states", title: "Состояния области", Body: StatesOfAViewSection },
   { id: "frames", title: "Кадры", Body: FramesSection },
   { id: "overlays", title: "Выбор, меню, диалог", Body: OverlaysSection },
+  { id: "table", title: "Таблица данных", Body: TableSection },
 ];
 
 export function Kit() {

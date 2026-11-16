@@ -84,6 +84,18 @@ components:
     rounded: "{rounded.sm}"
     width: "{spacing.thumb-w}"
     height: "{spacing.thumb-h}"
+  table-row:
+    height: "32px"
+    padding: "0 8px"
+  table-header:
+    textColor: "{colors.muted-ink}"
+    typography: "{typography.small}"
+    height: "32px"
+    padding: "0 8px"
+  status-bar:
+    textColor: "{colors.muted-ink}"
+    typography: "{typography.small}"
+    height: "32px"
   inline-code:
     backgroundColor: "{colors.code-ground}"
     textColor: "{colors.ink}"
@@ -244,6 +256,24 @@ Sonner at the bottom right: a success leaves on its own; a failure stays until c
 ### Browser Storage — `usePref`, `readPref`, `writePref`
 One module, read synchronously so a persisted value is on first paint, every access guarded; it holds folds, «Подробнее», the pin and view state. Serves `ui` → Persisted preferences, Tables 4.
 
+### Data Table — `DataTable` (`fsloopui/src/table/`, exported from `src/table/index.ts`)
+One table for every list of a run, built on the library's table with `@tanstack/react-table` as its column model; a view passes columns, filters, «Вид» presets, the search's fields and row actions as module-level configuration. Density is set here once: header and row 32 px, cells 8 px across, the header in small muted type, sticky on the table; one line per cell, truncated, the full text in the cell's title. A fixed layout: each column a fixed width that clears its header, its sort icon and its widest ordinary value, one width-free column taking the slack, a 32 px checkbox column first; the table's floor is their sum, and a narrower region scrolls sideways in the table's own bordered, height-bounded box with `scrollbar-gutter: stable`. A variable column carries a resize handle — a permanent hairline at its edge that thickens on hover, focus and drag; ←/→ nudge 16 px, a double click resets. Rows: hover and the row a menu opened on take the muted ground, a selected row the muted ground, the focused row an inset ring; the edge and target marks as above; a row the filters hide but a link or a live change keeps reads «вне фильтра» at the end of its width-free cell. A row expands in place under itself across the table's width on a slightly muted ground; several stay open. Below the table: the held-order strip's reserved line, then the status bar. First load: the framed spinner in the table's place; empty: the empty state centred in the same bordered box. The query — sort by a column's rank, filters with counts over the set without their own filter, search with identifier tokens OR-matched and free text AND-matched, paging — runs in `query.ts`, never in a view. Serves `table #1–15`, `rules/ui` → Tables 1–5, Live data 2–3.
+
+### Adaptive Toolbar — `AdaptiveToolbar`
+One 28 px line: «Вид», the search (flexible, 12–20 rem), the filters, then the right cluster (toolbar facts, the columns menu). It measures its own box — a container, never the viewport — and the pure `pack.ts` folds ordinary items right to left into «…», then sticky ones; pinned ones never fold. A select that shows its count keeps the box of its longest value, so neither the first load nor a live count moves the line. «…» opens a popover of full-width rows (↑/↓, Home/End) and carries a neutral dot while a folded filter holds a value. Serves `table #14`, `ui` → Widths.
+
+### Search with History — `SearchBox`
+The library's input group: a search icon, the field whose placeholder names the fields searched, the `/` cap (hidden, its box kept, while the field is focused or filled), a clear button (its box kept when empty) and the history button; Enter or leaving the field keeps the term in the table's history of eight, ↓ opens it. Hits in cells are underlined on the muted ground. Serves `table #12`, `rules/ui` → Conventions 11.
+
+### Filters, Columns Menu, Row Menu
+A filter over at most six values is u2's `CountSelect` with «все», a longer one u2's `CountCombobox` of several values; «Вид» is a `CountSelect` of presets with «Свой набор» while the filters match none. The columns menu is an icon-only trigger to a popover: a checkbox row per column (the primary one «всегда виден»), drag or Alt + ↑/↓ to reorder, «Делить строки на страницы», and «Сбросить столбцы и страницы» only while something differs. The row menu is the library's context menu over the body: a header naming the row or the selection («12 находок», «28 из 30 находок»), the view's items marked single or multi, then «Действие по клику» — the pin a left click and Enter run, kept in the browser. Serves `table #3`, `#4`, `#11`, `#13`.
+
+### Status Bar — `StatusBar`
+The bottom strip of every view, 32 px, small muted type with tabular numerals: the pager («‹ стр. 3 из 15 ›» and «Строк: 50 / 100 / все») or the counts strip, then «128 из 723 находок» (the noun genitive after «из»; «723 находки» when nothing is filtered out), then «обновлено 5 мин назад» at the right end with the full МСК time in its title. Each number keeps a three-digit box. Serves `table #8`, `ui` → Page chrome.
+
+### View State — `useTableView`, `useRunView`
+Through the one storage module: sort, columns, widths, page size, the page split, the pin and the search history per table id; filters and search per table id and run. The page and the open rows live in the URL, owned by the caller; the selection in memory. Serves `table #7`, `rules/ui` → Tables 4, Conventions 12.
+
 ### Role Map
 
 The roles of `law/ui.md` → Roles, as fsloopUI fills them:
@@ -256,12 +286,12 @@ The roles of `law/ui.md` → Roles, as fsloopUI fills them:
 | blocked action | `Hint` holding the reason, on a control that stays focusable |
 | confirm dialog / confirm button | — (fsloopUI has no destructive action) |
 | toast | `notify`, `AppToaster` (`src/ui/toast.tsx`) |
-| empty state | `EmptyState` (`src/ui/empty-state.tsx`); a table's own variant is u7's |
+| empty state | `EmptyState` (`src/ui/empty-state.tsx`); a table's variant — the same part centred in the table's bordered box, «Сбросить фильтры» resetting filters and search — is `DataTable`'s |
 | fact list | `FactList` (`src/ui/fact-list.tsx`) |
 | page header | the run page frame (`src/app/`, u3) |
-| adaptive toolbar | `src/table/` (u7) |
-| status bar | `src/table/` StatusBar (u7) |
-| data table | `src/table/` (u7) |
+| adaptive toolbar | `AdaptiveToolbar` (`src/table/toolbar.tsx`, packing `src/table/pack.ts`) |
+| status bar | `StatusBar` (`src/table/status-bar.tsx`), on every view, with a table or without |
+| data table | `DataTable` (`src/table/data-table.tsx`): query `query.ts`, columns `columns.ts` and `columns-menu.tsx`, row menu `row-menu.tsx`, search `search.tsx`, filters `filters.tsx`, view state `view-state.ts` |
 | what's-new registry | — (none kept) |
 
 ## Do's and Don'ts
