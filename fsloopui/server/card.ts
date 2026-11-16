@@ -48,6 +48,9 @@ export function cardOf({ key, project, run, lastWriteAt }: { key: string; projec
     updatedAt: run.updatedAt,
     lastWriteAt,
     errors: run.errors.length,
+    dir: run.dir,
+    worktree: run.worktree,
+    version: run.version ?? null,
   };
 }
 

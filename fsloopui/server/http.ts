@@ -154,7 +154,8 @@ export function createApp({ roots, distDir, intervalMs = 2000, now = Date.now, g
     if (url.pathname.startsWith("/api/")) {
       if (!method) return json(404, { error: `Нет такого адреса: ${url.pathname}` });
       if (req.method !== method) return json(405, { error: `Метод ${req.method} не поддерживается` });
-      if (url.pathname === "/api/runs") return json(200, store.list());
+      // The roots go with the list: the empty-root and not-found texts name them.
+      if (url.pathname === "/api/runs") return json(200, { ...store.list(), roots: roots.map((r) => resolve(r)) });
       if (url.pathname === "/api/run") {
         const key = url.searchParams.get("run") ?? "";
         const run = store.run(key);

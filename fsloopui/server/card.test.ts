@@ -59,6 +59,15 @@ describe("cardOf", () => {
     expect(card.since).toBe("2026-11-15T12:00:00Z");
   });
 
+  test("the facts the run page folds behind «Подробнее»: the run folder, the worktree, the record's version", () => {
+    expect(card.dir).toBe(dir);
+    expect(card.worktree).toBeNull();
+    expect(card.version).toBe(readRun(dir).version ?? null);
+    const bare = join(temp, "bare-run");
+    writeRun(bare, { id: "bare-run", common: false, mtime: NOW, now: NOW });
+    expect(cardOf({ key: "k", project: "app", run: readRun(bare), lastWriteAt: null })).toMatchObject({ recorded: false, dir: bare, worktree: null, version: null });
+  });
+
   test("units by state, the blocked unit with its why", () => {
     expect(card.units).toEqual({ committed: 1, implement: 1, blocked: 1, ready: 1 });
     expect(card.unitsTotal).toBe(4);

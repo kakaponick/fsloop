@@ -43,6 +43,8 @@ describe("handle — the API", () => {
     expect(typeof body.version).toBe("number");
     // By key; the sidebar places them by its own held order.
     expect(body.list.map((c: { key: string }) => c.key)).toEqual([`app/${OPEN}`, `app/${CLOSED}`]);
+    // The roots the server reads, named in the empty-root and not-found texts.
+    expect(body.roots).toEqual([root]);
   });
 
   test("/api/run gives one run's model; an unknown key is a 404 in Russian", async () => {

@@ -275,4 +275,8 @@ export interface RunCard {
   updatedAt: string | null;
   lastWriteAt: string | null;
   errors: number;
+  /** The run folder, the worktree and run.json's version: the run page's «Подробнее», drawn before the run is read. */
+  dir: string;
+  worktree: string | null;
+  version: number | null;
 }
