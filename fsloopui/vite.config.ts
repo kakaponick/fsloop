@@ -14,5 +14,10 @@ export default defineConfig({
   },
   test: {
     include: ["src/**/*.test.{ts,tsx}", "server/**/*.test.ts", "shared/**/*.test.ts", "fixtures/**/*.test.ts"],
+    // The whole fixture roots, written once per run, never in a file's hook (fixtures/global-setup.ts).
+    globalSetup: ["fixtures/global-setup.ts"],
+    // Half the logical CPUs: each file is a jsdom page over a live fixture server, and one worker per logical CPU
+    // starved the heaviest walks past their 5 s limit under the parallel load.
+    maxWorkers: "50%",
   },
 });

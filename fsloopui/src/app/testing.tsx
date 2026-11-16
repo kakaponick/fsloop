@@ -7,6 +7,8 @@ import { join, resolve } from "node:path";
 import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { MemoryRouter, useLocation, useNavigate, useNavigationType, type Location, type NavigateFunction, type NavigationType } from "react-router-dom";
+import { inject } from "vitest";
+import { APP_NOW } from "../../fixtures/global-setup.ts";
 import { makeFixtureRoot, PROJECTS, runId } from "../../fixtures/make.ts";
 import { createApp } from "../../server/http.ts";
 import { UiProvider } from "../ui/provider.tsx";
@@ -15,7 +17,7 @@ import { createLiveStore, LiveProvider, type StreamHandlers, type Transport } fr
 import { Shell } from "./shell.tsx";
 
 /** 16.11.2026 19:41 МСК — the fixture root's «now» and the clock of every rendered shell. */
-export const NOW = Date.parse("2026-11-16T16:41:00Z");
+export const NOW = APP_NOW;
 export const MIN = 60_000;
 
 /** The project of fixture folder n, in the fixture plan's order. */
@@ -36,12 +38,15 @@ interface Connection {
   handlers: StreamHandlers;
 }
 
-/** u1's app over a fixture root (all 63 folders, the `only` ones, or none) and a transport into its handler. */
+/** u1's app over a fixture root (all 63 folders, the `only` ones, or none) and a transport into its handler. All 63
+ * are the root the global setup wrote once for the run (fixtures/global-setup.ts), shared and read-only: a test that
+ * writes into a run folder builds its own with `only`. */
 export function fixtureApp({ only, empty = false }: { only?: number[]; empty?: boolean } = {}) {
   const temp = mkdtempSync(join(tmpdir(), "fsloopui-app-"));
-  const root = join(temp, "root");
+  const shared = !empty && !only;
+  const root = shared ? inject("fixtureRoot") : join(temp, "root");
   if (empty) mkdirSync(root, { recursive: true });
-  else makeFixtureRoot(root, { now: NOW, only });
+  else if (!shared) makeFixtureRoot(root, { now: NOW, only });
   const dist = join(temp, "dist");
   mkdirSync(dist);
   const app = createApp({ roots: [root], distDir: dist, intervalMs: 20, git: () => null });
@@ -109,6 +114,7 @@ export function fixtureApp({ only, empty = false }: { only?: number[]; empty?: b
     },
     /** Writes a file of run folder n, dated `at` (folder included), as fsloop would. */
     write(n: number, rel: string, text: string, at = NOW - MIN / 2) {
+      if (shared) throw new Error("fixtureApp: the shared root of 63 is read-only — build the folders you write with `only`");
       const path = join(dirOf(n), rel);
       mkdirSync(join(path, ".."), { recursive: true });
       writeFileSync(path, text);

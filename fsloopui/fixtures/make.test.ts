@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, inject, test } from "vitest";
+import { MAKE_NOW } from "./global-setup.ts";
 import { livenessOf } from "../shared/liveness.ts";
 import { cardOf, lastWriteOf } from "../server/card.ts";
 import { discover } from "../server/discover.ts";
@@ -10,10 +10,10 @@ import { startServer } from "../server/main.ts";
 import { readRun } from "../server/run.ts";
 import { makeFixtureRoot } from "./make.ts";
 
-const NOW = Date.parse("2026-11-16T10:00:00Z");
-const temp = mkdtempSync(join(tmpdir(), "fsloopui-fixture-"));
-const root = join(temp, "root");
-afterAll(() => rmSync(temp, { recursive: true, force: true }));
+const NOW = MAKE_NOW;
+// The whole root at NOW, written by makeFixtureRoot once in the global setup (fixtures/global-setup.ts), not in this
+// file's hook; the global setup removes it after the run. This file is its only reader and writes it again last.
+const root = inject("makeFixtureRoot");
 
 /** Every file under the root with its content hash and mtime: equal for two equal roots. */
 function snapshot(dir: string): string[] {
@@ -35,7 +35,6 @@ describe("makeFixtureRoot", () => {
   let models: ReturnType<typeof readRun>[];
   let first: string[];
   beforeAll(() => {
-    makeFixtureRoot(root, { now: NOW });
     runs = discover([root]);
     models = runs.map((r) => readRun(r.dir, { git: () => null }));
     first = snapshot(root);

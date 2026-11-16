@@ -1,9 +1,14 @@
 // The jsdom side of a component test: jest-dom matchers, cleanup between cases, and the browser APIs jsdom lacks
 // that the library's primitives call (pointer capture, scrollIntoView, ResizeObserver, matchMedia).
 import "@testing-library/jest-dom/vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { resetPrefsMemory } from "./storage.ts";
+
+// A `waitFor` / `findBy` bound catches a hang, not a stopwatch (`tests 4`): the walks over the 723-finding run render
+// in well under a second alone, but the suite runs 34 files at once and a re-render can pass 1 s, the library's
+// default. The files' own explicit waits already use 4 s; the default takes the same bound.
+configure({ asyncUtilTimeout: 4000 });
 
 afterEach(() => {
   cleanup();

@@ -1,0 +1,293 @@
+// @vitest-environment jsdom
+// Done-criteria 0, 1, 4 and 6: the task walk of surfaces/units.md → WALK on the 42-unit fixture run over 2 passes,
+// the view's configuration at the production shape (0 / 14 / 42 units, a 964 px region), the empty states and the
+// strict rules (no layout shift, no skeletons).
+import "../../ui/test-setup.ts";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterAll, describe, expect, test, vi } from "vitest";
+import { emptyStateText, glossaryLines, readPref } from "@/ui";
+import { assertLayout, fitsRegion, headerWidth, isSelectFilter, mergeWidths, runQuery, type FilterDef } from "@/table";
+import { runKey as viewKey, type RunPrefs } from "../../table/view-state.ts";
+import { runPath } from "../../app/routes.ts";
+import { COLUMNS, STATE_GLOSSARY } from "./columns.tsx";
+import { DEFAULT_SORT, emptyFor, filtersFor, SEARCH, stateDetail, unitRows, type UnitRow } from "./query.ts";
+import { fixtureApp, keyOf, loadedRun, NOW, renderRun, renderUnits } from "./testing.tsx";
+import { CANDIDATES_WIDEST, candidatesText, UNDECIDED_WIDEST, undecidedText, unitNotFound } from "./words.ts";
+
+const N = 40; // the production maximum: 42 units over 2 passes
+const INIT = 60; // an init run, closed with no units
+const ONE = 24; // a live run of one pass, one unit at work
+const KEY = keyOf(N);
+// Three folders, not the shared 63: the server polls its root every 20 ms in this file's thread.
+const fx = fixtureApp({ only: [N, INIT, ONE] });
+afterAll(() => fx.close());
+const run = loadedRun(fx, N);
+const rows = unitRows(run);
+const REGION = 964; // 1280 px beside the 316 px sidebar
+
+const bodyRows = () => [...document.querySelectorAll<HTMLTableRowElement>("tr[data-row-id]")];
+const ids = () => bodyRows().map((r) => r.dataset.rowId as string);
+const row = (id: string) => bodyRows().find((r) => r.dataset.rowId === id) as HTMLTableRowElement;
+const cell = (id: string, col: string) => row(id).querySelector(`td[data-col=${col}]`) as HTMLElement;
+const detail = (id: string) => document.querySelector(`tr[data-detail-for="${id}"]`) as HTMLElement;
+const loaded = () => waitFor(() => expect(bodyRows()).toHaveLength(42), { timeout: 4000 });
+const sortColumns = COLUMNS.flatMap((c) => (c.rank ? [{ id: c.id, rank: c.rank }] : []));
+
+describe("the view's configuration at the production shape", () => {
+  test("the columns of BLOCKS fit the 964 px region; every header clears its width; glossaries are bounded", () => {
+    expect(() => assertLayout(COLUMNS)).not.toThrow();
+    expect(COLUMNS.map((c) => c.label)).toEqual(["Юнит", "Проход", "Состояние", "Что делает", "Коммит", "major+", "minor", "Запуски"]);
+    expect(COLUMNS.filter((c) => c.width === undefined).map((c) => c.id)).toEqual(["title"]);
+    expect(COLUMNS.filter((c) => c.numeric).map((c) => c.id)).toEqual(["pass", "major", "minor", "launches"]);
+    expect(fitsRegion(COLUMNS, mergeWidths(COLUMNS, null), REGION)).toBe(true);
+    for (const c of COLUMNS) if (c.width !== undefined) expect(headerWidth(c.label, { sortable: Boolean(c.rank) }), c.id).toBeLessThanOrEqual(c.width);
+    for (const c of COLUMNS) if (c.glossary) expect(() => glossaryLines(c.glossary ?? []), c.id).not.toThrow();
+    expect(glossaryLines(STATE_GLOSSARY)).toEqual([
+      "черновик — Бриф юнита написан, юнит ещё не готов к работе.",
+      "готов к работе — Бриф юнита принят, исполнитель ещё не запущен.",
+      "проверяется — Прогон проверяет код юнита: типы, линт, тесты.",
+      "отладка — Проверка юнита упала, прогон ищет причину.",
+      "вливается — Код юнита коммитится в ветку прогона.",
+      "заблокирован — Юнит остановлен: прогон ждёт решения или другого юнита.",
+      "· 12 мин — сколько прошло с запуска исполнителя или с последней проверки",
+    ]);
+  });
+
+  test("«Состояние» is a combobox; «Проход» a select only when the run has more than one pass", () => {
+    const filters = filtersFor(run);
+    expect(filters.map((f) => f.label)).toEqual(["Состояние", "Проход"]);
+    expect(filters.map((f) => (isSelectFilter(f as FilterDef<unknown>) ? "select" : "combobox"))).toEqual(["combobox", "select"]);
+    expect(filters[1].options.map((o) => o.label)).toEqual(["1", "2"]);
+    expect(filtersFor(loadedRun(fx, ONE)).map((f) => f.label)).toEqual(["Состояние"]);
+    const q = runQuery({ rows, rowId: (u) => u.id, columns: [], filters, search: SEARCH, state: { sort: null, filters: {}, search: "" } });
+    expect(q.counts.state).toMatchObject({ "": 42, committed: 30, blocked: 1, ready: 5, drafted: 4, implement: 1, verify: 1 });
+    expect(q.counts.pass).toMatchObject({ "": 42, "1": 21, "2": 21 });
+  });
+
+  test("the default order: the pass descending, ties in units.md's order (u before f)", () => {
+    const sorted = runQuery({ rows, rowId: (u) => u.id, columns: sortColumns, filters: [], search: null, state: { sort: DEFAULT_SORT, filters: {}, search: "" } }).rows.map((u) => u.id);
+    const expected = [...Array.from({ length: 16 }, (_, k) => `u${k + 17}`), ...Array.from({ length: 5 }, (_, k) => `f${k + 6}`), ...Array.from({ length: 16 }, (_, k) => `u${k + 1}`), ...Array.from({ length: 5 }, (_, k) => `f${k + 1}`)];
+    expect(sorted).toEqual(expected);
+  });
+
+  test("search: ids, shas and the closed findings' ids OR-matched; the title as free text", () => {
+    const q = (search: string) => runQuery({ rows, rowId: (u) => u.id, columns: [], filters: [], search: SEARCH, state: { sort: null, filters: {}, search } }).rows.map((u) => u.id);
+    expect(q("c0ffee05")).toEqual(["u5"]);
+    expect(q("c0ffee05 f1f1f103")).toEqual(["u5", "f3"]);
+    const closed = run.units.find((u) => u.id === "u1")?.closes[0] as string;
+    expect(q(closed)).toContain("u1");
+    expect(q("fixes")).toEqual(Array.from({ length: 10 }, (_, k) => `f${k + 1}`));
+    expect(SEARCH.placeholder).toBe("Юнит, коммит, находка или текст задачи");
+  });
+
+  test("the state cell: «state · age · cause», the cause last; no age without the model's `since`", () => {
+    const at = (id: string) => rows.find((u) => u.id === id) as UnitRow;
+    expect(stateDetail(at("u23"), NOW)).toEqual(["waits for the user — the empty state's wording (j140)"]);
+    expect(stateDetail(at("u24"), NOW)).toEqual(["ждёт u23"]);
+    expect(stateDetail({ ...at("u30"), since: new Date(NOW - 12 * 60_000).toISOString() }, NOW)).toEqual(["12 мин"]);
+    expect(stateDetail({ ...at("u1"), since: new Date(NOW - 12 * 60_000).toISOString() }, NOW)).toEqual([]);
+    expect(stateDetail({ ...at("u27"), state: "unknown", stateText: "paused by hand" }, NOW)).toEqual(["paused by hand"]);
+  });
+
+  test("the empty states and a missing unit: words built by code, against literals", () => {
+    expect(emptyFor({ closed: true, mode: "worktree" })).toEqual({ form: "never" });
+    expect(emptyFor({ closed: false, mode: "init" })).toEqual({ form: "never" });
+    expect(emptyFor({ closed: false, mode: "worktree" })).toEqual({ form: "not-yet", step: "decompose" });
+    expect(emptyStateText({ form: "not-yet", step: "decompose", noun: ["юнит", "юнита", "юнитов"] }).title).toBe("Юнитов ещё нет — они появятся на этапе «декомпозиция»");
+    expect(emptyStateText({ form: "never", noun: ["юнит", "юнита", "юнитов"] }).title).toBe("В этом прогоне не было юнитов");
+    expect(unitNotFound("u99")).toBe("Юнит u99 не найден: в этом прогоне его нет — проверьте ссылку");
+    expect(unitNotFound("u99").split(" ")).toHaveLength(12);
+    expect(candidatesText(1)).toBe("1 находка-кандидат");
+    expect(candidatesText(3)).toBe("3 находки-кандидата");
+    expect(CANDIDATES_WIDEST).toBe("888 находок-кандидатов");
+    expect(undecidedText(1)).toBe("1 находка без решения");
+    expect(undecidedText(12)).toBe("12 находок без решения");
+    expect(UNDECIDED_WIDEST).toBe("888 находок без решения");
+    expect(UNDECIDED_WIDEST.split(" ")).toHaveLength(4);
+  });
+});
+
+describe("the task walk over u1's handler (surfaces/units.md → WALK)", () => {
+  test("1–3: «Загрузка…» in the table's frame first; then all 42 rows unpaged, the columns, the counts strip, the toolbar", async () => {
+    const { container } = renderUnits(fx, KEY, runPath(KEY, { view: "units" }));
+    const status = screen.getAllByRole("status").find((s) => s.textContent === "Загрузка…") as HTMLElement;
+    expect(status).toHaveClass("size-full", "rounded-lg", "border");
+    expect(container.querySelector(".animate-pulse, [data-slot=skeleton]")).toBeNull();
+    await loaded();
+    expect(screen.getAllByRole("columnheader").map((h) => h.textContent).filter(Boolean)).toEqual(["Юнит", "Проход", "Состояние", "Что делает", "Коммит", "major+", "minor", "Запуски"]);
+    expect(ids().slice(0, 3)).toEqual(["u17", "u18", "u19"]);
+    expect(ids().at(-1)).toBe("f5");
+    expect(screen.queryByRole("navigation", { name: "Страницы" })).toBeNull();
+    const bar = container.querySelector("[data-slot=status-bar]") as HTMLElement;
+    expect(bar).toHaveClass("h-8");
+    expect(within(bar).getByText("42 юнита")).toBeInTheDocument();
+    const strip = bar.querySelector("[data-slot=counts-strip]") as HTMLElement;
+    expect([...strip.querySelectorAll("[data-slot=state-count]")].map((s) => s.textContent)).toEqual(["заблокирован1", "проверяется1", "пишется1", "готов к работе5", "черновик4", "закоммичен30"]);
+    expect(strip.querySelector("[data-slot=state-count] [data-tone]")).toHaveAttribute("data-tone", "warning");
+    for (const n of strip.querySelectorAll("[data-slot=state-count] > span:last-child")) expect(n).toHaveClass("min-w-count", "tabular-nums");
+    expect([...container.querySelectorAll<HTMLElement>("[data-toolbar-item]")].map((el) => el.dataset.toolbarItem)).toEqual(["search", "filter-state", "filter-pass", "facts", "columns"]);
+    expect(screen.getByRole("searchbox")).toHaveAttribute("placeholder", "Юнит, коммит, находка или текст задачи");
+
+    // a row: id · pass · state · title · commit · counts
+    expect(cell("u23", "state")).toHaveTextContent("заблокирован · waits for the user — the empty state's wording (j140)");
+    expect(cell("u23", "state").querySelector("[data-tone]")).toHaveAttribute("data-tone", "warning");
+    expect(cell("u31", "state").querySelector("[data-tone]")).toHaveAttribute("data-tone", "neutral");
+    expect(cell("u24", "state")).toHaveTextContent("готов к работе · ждёт u23");
+    expect(cell("u1", "sha")).toHaveTextContent("c0ffee01");
+    expect(cell("u27", "sha")).toHaveTextContent("—");
+    expect(cell("u17", "pass")).toHaveTextContent("2");
+  });
+
+  test("1: the toolbar facts link to «Находки» filtered so, each in a box reserved at its widest form", async () => {
+    const user = userEvent.setup({ delay: null });
+    const view = renderUnits(fx, KEY, runPath(KEY, { view: "units" }));
+    await loaded();
+    const facts = [...document.querySelectorAll<HTMLElement>("[data-slot=toolbar-fact]")];
+    expect(facts.map((f) => f.querySelector("[data-slot=fact-reserve]")?.textContent)).toEqual(["888 находок-кандидатов", "888 находок без решения"]);
+    for (const f of facts) expect(f.querySelector("[data-slot=fact-reserve]")).toHaveClass("invisible");
+    const candidates = run.findings.filter((f) => f.effectiveStatus === "candidate").length;
+    const undecided = run.findings.filter((f) => f.effectiveStatus === "undecided").length;
+    expect(facts[0]).toHaveTextContent(new RegExp(`${candidates} наход\\S+-кандидат`));
+    expect(facts[1]).toHaveTextContent(new RegExp(`${undecided} наход\\S* без решения`));
+    expect(candidates).toBeGreaterThan(0);
+    await user.click(within(facts[0]).getByRole("link"));
+    expect(view.probe.location?.search).toBe("?view=findings");
+    expect(readPref<RunPrefs | null>(viewKey("findings", KEY), null)?.filters).toEqual({ state: ["candidate"] });
+  });
+
+  test("1: a unit's major+ count opens «Находки» filtered by the unit and severity", async () => {
+    const user = userEvent.setup({ delay: null });
+    const view = renderUnits(fx, KEY, runPath(KEY, { view: "units" }));
+    await loaded();
+    const unit = rows.find((u) => u.majorUp > 0) as UnitRow;
+    const link = within(cell(unit.id, "major")).getByRole("link");
+    expect(link).toHaveTextContent(String(unit.majorUp));
+    expect(run.findings.filter((f) => f.units.includes(unit.id) && (f.severity === "critical" || f.severity === "major"))).toHaveLength(unit.majorUp);
+    await user.click(link);
+    expect(view.probe.location?.search).toBe("?view=findings");
+    expect(readPref<RunPrefs | null>(viewKey("findings", KEY), null)?.filters).toEqual({ unit: [unit.id], severity: ["major+"] });
+    // the link is the cell's own click: the row did not expand
+    expect(detail(unit.id)).toBeNull();
+  });
+
+  test("3: search narrows the rows; filtered to none names the search and offers «Сбросить фильтры»", async () => {
+    const user = userEvent.setup({ delay: null });
+    const { container } = renderUnits(fx, KEY, runPath(KEY, { view: "units" }));
+    await loaded();
+    const search = screen.getByRole("searchbox");
+    await user.click(search);
+    await user.paste("c0ffee05");
+    await waitFor(() => expect(ids()).toEqual(["u5"]));
+    expect(container.querySelector("[data-slot=status-bar]")).toHaveTextContent("1 из 42 юнитов");
+    await user.clear(search);
+    await user.paste("ни-одного-юнита");
+    expect(await screen.findByText("Нет юнитов, подходящих под фильтры")).toBeInTheDocument();
+    expect(screen.getByText("Фильтры: Поиск: «ни-одного-юнита»")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Сбросить фильтры" }));
+    await loaded();
+  });
+
+  test("4: rows expand in place, several at once; the URL names the last one, replaced", async () => {
+    const user = userEvent.setup({ delay: null });
+    const view = renderUnits(fx, KEY, runPath(KEY, { view: "units" }));
+    await loaded();
+    await user.click(cell("u23", "title"));
+    await user.click(cell("u24", "title"));
+    expect(detail("u23")).toBeTruthy();
+    expect(detail("u24")).toBeTruthy();
+    expect(row("u24")).toHaveAttribute("aria-expanded", "true");
+    expect(new URLSearchParams(view.probe.location?.search).get("unit")).toBe("u24");
+    // u24 waits for u23: its id links to u23's address, with u23's state
+    const waits = within(detail("u24")).getByRole("link", { name: "u23" });
+    expect(waits).toHaveAttribute("href", runPath(KEY, { view: "units", unit: "u23" }));
+    expect(waits.closest("li")).toHaveTextContent("u23заблокирован");
+    // a finding it closes links to its own address in «Находки»
+    const u23 = run.units.find((u) => u.id === "u23");
+    const first = run.findings.find((f) => f.id === u23?.closes[0]);
+    if (first) expect(within(detail("u23")).getAllByRole("link", { name: first.local })[0]).toHaveAttribute("href", runPath(KEY, { view: "findings", finding: first.id }));
+  });
+
+  test("4: the row menu of ACTIONS; a selection copies its ids joined by newlines", async () => {
+    const user = userEvent.setup({ delay: null });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    renderUnits(fx, KEY, runPath(KEY, { view: "units" }));
+    await loaded();
+    fireEvent.contextMenu(row("u1"));
+    let menu = await screen.findByRole("menu");
+    expect(within(menu).getByText("u1 — part 1")).toBeInTheDocument();
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual([
+      "ОткрытьEnter",
+      "Открыть находки юнита",
+      "Скопировать id",
+      "Скопировать коммит",
+      "Скопировать путь брифа",
+      "Скопировать рабочую копию",
+      "Действие по клику",
+    ]);
+    const tree = within(menu).getByRole("menuitem", { name: "Скопировать рабочую копию" });
+    expect(tree).toHaveAttribute("data-disabled");
+    expect(tree).toHaveAttribute("title", "У юнита нет своей рабочей копии: он работает в общей копии прогона");
+    await user.keyboard("{Escape}");
+
+    await user.click(within(row("u17")).getByRole("checkbox"));
+    await user.click(within(row("u18")).getByRole("checkbox"));
+    fireEvent.contextMenu(row("u18"));
+    menu = await screen.findByRole("menu");
+    expect(within(menu).getByText("2 юнита")).toBeInTheDocument();
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Скопировать id", "Скопировать коммит", "Скопировать путь брифа", "Скопировать рабочую копию", "Действие по клику"]);
+    await user.click(within(menu).getByRole("menuitem", { name: "Скопировать id" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("u17\nu18"));
+  });
+
+  test("5: a link to a unit opens and marks it; an id the run does not hold is named", async () => {
+    renderUnits(fx, KEY, runPath(KEY, { view: "units", unit: "f3" }));
+    await loaded();
+    expect(row("f3")).toHaveAttribute("data-target");
+    expect(row("f3")).toHaveAttribute("aria-expanded", "true");
+    expect(detail("f3")).toBeTruthy();
+  });
+
+  test("5: «Юнит u99 не найден» stands above the table, the table shows", async () => {
+    renderUnits(fx, KEY, runPath(KEY, { view: "units", unit: "u99" }));
+    await loaded();
+    expect(document.querySelector("[data-slot=unit-missing]")).toHaveTextContent(unitNotFound("u99"));
+  });
+});
+
+describe("the empty states and the production shape (done-criteria 4, 6)", () => {
+  test("a closed init run never had units", async () => {
+    renderUnits(fx, keyOf(INIT), runPath(keyOf(INIT), { view: "units" }));
+    expect(await screen.findByText("В этом прогоне не было юнитов")).toBeInTheDocument();
+    expect(bodyRows()).toHaveLength(0);
+  });
+
+  test("an open run before decompose: the stage that brings units", () => {
+    const one = loadedRun(fx, ONE);
+    expect(one.closed).toBe(false);
+    renderRun(fx, { ...one, units: [] }, runPath(one.key, { view: "units" }));
+    expect(screen.getByText("Юнитов ещё нет — они появятся на этапе «декомпозиция»")).toBeInTheDocument();
+  });
+
+  test("14 units — the median run — in one pass: no «Проход» filter, every row, the strip", () => {
+    const fourteen = { ...run, units: run.units.filter((u) => u.pass === 1).slice(0, 14) };
+    const { container } = renderRun(fx, fourteen, runPath(KEY, { view: "units" }));
+    expect(bodyRows()).toHaveLength(14);
+    expect([...container.querySelectorAll<HTMLElement>("[data-toolbar-item]")].map((el) => el.dataset.toolbarItem)).toEqual(["search", "filter-state", "facts", "columns"]);
+    expect(container.querySelector("[data-slot=status-bar]")).toHaveTextContent("14 юнитов");
+  });
+
+  test("units.md that cannot be read fails in the table's place: «Список юнитов не прочитан: …»", () => {
+    renderRun(fx, { ...run, errors: [...run.errors, { file: "units.md", cause: "нет доступа" }] }, runPath(KEY, { view: "units" }));
+    expect(screen.getByText("Список юнитов не прочитан: нет доступа")).toBeInTheDocument();
+    expect(bodyRows()).toHaveLength(0);
+  });
+
+  test("the held strip's line is reserved before anything waits in it (Strict 1)", () => {
+    renderRun(fx, run, runPath(KEY, { view: "units" }));
+    const strip = document.querySelector("[data-slot=held-strip]") as HTMLElement;
+    expect(strip).toBeInTheDocument();
+    expect(strip).toBeEmptyDOMElement();
+  });
+});
