@@ -187,7 +187,7 @@ function CountsSection() {
       </Case>
       <Case label="Полоса шире своего места: не влезшие вкладки — в меню «Ещё N»; выбранная вкладка и «Файл отчёта» остаются в полосе">
         <div className="flex max-w-md flex-wrap items-start rounded-lg border">
-          <CountTabs sticky value={part} onValueChange={setPart} tabs={PARTS} label="Части отчёта — свёрнутая полоса" overflow={{ label: "Другие части отчёта", keep: ["file"] }} className="w-auto min-w-0 flex-1 px-1" />
+          <CountTabs sticky value={part} onValueChange={setPart} tabs={PARTS} label="Части отчёта — свёрнутая полоса" overflow={{ label: "Другие части отчёта", keep: ["file"], noun: NOUNS.reportPart }} className="w-auto min-w-0 flex-1 px-1" />
         </div>
       </Case>
       <div className="flex flex-wrap items-center gap-6">

@@ -33,6 +33,9 @@ export interface ExpandingFindingsProps {
   ruled?: boolean;
   /** The unit whose detail holds the list: a row's state leaves it out (`FindingRow` → `host`). */
   unit?: string;
+  /** The report whose reader holds the list (its launch id): an open finding of it leaves «отчёт» out of its fact line
+   * (`FindingArticle` → `report`). */
+  report?: string;
 }
 
 /** The chevron's hover and open grounds on the muted ground of a unit's detail: the ghost button's own are that same
@@ -42,7 +45,7 @@ const ON_MUTED = "hover:bg-foreground/8 dark:hover:bg-foreground/8 aria-expanded
 /** A click on a row's own text toggles it; a link or a button inside the row keeps its own action. */
 const ownClick = (e: MouseEvent<HTMLElement>) => !(e.target as HTMLElement).closest("a, button");
 
-export function ExpandingFindings({ run, items, label, now, slot, ruled = true, unit }: ExpandingFindingsProps) {
+export function ExpandingFindings({ run, items, label, now, slot, ruled = true, unit, report }: ExpandingFindingsProps) {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   const list = useRef<HTMLOListElement>(null);
   const base = useId();
@@ -103,7 +106,7 @@ export function ExpandingFindings({ run, items, label, now, slot, ruled = true, 
                       {OPEN_IN_FINDINGS}
                     </ObjectLink>
                   </p>
-                  <FindingArticle run={run} finding={f} now={now} inRow />
+                  <FindingArticle run={run} finding={f} now={now} inRow report={report} />
                 </div>
               )}
             </li>

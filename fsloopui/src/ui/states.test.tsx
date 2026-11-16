@@ -176,10 +176,31 @@ describe("p2-assess-critic-improve#improve-13: one not-found line on all four su
     expect(missingText({ kind: "unit", ids }, "u99")).toBe("Юнит u99 не найден: в этом прогоне юниты u1–u32, f1–f10.");
     expect(wordCount(missingText({ kind: "unit", ids }, "u99"))).toBe(10);
     expect(missingText({ kind: "unit", ids: ["u1"] }, "u99")).toBe("Юнит u99 не найден: в этом прогоне юнит u1.");
-    expect(missingText({ kind: "unit", ids: ["u3", "u1", "f2", "fix-a"] }, "u9")).toBe("Юнит u9 не найден: в этом прогоне юниты u1–u3, f2, fix-a.");
+    // p3-review-critic-code#code-31: a gap splits the range — u2 is not between u1 and u3 here
+    expect(missingText({ kind: "unit", ids: ["u3", "u1", "f2", "fix-a"] }, "u9")).toBe("Юнит u9 не найден: в этом прогоне юниты u1, u3, f2, fix-a.");
     expect(missingText({ kind: "unit", ids: [] }, "u9")).toBe("Юнит u9 не найден.");
     // the numbered lists keep their range: one builder per kind
     expect(missingText({ kind: "entry", range: ["1", "143"] }, "999")).toBe("Решение #999 не найдено: в этом прогоне решения #1–#143.");
+  });
+
+  test("p3-review-critic-code#code-31: the ranges split at every gap and keep each id as the run writes it — the missing id never sits inside a range", () => {
+    const without20 = Array.from({ length: 32 }, (_, k) => `u${k + 1}`).filter((id) => id !== "u20");
+    const text = missingText({ kind: "unit", ids: without20 }, "u20");
+    expect(text).toBe("Юнит u20 не найден: в этом прогоне юниты u1–u19, u21–u32.");
+    expect(wordCount(text)).toBe(10);
+    expect(missingText({ kind: "unit", ids: ["u01", "u02", "u03", "f1"] }, "u99")).toBe("Юнит u99 не найден: в этом прогоне юниты u01–u03, f1.");
+    expect(missingText({ kind: "unit", ids: ["u1", "u2", "u4", "u5", "u7"] }, "u3")).toBe("Юнит u3 не найден: в этом прогоне юниты u1–u2, u4–u5, u7.");
+  });
+
+  test("p3-review-critic-craft-2#craft-15: the line reads in one ink — what is missing as loud as what the run holds", async () => {
+    render(<MissingLine kind="unit" id="u99" ids={["u1", "u2", "u3"]} onClose={() => {}} slot="unit-missing" />);
+    const sentence = document.querySelector("[data-slot=missing-sentence]") as HTMLElement;
+    const subject = sentence.querySelector("[data-slot=not-found]") as HTMLElement;
+    expect(sentence).toHaveTextContent(/^Юнит u99 не найден: в этом прогоне юниты u1–u3\.$/);
+    await applyStylesheet();
+    // DESIGN.md → Colors, light: ink #1b1b1a — the subject and the rest of the sentence alike, never muted #6d6d69
+    expect(getComputedStyle(subject).color).toBe("rgb(27, 27, 26)");
+    expect(getComputedStyle(sentence).color).toBe("rgb(27, 27, 26)");
   });
 
   test("MissingLine: one line — the sentence truncates with the whole in its title, «Закрыть» keeps its box", async () => {

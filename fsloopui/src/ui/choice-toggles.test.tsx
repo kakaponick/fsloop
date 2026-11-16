@@ -84,6 +84,14 @@ describe("improve-2: the shared choice toggles", () => {
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
+  test("p3-review-critic-craft#craft-5: the key hint opens below its toggles — never over the heading and the line above them, which the toggles answer", async () => {
+    const user = userEvent.setup();
+    renderUi(<Host choices={VERDICTS} first={null} hint="Оценить клавишей" />);
+    await user.tab();
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/^Оценить клавишей1$/);
+    expect(document.querySelector("[data-slot=tooltip-content]")).toHaveAttribute("data-side", "bottom");
+  });
+
   test("a choice reports itself — the pressed one too, which a single group would otherwise clear", async () => {
     const user = userEvent.setup();
     const chosen = vi.fn();

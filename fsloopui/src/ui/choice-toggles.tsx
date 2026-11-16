@@ -3,7 +3,9 @@
 // ←/→ between the choices. The pressed item is ink on paper. It is keyed on the item's own `aria-checked`, never on
 // `data-state`: a tooltip trigger writes its own `data-state` over the item it wraps, which would undo the ink. A
 // choice with a key shows its cap in that toggle's own tooltip, opened by its own hover and focus — the tooltip's
-// words the group's `keyHint`, a verb and its object («Оценить клавишей»).
+// words the group's `keyHint`, a verb and its object («Оценить клавишей»). The tooltip opens below the toggles: what
+// stands above them — a heading and the line the choice answers («Ваша оценка», «Оценки ещё нет — …») — stays in
+// view while the hint is read (craft-5) — the shared `Hint`, on its `bottom` side.
 import type { ReactNode } from "react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
@@ -58,7 +60,7 @@ export function ChoiceToggles<V extends string>({ label, value, choices, onChoos
           </ToggleGroupItem>
         );
         return c.keyCode && keyHint ? (
-          <Hint key={c.value} label={keyHint} keys={[c.keyCode]}>
+          <Hint key={c.value} label={keyHint} keys={[c.keyCode]} side="bottom">
             {item}
           </Hint>
         ) : (

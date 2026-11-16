@@ -26,7 +26,23 @@ export interface FindingArticleProps {
   now: number;
   /** The article is a table row's detail: the row right above shows the severity, so the fact line leaves it out. */
   inRow?: boolean;
+  /** The report the article is read inside (its launch id): a finding of it leaves «отчёт» out — a link to the page the
+   * user is on carries nothing (ux 2). */
+  report?: string;
   className?: string;
+}
+
+/** The stage fact's value beside a report named `name`: what the name does not already say (ux 2; craft-1). A name
+ * that carries the whole stage («craft · проход 1 · ревью») leaves the fact out — null; one that carries its pass
+ * («design · check · проход 2») leaves the stage its word — «декомпозиция»; otherwise the stage in full. */
+export function stageFact(stage: string | null | undefined, name: string | null): string | null {
+  const s = stageOf(stage);
+  if (!name || !s.stage) return s.full;
+  const parts = name.split(" · ");
+  const carries = (seq: readonly string[]) => parts.some((_, i) => seq.every((p, k) => parts[i + k] === p));
+  if (carries(s.full.split(" · "))) return null;
+  if (s.pass !== null && carries([`проход ${s.pass}`])) return s.compact;
+  return s.full;
 }
 
 /** The sections the text splits into, in reading order; one «Текст находки» when it has no split. */
@@ -60,7 +76,7 @@ const Sep = ({ slot }: { slot?: string }) => (
   </span>
 );
 
-function FactLine({ run, finding: f, inRow }: { run: ArticleRun; finding: Finding; inRow: boolean }) {
+function FactLine({ run, finding: f, inRow, report }: { run: ArticleRun; finding: Finding; inRow: boolean; report?: string }) {
   const label = (text: string) => <span className="text-muted-foreground">{text}</span>;
   // a row's detail leaves out the severity its row shows right above it (ux 2)
   const facts: { key: string; node: ReactNode }[] = inRow ? [] : [{ key: "severity", node: <SeverityCell finding={f} form="full" /> }];
@@ -73,31 +89,41 @@ function FactLine({ run, finding: f, inRow }: { run: ArticleRun; finding: Findin
     const fact = enumFact(words, name, value);
     facts.push({ key, node: <span title={fact.title}>{fact.text}</span> });
   }
-  facts.push({
-    key: "report",
-    node: (
-      <span>
-        {label(FACT.report)}{" "}
-        {f.launch ? (
-          <ObjectLink run={run} kind="report" id={f.launch}>
-            {f.launchName}
-          </ObjectLink>
-        ) : f.source === "own" ? (
-          reportWord(f)
-        ) : (
-          <NotRecorded />
-        )}
-      </span>
-    ),
-  });
-  facts.push({
-    key: "stage",
-    node: (
-      <span>
-        {label(FACT.stage)} {stageOf(f.stage).full}
-      </span>
-    ),
-  });
+  // inside the report it names, the finding's report is the page itself (ux 2)
+  if (!(f.launch && f.launch === report))
+    facts.push({
+      key: "report",
+      node: (
+        <span>
+          {label(FACT.report)}{" "}
+          {f.launch ? (
+            // the name in quotes: its own «·» («design · check · проход 2») never reads as the line's
+            <>
+              «
+              <ObjectLink run={run} kind="report" id={f.launch}>
+                {f.launchName}
+              </ObjectLink>
+              »
+            </>
+          ) : f.source === "own" ? (
+            reportWord(f)
+          ) : (
+            <NotRecorded />
+          )}
+        </span>
+      ),
+    });
+  // the stage says only what the report's name does not: «проход 2» once on the line
+  const stage = stageFact(f.stage, f.launch ? f.launchName : null);
+  if (stage !== null)
+    facts.push({
+      key: "stage",
+      node: (
+        <span>
+          {label(FACT.stage)} {stage}
+        </span>
+      ),
+    });
   facts.push({
     key: "location",
     node: f.location ? (
@@ -179,7 +205,7 @@ function Decision({ run, finding: f }: { run: ArticleRun; finding: Finding }) {
   );
 }
 
-export function FindingArticle({ run, finding: f, verdict, now, inRow = false, className }: FindingArticleProps) {
+export function FindingArticle({ run, finding: f, verdict, now, inRow = false, report, className }: FindingArticleProps) {
   const sections = textSections(f);
   // the verdict under its own heading: the control where the view writes it, else the saved one read-only
   const shownVerdict = verdict ?? (f.verdict ? <p className="m-0">{verdictValue(f.verdict, now)}</p> : null);
@@ -188,7 +214,7 @@ export function FindingArticle({ run, finding: f, verdict, now, inRow = false, c
   const base = `finding-${f.id.replace(/[^\w-]/g, "-")}`;
   return (
     <article data-slot="finding-article" aria-label={`Находка ${f.id}`} className={cn("@container/finding flex flex-col gap-4", className)}>
-      <FactLine run={run} finding={f} inRow={inRow} />
+      <FactLine run={run} finding={f} inRow={inRow} report={report} />
       <div className="grid items-start gap-x-10 gap-y-4 @min-[52rem]/finding:grid-cols-[minmax(0,var(--container-measure))_minmax(16rem,1fr)]">
         <div data-slot="finding-text" className="flex min-w-0 flex-col gap-3">
           {sections.length ? (

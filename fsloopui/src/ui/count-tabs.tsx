@@ -1,7 +1,7 @@
 // Tabs with counts (rules/ui → Layout 4, Conventions 7; ui → Widths: tabs stay content-width, left-aligned): the
 // views of a run and a report's sections. Each tab carries its count in a box three tabular digits wide, so a
 // live count never moves its neighbours (Strict 1); a tab whose count is zero is muted whole, its label with its «0»,
-// in ink alone — the weight stays, so a count that turns from zero moves nothing (improve-5 (1)); the active tab keeps
+// in ink alone, every ink over 4.5:1 (`TAB_INK`, `ZERO_TAB`) — the weight stays, so a count that turns from zero moves nothing (improve-5 (1)); the active tab keeps
 // the weight of the others — its underline and ink mark it, so choosing a tab shifts nothing. ←/→ move between tabs.
 //
 // A sticky strip is this component's own form, written once: the list pinned to the top of the region that scrolls
@@ -39,13 +39,18 @@ export function TabCount({ n }: { n: number | null }) {
   );
 }
 
-/** A tab whose count is zero: its label and its «0» quieter than every tab that holds something, in both themes (the
- * library's own dark ink is replaced, not stacked); chosen, it takes the chosen tab's ink like any other. */
-const ZERO_TAB = "text-muted-foreground/80 dark:text-muted-foreground/80";
+/** The tabs' three inks, each over 4.5:1 on the page in both themes (DESIGN.md → The Contrast Floor; craft-3): the
+ * chosen tab in ink, a tab that holds something in ink at 80 % — the library's own inactive ink (ink at 60 % in the
+ * light theme) falls under the floor —, a zero tab in muted ink, its label with its «0». The library's dark inks are
+ * replaced, not stacked; chosen, a zero tab takes the chosen tab's ink like any other. `tokens.test.ts` computes all
+ * three from the token values. */
+export const TAB_INK = "text-foreground/80 dark:text-foreground/80";
+export const ZERO_TAB = "text-muted-foreground dark:text-muted-foreground";
+/** «Ещё N» reads as the tabs it folds. */
+export const MORE_INK = TAB_INK;
 
-/** «Ещё N» spoken whole: what the trigger folds, its noun agreed — «Ещё 9 частей отчёта» (improve-5 (2)). */
-export const REPORT_PARTS: Forms = ["часть отчёта", "части отчёта", "частей отчёта"];
-export const moreTabsName = (n: number, noun: Forms = REPORT_PARTS): string => `${MORE_TABS} ${count(n, noun)}`;
+/** «Ещё N» spoken whole: what the trigger folds, in the noun its caller passes — «Ещё 9 частей отчёта» (improve-5 (2)). */
+export const moreTabsName = (n: number, noun: Forms): string => `${MORE_TABS} ${count(n, noun)}`;
 
 /** A strip that folds what does not fit into «Ещё N». */
 export interface TabsOverflow {
@@ -53,8 +58,8 @@ export interface TabsOverflow {
   label: string;
   /** Tabs that never fold, besides the open one: «Файл отчёта», where an unread line sends the user. */
   keep?: readonly string[];
-  /** What the tabs are, for the trigger's name «Ещё 9 частей отчёта»: a report's parts unless said. */
-  noun?: Forms;
+  /** What the tabs are, for the trigger's name «Ещё 9 частей отчёта» — a noun of `NOUNS` (shared/text.ts). */
+  noun: Forms;
 }
 
 export interface CountTabsProps {
@@ -144,7 +149,7 @@ export function CountTabs({ value, onValueChange, tabs, label, children, sticky 
     <Tabs value={value} onValueChange={onValueChange} className={cn("gap-0", sticky ? "contents" : className)}>
       <TabsList ref={list} variant="line" aria-label={label} data-sticky={sticky ? "" : undefined} className={cn("justify-start", sticky && STICKY_LIST, sticky && className)}>
         {shown.map((tab) => (
-          <TabsTrigger key={tab.value} value={tab.value} className={cn("flex-none gap-1.5 px-2", tab.count === 0 && ZERO_TAB, sticky && STICKY_TRIGGER)}>
+          <TabsTrigger key={tab.value} value={tab.value} className={cn("flex-none gap-1.5 px-2", TAB_INK, tab.count === 0 && ZERO_TAB, sticky && STICKY_TRIGGER)}>
             {tab.label}
             <TabCount n={tab.count} />
           </TabsTrigger>
@@ -153,7 +158,7 @@ export function CountTabs({ value, onValueChange, tabs, label, children, sticky 
       {overflow && folds.length > 0 && (
         <div ref={more} data-slot="tabs-more" className={cn("flex w-16 shrink-0 items-center pl-1", STICKY_MORE)}>
           <Menu label={overflow.label} groups={[folds.map((t) => ({ id: t.value, label: t.count === null ? t.label : `${t.label} ${num(t.count)}`, onSelect: () => onValueChange(t.value) }))]}>
-            <Button variant="ghost" size="sm" aria-label={moreTabsName(folds.length, overflow.noun)} className="w-full px-2 font-medium text-foreground/60 hover:text-foreground">
+            <Button variant="ghost" size="sm" aria-label={moreTabsName(folds.length, overflow.noun)} className={cn("w-full px-2 font-medium hover:text-foreground", MORE_INK)}>
               <span>{MORE_TABS}</span> <span className="tabular-nums">{num(folds.length)}</span>
             </Button>
           </Menu>

@@ -19,14 +19,15 @@ const fx = fixtureApp({ only: [N] });
 afterAll(() => fx.close());
 const run = { ...readRun(fx.dirOf(N)), key: keyOf(N) };
 const critic = run.findings.find((f) => f.launch && f.source !== "own") as Finding;
-/** The widest real fact line: both enums, a report, a stage with its pass, a place (p2-final-findings-narrow.png's craft-1). */
-const finding: Finding = { ...critic, confidence: "med", cause: "component", stage: "p1-map", location: "src/web/accounts/page.tsx:17" };
+/** The widest real fact line: both enums, a report whose name carries no stage, a stage with its pass, a place
+ * (p2-final-findings-narrow.png's craft-1). */
+const finding: Finding = { ...critic, launchName: "craft · accounts", confidence: "med", cause: "component", stage: "p1-map", location: "src/web/accounts/page.tsx:17" };
 
-const show = (f: Finding = finding) =>
+const show = (f: Finding = finding, report?: string) =>
   render(
     <MemoryRouter>
       <UiProvider>
-        <FindingArticle run={run} finding={f} now={NOW} inRow />
+        <FindingArticle run={run} finding={f} now={NOW} inRow report={report} />
       </UiProvider>
     </MemoryRouter>,
   );
@@ -40,9 +41,46 @@ describe("p2-assess-critic-improve#improve-1 (1): the fact line", () => {
   test("every fact with its label: the critic's two enums read as phrases that name it, then «отчёт», «этап», «место»", () => {
     const { container } = show();
     const texts = facts(container).map(own);
-    expect(texts).toEqual(["критик скорее уверен", "правка в общем компоненте", `отчёт ${finding.launchName}`, "этап проход 1 · карта", "место src/web/accounts/page.tsx:17"]);
-    expect(texts.map(words)).toEqual([3, 4, 1 + words(finding.launchName), 5, 2]);
+    expect(texts).toEqual(["критик скорее уверен", "правка в общем компоненте", "отчёт «craft · accounts»", "этап проход 1 · карта", "место src/web/accounts/page.tsx:17"]);
+    expect(texts.map(words)).toEqual([3, 4, 4, 5, 2]);
     expect(FACT.stage).toBe("этап");
+  });
+
+  describe("p3-review-critic-craft-2#craft-1: where each fact ends — the report's name set off in quotes, each fact once", () => {
+    test("the report's name in «», its link inside them: its own «·» never reads as the line's", () => {
+      const { container } = show();
+      const report = facts(container)[2];
+      const link = report.querySelector("a") as HTMLElement;
+      expect(link).toHaveTextContent(/^craft · accounts$/);
+      expect(link.previousSibling?.textContent).toMatch(/«$/);
+      expect(link.nextSibling?.textContent).toBe("»");
+    });
+
+    test("a name that carries the pass leaves the stage its word: «отчёт «design · check · проход 2» · этап декомпозиция» (units)", () => {
+      const { container } = show({ ...finding, launchName: "design · check · проход 2", stage: "p2-decompose" });
+      const texts = facts(container).map(own);
+      expect(texts.slice(2)).toEqual(["отчёт «design · check · проход 2»", "этап декомпозиция", "место src/web/accounts/page.tsx:17"]);
+      expect(texts.slice(2).map(words)).toEqual([7, 2, 2]);
+      // «проход 2» once on the line
+      expect(texts.join(" ").match(/проход 2/g)).toHaveLength(1);
+    });
+
+    test("a name that carries the whole stage leaves «этап» out: «отчёт «craft · проход 1 · ревью»»", () => {
+      const { container } = show({ ...finding, launchName: "craft · проход 1 · ревью", stage: "p1-review" });
+      expect(facts(container).map(own).slice(2)).toEqual(["отчёт «craft · проход 1 · ревью»", "место src/web/accounts/page.tsx:17"]);
+    });
+
+    test("inside the report it names, «отчёт» is left out — a link to the page the user is on carries nothing (reports)", () => {
+      const host = { ...finding, launchName: "craft · проход 1 · ревью", stage: "p1-review" };
+      const { container } = show(host, host.launch as string);
+      const texts = facts(container).map(own);
+      expect(texts).toEqual(["критик скорее уверен", "правка в общем компоненте", "место src/web/accounts/page.tsx:17"]);
+      expect(texts.map(words)).toEqual([3, 4, 2]);
+      expect((container.querySelector("[data-slot=finding-facts]") as HTMLElement).querySelector("a")).toBeNull();
+      // another report's finding inside that reader keeps its report
+      const { container: other } = show(finding, "p9-review-critic-code");
+      expect(facts(other).map(own)[2]).toBe("отчёт «craft · accounts»");
+    });
   });
 
   test("a stage the record lacks keeps its label: «этап не записано»", () => {

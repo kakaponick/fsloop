@@ -10,7 +10,7 @@ import { describe, expect, test, vi } from "vitest";
 import { LIVENESS } from "../../shared/liveness.ts";
 import { SEVERITY, UNIT_STATE } from "../../shared/states.ts";
 import { Button } from "@/components/ui/button";
-import { applyStylesheet } from "../app/layout-testing.ts";
+import { applyStylesheet, innerWidth, leftEdge } from "../app/layout-testing.ts";
 import { AppDialog } from "./dialog.tsx";
 import { keyLabel, Keys } from "./kbd.tsx";
 import { copyItem, copyLabel, Menu, PLACE_WHAT } from "./menu.tsx";
@@ -107,6 +107,27 @@ describe("tooltip and glossary", () => {
     await user.tab();
     const tip = await screen.findByRole("tooltip");
     expect(tip).toHaveTextContent("Найти находку/");
+  });
+
+  test("p3-review-critic-craft#craft-5: a hint opens on the side its caller names — below, where what stands above the control stays in view; above by default", async () => {
+    const user = userEvent.setup();
+    const view = renderUi(
+      <Hint label="Оценить клавишей" keys={["Digit1"]} side="bottom">
+        <Button>согласен</Button>
+      </Hint>,
+    );
+    await user.tab();
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/^Оценить клавишей1$/);
+    expect(document.querySelector("[data-slot=tooltip-content]")).toHaveAttribute("data-side", "bottom");
+    view.unmount();
+    renderUi(
+      <Hint label="Найти находку">
+        <Button>Найти</Button>
+      </Hint>,
+    );
+    await user.tab();
+    await screen.findByRole("tooltip");
+    expect(document.querySelector("[data-slot=tooltip-content]")).toHaveAttribute("data-side", "top");
   });
 
   test("a glossary keeps its bounds: at most 8 entries of at most 80 characters", () => {
@@ -234,6 +255,41 @@ describe("select and combobox", () => {
     // one line in muted ink (light #6d6d69), cut at its 18 rem cap with an ellipsis — its box is the option's one line
     expect([s.whiteSpace, s.overflow, s.textOverflow, s.color, s.maxWidth]).toEqual(["nowrap", "hidden", "ellipsis", "rgb(109, 109, 105)", "288px"]);
     expect(getComputedStyle(second.previousElementSibling as HTMLElement).color).not.toBe("rgb(109, 109, 105)");
+  });
+
+  test("p3-review-critic-craft-2#craft-4: the counts stand in one right-aligned column — the option's text box spans the item, so every count ends at the same x", async () => {
+    const user = userEvent.setup();
+    renderUi(
+      <CountSelect
+        label="Вид"
+        value="all"
+        onValueChange={() => {}}
+        options={[
+          { value: "all", label: "Все", count: 42 },
+          { value: "work", label: "В работе", detail: "пишется, проверяется, отладка, вливается", count: 2 },
+          { value: "todo", label: "Не начаты", count: 9 },
+          { value: "blocked", label: "Заблокированы", count: 1 },
+          { value: "committed", label: "Закоммичены", count: 30 },
+        ]}
+      />,
+    );
+    await user.click(screen.getByRole("combobox", { name: "Вид" }));
+    const options = await screen.findAllByRole("option");
+    await applyStylesheet();
+    // an open list whose items are 240 px wide: the item's padding is 6 px before, 32 px after (the check's room)
+    const ITEM = 240;
+    for (const option of options) {
+      // the library's item text — the last span, which the option does not otherwise size — holds the row
+      const text = option.lastElementChild as HTMLElement;
+      const row = text.firstElementChild as HTMLElement;
+      const count = row.lastElementChild as HTMLElement;
+      expect(count).toHaveTextContent(/^\d+$/);
+      // the text box grows to the item's content box, the row fills it, the count is pushed to its end
+      expect(getComputedStyle(text).flexGrow).toBe("1");
+      expect(getComputedStyle(row).width).toBe("100%");
+      expect(getComputedStyle(count).marginLeft).toBe("auto");
+      expect(leftEdge(row, option) + innerWidth(row, option, ITEM)).toBe(208);
+    }
   });
 });
 

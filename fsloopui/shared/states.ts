@@ -2,7 +2,7 @@
 // full label, tone, rank, glossary meaning. Card, header, cell, filter, sort and glossary read these; no surface
 // writes its own words for a state. Tones per Conventions 2: work in progress neutral, done green, what waits
 // for the user amber, severity the one ranked category.
-import { duration } from "./text.ts";
+import { duration, MINUTE } from "./text.ts";
 
 export type Tone = "neutral" | "success" | "warning" | "danger";
 
@@ -246,8 +246,8 @@ export function launchState(
     return { state: "running", label: age === null ? LAUNCH_STATE.running.compact : `${LAUNCH_STATE.running.compact} · ${duration(age, { compact: true })}`, tone: LAUNCH_STATE.running.tone };
   }
   if (l.reportMissing) return { state: "missing", label: LAUNCH_STATE.missing.compact, tone: LAUNCH_STATE.missing.tone };
-  // how long it took, through the one duration: «за 9 мин»; under a minute «меньше чем за минуту», never seconds
+  // how long it took, through the one duration: «за 9 мин»; under its own minute «меньше чем за минуту», never seconds
   const ms = l.seconds ? l.seconds * 1000 : null;
-  const took = ms === null ? "" : ms < 60_000 ? " меньше чем за минуту" : ` за ${duration(ms, { compact: true })}`;
+  const took = ms === null ? "" : ms < MINUTE ? " меньше чем за минуту" : ` за ${duration(ms, { compact: true })}`;
   return { state: "done", label: `${LAUNCH_STATE.done.compact}${took}`, tone: LAUNCH_STATE.done.tone };
 }

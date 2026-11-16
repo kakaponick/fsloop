@@ -72,7 +72,9 @@ export function CountSelect({ label, value, onValueChange, options, className }:
       <SelectContent position="popper" align="start">
         <SelectGroup>
           {options.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
+            // the library wraps an item's children in its item text, the last span, sized by its content: grown to the
+            // item's width, it gives the row the whole line, so every count ends in one column (craft-4)
+            <SelectItem key={option.value} value={option.value} className="*:[span]:last:flex-1">
               <span className="flex w-full items-baseline gap-4">
                 <OptionText option={option} />
                 <OptionCount n={option.count} />

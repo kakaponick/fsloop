@@ -377,7 +377,7 @@ describe("tabs with counts", () => {
       });
     const Strip = ({ initial = "t0" }: { initial?: string }) => {
       const [value, setValue] = useState(initial);
-      return <CountTabs sticky value={value} onValueChange={setValue} tabs={wide} label="Части отчёта" className="w-auto min-w-0 flex-1" overflow={{ label: "Другие части отчёта", keep: ["t16"] }} />;
+      return <CountTabs sticky value={value} onValueChange={setValue} tabs={wide} label="Части отчёта" className="w-auto min-w-0 flex-1" overflow={{ label: "Другие части отчёта", keep: ["t16"], noun: NOUNS.reportPart }} />;
     };
     // by the DOM, not the accessibility tree: an open menu hides the rest of the page from it
     const shown = () => [...document.querySelectorAll('[role=tablist][aria-label="Части отчёта"] [role=tab]')].map((t) => (t.textContent ?? "").replace(/\d+$/, ""));
@@ -413,12 +413,13 @@ describe("tabs with counts", () => {
       }
     });
 
-    test("improve-5 (2) · «Ещё N»'s name says what it folds, its noun agreed: «Ещё 9 частей отчёта»", () => {
-      const name = moreTabsName(9);
+    test("improve-5 (2), p3-review-critic-code#code-21 · «Ещё N»'s name says what it folds in the noun its caller passes — a report's parts are a word of shared/text.ts NOUNS: «Ещё 9 частей отчёта»", () => {
+      expect(NOUNS.reportPart).toEqual(["часть отчёта", "части отчёта", "частей отчёта"]);
+      const name = moreTabsName(9, NOUNS.reportPart);
       expect(name).toBe("Ещё 9 частей отчёта");
       expect(name.split(" ")).toHaveLength(4);
-      expect(moreTabsName(2)).toBe("Ещё 2 части отчёта");
-      expect(moreTabsName(21)).toBe("Ещё 21 часть отчёта");
+      expect(moreTabsName(2, NOUNS.reportPart)).toBe("Ещё 2 части отчёта");
+      expect(moreTabsName(21, NOUNS.reportPart)).toBe("Ещё 21 часть отчёта");
       expect(moreTabsName(3, ["раздел", "раздела", "разделов"])).toBe("Ещё 3 раздела");
     });
 

@@ -9,6 +9,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterAll, describe, expect, test } from "vitest";
 import { readRun } from "../../server/run.ts";
 import { UiProvider } from "../ui/provider.tsx";
+import { applyStylesheet, usedBlockSize } from "../app/layout-testing.ts";
 import { runPath } from "../app/routes.ts";
 import { fixtureApp, keyOf, NOW } from "../app/testing.tsx";
 import { OPEN_FRAME } from "../ui/marks.tsx";
@@ -22,6 +23,13 @@ const fx = fixtureApp({ only: [N] });
 afterAll(() => fx.close());
 const run = { ...readRun(fx.dirOf(N)), key: KEY };
 const five = run.findings.slice(0, 5);
+
+/** A row line's box as the browser draws it: its padding, border and margin on every side, and its block size. */
+const rowBox = (el: Element) => {
+  const s = getComputedStyle(el);
+  const sides = ["Top", "Right", "Bottom", "Left"] as const;
+  return { padding: sides.map((k) => s[`padding${k}`]), border: sides.map((k) => s[`border${k}Width`]), margin: sides.map((k) => s[`margin${k}`]), block: usedBlockSize(el) };
+};
 
 const show = (items: Parameters<typeof ExpandingFindings>[0]["items"], ruled = true) =>
   render(
@@ -74,19 +82,27 @@ describe("gap 3: the shared expanding finding rows", () => {
     expect(lines[0]).toHaveAttribute("data-state", "open");
   });
 
-  test("an id the run does not hold reads «не найдена» in the row's place — no chevron, no stop", () => {
+  test("an id the run does not hold reads «не найдена» in the row's place — no chevron, no stop", async () => {
     const { container } = show([five[0], "p9-review-critic-code#code-99"]);
     const missing = container.querySelector("li[data-finding='p9-review-critic-code#code-99']") as HTMLElement;
     expect(missing).toHaveTextContent("находка p9-review-critic-code#code-99 не найдена");
-    // the row's own 32 px line, aligned past the chevrons' column (Strict 1)
-    expect(missing.firstElementChild).toHaveClass("h-8", "pl-8");
+    // p3-review-critic-code#code-16: the row's own 32 px line, its text starting where a row's text starts — past the
+    // chevrons' column — by the product's stylesheet, never by a class name (Strict 1)
+    await applyStylesheet();
+    const line = missing.firstElementChild as HTMLElement;
+    expect(usedBlockSize(line)).toBe(32);
     const row = container.querySelector("[data-slot=finding-line]") as HTMLElement;
-    expect(row).toHaveClass("pl-1");
+    const s = getComputedStyle(row);
+    const track = /^([\d.]+)(rem|px)\b/.exec(s.gridTemplateColumns) as RegExpExecArray;
+    const chevrons = Number(track[1]) * (track[2] === "rem" ? 16 : 1);
+    const rowText = Number.parseFloat(s.paddingLeft) + chevrons + Number.parseFloat(s.columnGap);
+    expect(Number.parseFloat(getComputedStyle(line).paddingLeft)).toBe(rowText);
+    expect(rowText).toBe(32);
     expect(within(missing).queryByRole("button")).toBeNull();
     expect(screen.getAllByRole("button", { name: /^Развернуть находку / })).toHaveLength(1);
   });
 
-  test("ruled — a hairline between rows, a hover and an open ground (a report's list); plain — none (a unit's detail, already on muted ground)", () => {
+  test("ruled — a hairline between rows, a hover and an open ground (a report's list); plain — none (a unit's detail, already on muted ground)", async () => {
     const ruled = show(five);
     expect(ruled.container.querySelector("[data-slot=report-findings]")).toHaveClass("border-t");
     expect(ruled.container.querySelector("[data-slot=report-findings] > li")).toHaveClass("border-b");
@@ -96,8 +112,9 @@ describe("gap 3: the shared expanding finding rows", () => {
     expect(plain.container.querySelector("[data-slot=report-findings]")).not.toHaveClass("border-t");
     expect(plain.container.querySelector("[data-slot=report-findings] > li")).not.toHaveClass("border-b");
     expect(plain.container.querySelector("[data-slot=finding-line]")).not.toHaveClass("hover:bg-muted");
-    // the row's box is one fixed line either way
-    for (const r of plain.container.querySelectorAll("[data-slot=finding-row]")) expect(r).toHaveClass("h-8");
+    // the row's box is one fixed 32 px line either way — by the product's stylesheet, never a class name (code-16)
+    await applyStylesheet();
+    for (const r of plain.container.querySelectorAll("[data-slot=finding-row]")) expect(usedBlockSize(r)).toBe(32);
   });
 
   test("p2-verdict-critic-craft-verdict#craft-6: plain, the row's hover and the chevron's hover and open ground step off the muted ground — ink over it, never muted on muted", async () => {
@@ -128,9 +145,12 @@ describe("gap 3: the shared expanding finding rows", () => {
       expect(line).toHaveClass(OPEN_FRAME.muted, OPEN_FRAME.row);
       expect(detail).toHaveClass(OPEN_FRAME.muted, OPEN_FRAME.detail);
       for (const el of [line, detail]) expect([...el.classList].filter((c) => /bg-muted\/40/.test(c))).toEqual([]);
-      // a closed row draws no frame; the frame is inset, so opening changes no box
+      // a closed row draws no frame; the frame is inset, so opening changes no box — p3-review-critic-code#code-16: the
+      // open row's box against a closed one's, by the product's stylesheet
       expect(closed).not.toHaveClass(OPEN_FRAME.row);
-      expect([...line.classList].filter((c) => /^(p[xytrbl]?|m[xytrbl]?|border)-/.test(c))).toEqual([...closed.classList].filter((c) => /^(p[xytrbl]?|m[xytrbl]?|border)-/.test(c)));
+      await applyStylesheet();
+      expect(rowBox(line)).toEqual(rowBox(closed));
+      expect(getComputedStyle(line).boxShadow).toMatch(/inset/);
       view.unmount();
     }
   });

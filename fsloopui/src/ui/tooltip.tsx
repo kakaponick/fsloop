@@ -12,15 +12,18 @@ export interface HintProps {
   label: string;
   /** Its shortcut, as physical key codes. */
   keys?: readonly string[];
+  /** Where it opens: above the control unless said — below where what stands above the control is what the control
+   * answers (the verdict toggles under «Ваша оценка»; craft-5). */
+  side?: "top" | "bottom";
   children: ReactNode;
 }
 
 /** The name of an icon-only control, or a blocked action's reason. */
-export function Hint({ label, keys, children }: HintProps) {
+export function Hint({ label, keys, side = "top", children }: HintProps) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>{children}</TooltipTrigger>
-      <TooltipContent>
+      <TooltipContent side={side}>
         {label}
         {keys && keys.length > 0 && <Keys codes={keys} />}
       </TooltipContent>

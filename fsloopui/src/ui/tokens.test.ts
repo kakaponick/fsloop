@@ -5,6 +5,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
+import { MORE_INK, TAB_INK, ZERO_TAB } from "./count-tabs.tsx";
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8").replace(/\r\n/g, "\n");
 const css = read("../styles/index.css");
@@ -110,6 +111,39 @@ describe("theme tokens", () => {
       if (type) expect(theme.has(`--text-${type[1]}`), `${file}: ${token}`).toBe(true);
     }
   });
+});
+
+/** A text utility's colour in a theme as hex — `text-<token>` or `text-<token>/<alpha>`, its `dark:` form in the dark
+ * set when it has one — the alpha blended over the page's paper, as the browser paints it. */
+function textInk(classes: string, set: Map<string, string>, isDark: boolean): string {
+  const of = (prefix: string) => classes.split(/\s+/).map((c) => new RegExp(`^${prefix}text-([a-z][\\w-]*?)(?:/(\\d+))?$`).exec(c)).find((m) => m && colours.has(m[1]));
+  const m = (isDark ? of("dark:") : null) ?? of("");
+  if (!m) throw new Error(`no text colour in «${classes}»`);
+  const alpha = m[2] ? Number(m[2]) / 100 : 1;
+  const [fr, fg, fb] = hex(set.get(`--${m[1]}`)!);
+  const [br, bg, bb] = hex(set.get("--background")!);
+  const mix = (f: number, b: number) => Math.round(f * alpha + b * (1 - alpha));
+  return `#${[mix(fr, br), mix(fg, bg), mix(fb, bb)].map((n) => n.toString(16).padStart(2, "0")).join("")}`;
+}
+
+describe("p3-review-critic-craft-2#craft-3: the tabs' inks, computed from the tokens — every tab holds 4.5:1 on the page, a zero tab quieter than a tab that holds something", () => {
+  for (const [name, set] of [
+    ["light", light],
+    ["dark", dark],
+  ] as const) {
+    test(`${name}: the chosen tab in ink, then a tab that holds something, then a zero tab — each ≥ 4.5:1; «Ещё N» ≥ 4.5:1`, () => {
+      const on = (classes: string) => contrast(textInk(classes, set, name === "dark"), set.get("--background")!);
+      const [chosen, holds, zero, more] = [on("text-foreground"), on(TAB_INK), on(ZERO_TAB), on(MORE_INK)];
+      for (const [what, ratio] of [
+        ["a tab that holds something", holds],
+        ["a zero tab", zero],
+        ["«Ещё N»", more],
+      ] as const)
+        expect(ratio, what).toBeGreaterThanOrEqual(4.5);
+      expect(zero).toBeLessThan(holds);
+      expect(holds).toBeLessThan(chosen);
+    });
+  }
 });
 
 describe("contrast, computed from the tokens", () => {

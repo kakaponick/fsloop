@@ -146,8 +146,9 @@ describe("a critic's report", () => {
     const rows = list.querySelectorAll<HTMLElement>("[data-slot=finding-row]");
     expect(rows).toHaveLength(18);
     expect(list.querySelectorAll("[data-slot=finding-article]")).toHaveLength(0);
-    // each row's box is one fixed line, so the list never jumps as it renders
-    for (const r of rows) expect(r).toHaveClass("h-8");
+    // each row's box is one fixed 32 px line, so the list never jumps as it renders — by the product's stylesheet (code-16)
+    await applyStylesheet();
+    for (const r of rows) expect(usedBlockSize(r)).toBe(32);
     const items = [...list.querySelectorAll<HTMLElement>(":scope > li")];
     const first = items[0];
     const toggle = within(first).getByRole("button", { name: `Развернуть находку ${first.dataset.finding?.split("#")[1]}` });
@@ -163,6 +164,18 @@ describe("a critic's report", () => {
     expect(list.querySelectorAll("[data-slot=finding-article]")).toHaveLength(2);
     await user.click(toggle);
     expect(list.querySelectorAll("[data-slot=finding-article]")).toHaveLength(1);
+  });
+
+  test("p3-review-critic-craft-2#craft-1: an opened finding's fact line leaves out «отчёт» — the report the user is reading; a finding of another report in «Сравнение» keeps it", async () => {
+    const user = userEvent.setup({ delay: null });
+    open("p1-map-craft-accounts");
+    const list = reader().querySelector("[data-slot=report-findings]") as HTMLElement;
+    const first = list.querySelector<HTMLElement>(":scope > li") as HTMLElement;
+    await user.click(within(first).getByRole("button", { name: /^Развернуть находку / }));
+    const line = first.querySelector("[data-slot=finding-facts]") as HTMLElement;
+    expect(line).not.toHaveTextContent(/отчёт/);
+    expect(line.querySelector("a")).toBeNull();
+    expect(line).toHaveTextContent(/место /);
   });
 
   test("craft-3: the findings list is one Tab stop — ↑/↓ move, Enter opens and closes; `aria-controls` only while the panel exists", async () => {
@@ -586,6 +599,20 @@ describe("cand-3 (u6 shape): a craft report against the surface's earlier one", 
     await user.keyboard("{ArrowDown}{Enter}");
     expect(chevrons[1]).toHaveAttribute("aria-expanded", "true");
     expect(gone.querySelector("[data-slot=finding-detail]")).not.toBeNull();
+  });
+
+  test("p3-review-critic-craft-2#craft-1: in «Сравнение» a finding of the earlier report keeps «отчёт» and its link; one of the report being read leaves it out", async () => {
+    const user = userEvent.setup({ delay: null });
+    open(later.id, { tab: "compare" }, over);
+    const panel = within(reader()).getByRole("tabpanel");
+    const [fresh, gone] = ["compare-new", "compare-gone"].map((slot) => panel.querySelector<HTMLElement>(`ol[data-slot=${slot}]`) as HTMLElement);
+    await user.click(within(gone).getAllByRole("button", { name: /^Развернуть находку / })[0]);
+    const earlierLine = gone.querySelector("[data-slot=finding-facts]") as HTMLElement;
+    const name = own[0].launchName;
+    expect(earlierLine).toHaveTextContent(`отчёт «${name}»`);
+    expect(within(earlierLine).getByRole("link", { name })).toHaveAttribute("href", runPath(KEY, { view: "reports", report: earlier.id }));
+    await user.click(within(fresh).getAllByRole("button", { name: /^Развернуть находку / })[0]);
+    expect(fresh.querySelector("[data-slot=finding-facts]")).not.toHaveTextContent(/отчёт/);
   });
 
   test("cand-3 (u6 shape): the earliest report of a surface has nothing to compare with — no «Сравнение»", () => {

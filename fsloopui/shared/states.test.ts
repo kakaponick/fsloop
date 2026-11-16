@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { OUTCOMES as FSL_OUTCOMES, STEPS as FSL_STEPS } from "../../skills/fsloop/fsl.mjs";
 import { LIVENESS } from "./liveness.ts";
+import { duration, MINUTE } from "./text.ts";
 import { agentKind, CHECK_OUTCOME, checkOutcome, DECISION, FINDING_STATUS, LAUNCH_STATE, launchName, launchNames, launchState, PASS_OUTCOME, reportWord, SEVERITY, stageOf, STAGE_WORDS, STEPS, UNIT_STATE, VERDICT } from "./states.ts";
 
 describe("glossary lines (ui → Glossary → Bound)", () => {
@@ -122,6 +123,16 @@ describe("launches", () => {
     expect(words(done(40).label)).toBe(5);
     // no time recorded: the word alone
     expect(done(null).label).toBe("завершён");
+  });
+
+  test("p3-review-critic-code#code-13: «меньше чем за минуту» is duration()'s own threshold — `MINUTE` of shared/text.ts, never a copy", () => {
+    expect(MINUTE).toBe(60_000);
+    const done = (seconds: number) => launchState({ running: false, seconds }, NOW).label;
+    // one second under the threshold, and the threshold itself: the launch and the duration read the same side
+    expect(done(MINUTE / 1000 - 1)).toBe("завершён меньше чем за минуту");
+    expect(duration(MINUTE - 1000)).toBe("меньше минуты");
+    expect(done(MINUTE / 1000)).toBe("завершён за 1 мин");
+    expect(duration(MINUTE)).toBe("1 мин");
   });
 
   test("a critic's report is «отчёт критика», any other «отчёт запуска»", () => {

@@ -20,6 +20,8 @@ export const NOUNS = {
   decision: ["решение", "решения", "решений"],
   pass: ["проход", "прохода", "проходов"],
   token: ["токен", "токена", "токенов"],
+  /** A part of a report the reader shows as a tab: «Ещё 9 частей отчёта». */
+  reportPart: ["часть отчёта", "части отчёта", "частей отчёта"],
 } as const satisfies Record<string, Forms>;
 
 export function plural(n: number, forms: Forms): string {
@@ -41,7 +43,8 @@ export function num(n: number): string {
 /** «3 находки» — the number first, the noun agreed with it. */
 export const count = (n: number, forms: Forms): string => `${num(n)} ${plural(n, forms)}`;
 
-const MINUTE = 60_000;
+/** The shortest span a duration counts: under it, «меньше минуты» — the one threshold every reader of a span keeps. */
+export const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 

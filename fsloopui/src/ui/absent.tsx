@@ -83,21 +83,37 @@ export type Holds = { kind: NumberedKind; range: readonly [string, string] | nul
 /** The plural a list of units takes before its ids. */
 const UNITS_WORD = "юниты";
 
-/** A run's unit ids as ranges, one per prefix in the run's order: «u1–u32, f1–f10»; an id with no number stands alone. */
+/** A run's unit ids as ranges, the prefixes in the run's order: «u1–u32, f1–f10» — a range only over numbers that
+ * follow one another, so a gap splits it («u1–u19, u21–u32» without u20), each end the id as the run writes it
+ * («u01–u03»); an id with no number stands alone (code-31). */
 function idRanges(ids: readonly string[]): string {
-  const groups = new Map<string, { min: number; max: number } | null>();
+  // a numbered prefix and a bare id keep apart, so an id «u» never swallows the prefix «u»
+  const groups = new Map<string, { n: number; id: string }[] | null>();
   for (const id of ids) {
     const m = /^(\D*)(\d+)$/.exec(id);
-    if (!m) {
-      groups.set(id, null);
+    if (!m) groups.set(`=${id}`, null);
+    else groups.set(`#${m[1]}`, [...(groups.get(`#${m[1]}`) ?? []), { n: Number(m[2]), id }]);
+  }
+  const out: string[] = [];
+  for (const [key, list] of groups) {
+    if (!list) {
+      out.push(key.slice(1));
       continue;
     }
-    const n = Number(m[2]);
-    const g = groups.get(m[1]);
-    if (g) groups.set(m[1], { min: Math.min(g.min, n), max: Math.max(g.max, n) });
-    else groups.set(m[1], { min: n, max: n });
+    const sorted = [...list].sort((a, b) => a.n - b.n);
+    let [start, end] = [sorted[0], sorted[0]];
+    const close = () => out.push(start === end ? start.id : `${start.id}–${end.id}`);
+    for (const x of sorted.slice(1)) {
+      if (x.n === end.n) continue;
+      if (x.n === end.n + 1) end = x;
+      else {
+        close();
+        [start, end] = [x, x];
+      }
+    }
+    close();
   }
-  return [...groups].map(([prefix, g]) => (!g ? prefix : g.min === g.max ? `${prefix}${g.min}` : `${prefix}${g.min}–${prefix}${g.max}`)).join(", ");
+  return out.join(", ");
 }
 
 /** What the run holds, after a «не найдено»: «: в этом прогоне решения #1–#43», «: в этом прогоне соглашение 1»,
@@ -128,13 +144,14 @@ export type MissingLineProps = Holds & { id: string; onClose: () => void; slot: 
 /** An address that names an object its list does not hold (ux 1: what went wrong, what the run holds, the way out):
  * «Решение #99 не найдено: в этом прогоне решения #1–#43.» and «Закрыть», which the caller turns into dropping the
  * address and focusing its list. One line, so it sits in a reserved one: the sentence truncates, whole in its title,
- * and «Закрыть» keeps its box. A polite status, so a screen reader hears it once. */
+ * and «Закрыть» keeps its box. A polite status, so a screen reader hears it once. The sentence reads in one ink:
+ * here «не найден» is the news, not an absent value, so what is missing is as loud as what the run holds (craft-15). */
 export function MissingLine({ id, onClose, slot, className, ...holds }: MissingLineProps) {
   const of = holds as Holds;
   return (
     <p role="status" data-slot={slot} className={cn("m-0 flex max-w-measure min-w-0 items-baseline gap-x-2", className)}>
-      <span data-slot="missing-sentence" className="min-w-0 truncate" title={missingText(of, id)}>
-        <NotFound kind={of.kind} id={id} start />
+      <span data-slot="missing-sentence" className="min-w-0 truncate text-foreground" title={missingText(of, id)}>
+        <NotFound kind={of.kind} id={id} start className="text-foreground" />
         {heldText(of)}.
       </span>
       <Button variant="ghost" size="xs" className="shrink-0" onClick={onClose}>

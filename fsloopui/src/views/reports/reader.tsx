@@ -78,7 +78,7 @@ export const conventionLinkLabel = (n: number): string => `Соглашение 
 export const SECTIONS_LABEL = "Части отчёта";
 export const MORE_SECTIONS = "Другие части отчёта";
 /** The strip's fold: «Файл отчёта», where an unread line sends the user, never folds (craft-1). */
-const SECTIONS_OVERFLOW = { label: MORE_SECTIONS, keep: [FILE_TAB] } as const;
+const SECTIONS_OVERFLOW = { label: MORE_SECTIONS, keep: [FILE_TAB], noun: NOUNS.reportPart } as const;
 export const PREV_REPORT = "Предыдущий отчёт";
 export const NEXT_REPORT = "Следующий отчёт";
 export const NO_PREV = "Предыдущего отчёта нет: этот — первый в списке";
@@ -459,7 +459,7 @@ function Body({ run, launch: l, tab, findings, earlier, frames, framesTitle, now
         <p className="m-0 text-muted-foreground">{emptyTabText(reportKind(l))}</p>
       </div>
     );
-  if (body.kind === "findings") return <FindingsBody run={run} findings={findings} now={now} />;
+  if (body.kind === "findings") return <FindingsBody run={run} report={l.id} findings={findings} now={now} />;
   if (body.kind === "parts")
     return (
       <div className="flex max-w-measure flex-col gap-4">
@@ -564,7 +564,7 @@ function CompareBody({ run, launch: l, earlier, findings, now }: { run: LoadedRu
           <h3 className="m-0 text-xs font-normal text-muted-foreground">
             {g.title} — {count(g.rows.length, NOUNS.finding)}
           </h3>
-          {g.rows.length > 0 && <ExpandingFindings run={run} items={g.rows} label={g.label} now={now} slot={`compare-${g.key}`} />}
+          {g.rows.length > 0 && <ExpandingFindings run={run} items={g.rows} label={g.label} now={now} slot={`compare-${g.key}`} report={l.id} />}
         </section>
       ))}
     </div>
@@ -640,7 +640,7 @@ const ALL = "all";
  * the article (`@/finding` → ExpandingFindings: one Tab stop, ↑/↓, Enter; craft-3) — several may stay open, so the
  * list reads like «Находки» and the whole report scans in a screen (rules/ui → Tables 3) — critical first, the
  * critic's order inside each severity (Conventions 2). */
-function FindingsBody({ run, findings, now }: { run: LoadedRun; findings: Finding[]; now: number }) {
+function FindingsBody({ run, report, findings, now }: { run: LoadedRun; report: string; findings: Finding[]; now: number }) {
   const [stored, setStored] = usePref<string>(SEVERITY_PREF, ALL);
   const counts = severityCounts(findings);
   // a severity this report has none of reads «все» here and stays chosen for the next report
@@ -674,7 +674,7 @@ function FindingsBody({ run, findings, now }: { run: LoadedRun; findings: Findin
           </p>
         </div>
       )}
-      <ExpandingFindings run={run} items={rows} label={FINDINGS_LIST_LABEL} now={now} slot="report-findings" />
+      <ExpandingFindings run={run} items={rows} label={FINDINGS_LIST_LABEL} now={now} slot="report-findings" report={report} />
     </div>
   );
 }
