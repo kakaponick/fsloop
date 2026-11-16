@@ -4,15 +4,17 @@
 // where it differs from its group's most common kind, then its state as plain text — «2 major · 5 minor», «работает ·
 // 4 мин» — with a dot
 // only where the state asks for the operator («нет отчёта»): severity's tones live in the reader and the overview,
-// where they rank something (DESIGN.md → The Signal-Only Rule). The rail is height-bounded and scrolls inside; the
-// held-order strip under it keeps its line whether anything waits or not (Strict 1).
+// where they rank something (DESIGN.md → The Signal-Only Rule). A group of implementers names the result they share
+// once, on a line under its heading. The rail is height-bounded and scrolls inside, its stage heading pinned at the
+// very top of the scroller (craft-9: no padding above it); the held-order strip under it keeps its line whether
+// anything waits or not (Strict 1).
 import { Fragment, useLayoutEffect, useRef, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { Finding } from "../../../shared/model.ts";
 import { count, NOUNS, num } from "../../../shared/text.ts";
 import { cn } from "@/lib/utils";
 import { copyItem, Dot, flatItem, FlatList, markProps, Menu, OutOfFilter, revealIn } from "@/ui";
-import { commonKind, commonResult, groupsOf, groupTitle, itemState, type HeldItem } from "./model.ts";
+import { commonKind, groupResult, groupsOf, groupTitle, itemState, sharedResultText, type HeldItem } from "./model.ts";
 
 export interface RailProps {
   items: readonly HeldItem[];
@@ -70,7 +72,9 @@ export function Rail({ items, findings, current, outside, arrived, hrefOf, overv
           {...flatItem("")}
           data-slot="rail-overview"
           aria-current={current === null ? "page" : undefined}
-          className={cn("mb-1 flex h-9 shrink-0 items-center", ITEM_CLASS, current === null && "bg-muted shadow-target")}
+          /* its 4 px off the rail's top is its own margin: the scroller has no top padding, which would hold the sticky
+             stage heading down (craft-9) */
+          className={cn("my-1 flex h-9 shrink-0 items-center", ITEM_CLASS, current === null && "bg-muted shadow-target")}
         >
           <span className="truncate">{OVERVIEW_ITEM}</span>
         </Link>
@@ -79,8 +83,12 @@ export function Rail({ items, findings, current, outside, arrived, hrefOf, overv
           const title = groupTitle(group.stage);
           // the kind word only on a row whose kind is not the group's usual one; every row keeps it in its title
           const usual = commonKind(group.items);
-          // likewise an implementer's result: «итог» only where it differs from the one its group shares
-          const result = commonResult(group.items);
+          // likewise an implementer's result: «итог» only where it differs from the one its group shares, which the line
+          // under the heading names once (craft-10)
+          const { of, shared } = groupResult(group.items);
+          const result = shared?.result ?? null;
+          // counted against the heading's own number, so «у 15 из 16» reads beside «16»
+          const resultLine = sharedResultText(shared, group.items.length);
           return (
             <section key={`${group.stage}-${g}`} aria-label={[title.word, title.pass].filter(Boolean).join(", ")} className="flex flex-col">
               <h3 data-slot="rail-heading" className="sticky top-0 z-10 m-0 flex h-7 items-center gap-1.5 bg-background px-2 text-xs font-normal text-muted-foreground">
@@ -91,6 +99,13 @@ export function Rail({ items, findings, current, outside, arrived, hrefOf, overv
                   {num(group.items.length)}
                 </span>
               </h3>
+              {/* a group of two implementers or more: the line stands whatever their results, so a result recorded
+                  late rewrites it in place and moves no row (Strict 1); one 20 px line, truncated, whole in its title */}
+              {of >= 2 && (
+                <p data-slot="rail-result" title={resultLine} className="m-0 h-5 truncate px-2 text-xs/5 text-muted-foreground">
+                  {resultLine}
+                </p>
+              )}
               {group.items.map((item) => {
                 const state = itemState(item, findings, now, { ended: ended.has(item.id), usual: result });
                 const path = pathOf(item.id);

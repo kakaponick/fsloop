@@ -4,8 +4,9 @@
 // ranking of surfaces. Pure functions over the run model: the view and the tests read the same ones.
 import type { Finding, Launch, Run, RunningLaunch, Surface, SurfaceScore } from "../../../shared/model.ts";
 import { agentKind, launchState, stageOf, type Tone } from "../../../shared/states.ts";
-import { count, NOUNS } from "../../../shared/text.ts";
+import { count, NOUNS, num } from "../../../shared/text.ts";
 import type { FilterDef, SearchDef } from "@/table";
+import { ofTotal } from "@/table/status-bar.tsx";
 import { lensOf, reportFindings, reportKind, resultOf, severityCounts, severityText, verdictCounts, verdictText } from "./sections.ts";
 
 /** The view state's id: filters and search per run, history per view. */
@@ -122,17 +123,29 @@ export function commonKind(items: readonly Pick<RailItem, "kind">[]): string | n
   return best;
 }
 
-/** The result most of a group's implementers share, when two or more share it (improve-10 (3)): the rail says
- * «итог: <result>» only on a row whose result differs from it — «итог: done» on 16 rows of one stage ranked nothing. */
-export function commonResult(items: readonly Pick<RailItem, "launch">[]): string | null {
+/** A group's implementers (`of`, the recorded ones) and the result most of them share, when two or more share it
+ * (improve-10 (3)): the rail says «итог: <result>» only on a row whose result differs from it — «итог: done» on 16
+ * rows of one stage ranked nothing — and names the shared one once, under the group's heading (craft-10). */
+export function groupResult(items: readonly Pick<RailItem, "launch">[]): { of: number; shared: { result: string; n: number } | null } {
   const counts = new Map<string, number>();
+  let of = 0;
   for (const i of items) {
-    const result = i.launch && reportKind(i.launch) === "implement" ? resultOf(i.launch) : null;
+    if (!i.launch || reportKind(i.launch) !== "implement") continue;
+    of++;
+    const result = resultOf(i.launch);
     if (result) counts.set(result, (counts.get(result) ?? 0) + 1);
   }
   let best: string | null = null;
   for (const [result, n] of counts) if (best === null || n > (counts.get(best) ?? 0)) best = result;
-  return best !== null && (counts.get(best) ?? 0) >= 2 ? best : null;
+  const n = best === null ? 0 : (counts.get(best) ?? 0);
+  return { of, shared: best !== null && n >= 2 ? { result: best, n } : null };
+}
+
+/** The line under a group's heading: «итог: done — у 15 из 16 отчётов» (of the group's reports, the heading's own
+ * count), or «общего итога нет» where no two share one — then every row says its own. */
+export function sharedResultText(shared: { result: string; n: number } | null, total: number): string {
+  if (!shared) return "общего итога нет";
+  return `итог: ${shared.result} — у ${num(shared.n)} ${ofTotal(total, NOUNS.report)}`;
 }
 
 /** The narrow view's «Отчёт» option for an item: what the rail shows of it — the description, its stage heading and
@@ -223,10 +236,11 @@ export function heldItems(held: Held, items: readonly RailItem[]): { shown: Held
 }
 
 /** The item a `report=` id names: a launch, a running agent, or — once a running agent ended — the launch the run
- * recorded for it (same description, the latest). */
+ * recorded for it: the one whose record names that agent's id, read from the run whenever the page opens (craft-12);
+ * for a record that names none, the one placed while it ran, by description (the latest). */
 export function resolveItem(id: string | null, items: readonly RailItem[], known: Readonly<Record<string, RailItem>>): RailItem | null {
   if (!id) return null;
-  const direct = items.find((i) => i.id === id);
+  const direct = items.find((i) => i.id === id) ?? items.find((i) => i.launch?.agentId === id);
   if (direct) return direct;
   const was = known[id];
   if (was?.running) return [...items].reverse().find((i) => i.launch && i.description === was.description) ?? was;

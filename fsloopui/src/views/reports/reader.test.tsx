@@ -8,6 +8,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, describe, expect, test, vi } from "vitest";
 import type { Finding, Launch, Surface } from "../../../shared/model.ts";
+import { SEVERITY } from "../../../shared/states.ts";
 import { glossaryLines, readPref, writePref } from "@/ui";
 import { applyStylesheet, usedBlockSize } from "../../app/layout-testing.ts";
 import { runPath } from "../../app/routes.ts";
@@ -16,7 +17,7 @@ import { join } from "node:path";
 import { ReportsView } from "./index.tsx";
 import { reportPath, severityShown, SEVERITY_PREF } from "./reader.tsx";
 import { SCORES_GLOSSARY } from "./scores.tsx";
-import { bySeverity, lensGlossary, reportFindings, reportTabs, unparsedText } from "./sections.ts";
+import { bySeverity, lensGlossary, reportFindings, reportTabs, severityCounts, unparsedText } from "./sections.ts";
 import { fixtureApp, handlerReport, keyOf, loadedRun, renderOver, type FetchReport } from "./testing.tsx";
 
 const N = 40;
@@ -320,11 +321,12 @@ describe("a critic's report", () => {
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
-  test("improve-2 (3), design-9: a severity that hides rows says so beside the group — «5 из 30 находок · показать все» — on a line reserved before it", async () => {
+  test("improve-2 (3), design-9, p3-review-critic-code#code-9: a severity that hides rows says so beside the group, the line rendered from `severityShown`'s parts — «5 из 30 находок · показать все» — on a line reserved before it", async () => {
     // Copy 3, 4: the status bar's one form, the noun genitive after «из», then the verb of the click
-    expect(severityShown(5, 30)).toBe("5 из 30 находок · показать все");
-    expect(severityShown(5, 30).split(/\s+/)).toHaveLength(7);
-    expect(severityShown(1, 21)).toBe("1 из 21 находки · показать все");
+    // p3-review-critic-code#code-9: the parts the line renders, and the line they read as one
+    expect(severityShown(5, 30)).toEqual({ count: "5 из 30 находок", verb: "показать все", text: "5 из 30 находок · показать все" });
+    expect(severityShown(5, 30).text.split(/\s+/)).toHaveLength(7);
+    expect(severityShown(1, 21).text).toBe("1 из 21 находки · показать все");
     const user = userEvent.setup({ delay: null });
     open("p1-review-critic-craft");
     const line = reader().querySelector("[data-slot=severity-bar]") as HTMLElement;
@@ -362,6 +364,43 @@ describe("a critic's report", () => {
     expect(ranks[0]).toBe(0);
     // inside a severity, the critic's numbering runs up
     for (let i = 1; i < ids.length; i++) if (ranks[i] === ranks[i - 1]) expect(Number(ids[i].split("-").at(-1))).toBeGreaterThan(Number(ids[i - 1].split("-").at(-1)));
+  });
+
+  test("p3-review-critic-code#code-10: a report's findings and its severity counts follow the severity map's rank — the one «Находки» sorts by", () => {
+    const f = (id: string, severity: Finding["severity"]) => ({ id, severity });
+    const minor = SEVERITY.minor.rank;
+    // a rank changed in the map changes the reader's order with it
+    SEVERITY.minor.rank = -1;
+    try {
+      expect(bySeverity([f("a", "major"), f("b", "minor"), f("c", "critical"), f("d", null)]).map((x) => x.id)).toEqual(["b", "c", "a", "d"]);
+      expect(severityCounts([f("a", "major"), f("b", "minor"), f("c", "critical")]).map((c) => c.severity)).toEqual(["minor", "critical", "major"]);
+    } finally {
+      SEVERITY.minor.rank = minor;
+    }
+  });
+
+  test("p3-review-critic-craft-2#craft-13: the reader's jumps and «показать все» are underlined like every link, not on hover alone", async () => {
+    const user = userEvent.setup({ delay: null });
+    const underline = (el: Element) => getComputedStyle(el).getPropertyValue("text-decoration-line");
+    // the outline of a long file
+    let view = open("p1-map-map");
+    await loadedFile();
+    const outline = within(within(reader()).getByRole("navigation", { name: "Содержание отчёта" })).getAllByRole("button");
+    await applyStylesheet();
+    expect(outline.map(underline)).toEqual(outline.map(() => "underline"));
+    view.unmount();
+    // «показать все» beside a chosen severity
+    view = open("p1-review-critic-craft");
+    await user.click(within(reader()).getByRole("radio", { name: "critical" }));
+    const all = within(reader().querySelector("[data-slot=severity-shown]") as HTMLElement).getByRole("button", { name: "показать все" });
+    await applyStylesheet();
+    expect(underline(all)).toBe("underline");
+    view.unmount();
+    // «Расход токенов» in the overview's lead
+    renderOver(fx, run, runPath(KEY, { view: "reports" }), ReportsView);
+    const spend = within(document.querySelector("[data-slot=overview-lead]") as HTMLElement).getByRole("button", { name: "Расход токенов" });
+    await applyStylesheet();
+    expect(underline(spend)).toBe("underline");
   });
 
   test("improve-10 (2), Strict 1: «Состояние» comes and goes with the state — an open reader keeps the rows it opened with", async () => {

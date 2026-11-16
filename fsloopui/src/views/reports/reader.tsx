@@ -7,12 +7,13 @@
 // «Ещё N». Bodies are running text at the reading measure, each critic's part led by what it holds; ids in them are
 // links; the findings are compact rows that expand in place (craft-13: the product first, in the first viewport).
 import { ChevronDownIcon, ChevronUpIcon, CopyIcon } from "lucide-react";
-import { useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { Finding, Launch } from "../../../shared/model.ts";
 import { launchState, NOT_RECORDED, reportWord, SEVERITY, stageOf } from "../../../shared/states.ts";
 import { ago, count, duration, mskDateTime, mskTime, NOUNS, num, tokens } from "../../../shared/text.ts";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { frameSrc } from "@/api";
 import { shownText } from "@/table";
 import {
@@ -93,9 +94,21 @@ export const SEVERITY_PREF = "reports:severity";
 export const SEVERITY_LABEL = "Серьёзность находок";
 /** The verb of the count beside the severity filter: its click brings every row back. */
 export const SHOW_ALL = "показать все";
+const SHOWN_SEP = " · ";
 /** What a chosen severity hides, beside the filter (improve-2 (3), design-9): the status bar's one form, then the
- * verb of the click — «5 из 30 находок · показать все». */
-export const severityShown = (shown: number, total: number): string => `${shownText(shown, total, NOUNS.finding)} · ${SHOW_ALL}`;
+ * verb of the click — «5 из 30 находок · показать все»; the line renders its parts, the count and the verb's button
+ * (code-9). */
+export function severityShown(shown: number, total: number): { count: string; verb: string; text: string } {
+  const count = shownText(shown, total, NOUNS.finding);
+  return { count, verb: SHOW_ALL, text: `${count}${SHOWN_SEP}${SHOW_ALL}` };
+}
+
+/** A button that reads as a link — the reader's jumps (the outline, «Расход токенов») and «показать все»: underlined
+ * like every link (`LINK_CLASS`, DESIGN.md → Object Address), not on hover alone (craft-13); the size is the text's
+ * around it. */
+export function LinkButton({ className, ...props }: ComponentProps<typeof Button>) {
+  return <Button variant="link" size="xs" className={cn("h-auto px-0 font-normal", LINK_CLASS, className)} {...props} />;
+}
 
 /** The report file's full path: the run folder joined with the launch's relative report path. */
 export function reportPath(dir: string, report: string): string {
@@ -617,9 +630,9 @@ function ReportFile({ run, file }: { run: LoadedRun; file: string }) {
           <ol role="list" className="m-0 flex list-none flex-wrap gap-x-4 gap-y-0.5 p-0">
             {outline.map((h) => (
               <li key={h.index}>
-                <Button variant="link" size="xs" className="h-auto px-0 text-sm font-normal" onClick={() => go(h.index)}>
+                <LinkButton className="text-sm" onClick={() => go(h.index)}>
                   {h.text}
-                </Button>
+                </LinkButton>
               </li>
             ))}
           </ol>
@@ -647,6 +660,7 @@ function FindingsBody({ run, report, findings, now }: { run: LoadedRun; report: 
   const severity = stored === ALL || counts.some((c) => c.severity === stored) ? stored : ALL;
   const ordered = bySeverity(findings);
   const rows = severity === ALL ? ordered : ordered.filter((f) => (f.severity ?? "none") === severity);
+  const shown = severityShown(rows.length, findings.length);
   return (
     <div className="flex min-w-0 flex-col gap-3">
       {counts.length > 1 && (
@@ -662,13 +676,13 @@ function FindingsBody({ run, report, findings, now }: { run: LoadedRun; report: 
           <p data-slot="severity-shown" className="m-0 flex min-w-0 items-baseline text-xs text-muted-foreground tabular-nums">
             {rows.length < findings.length && (
               <>
-                <span className="min-w-0 truncate">{shownText(rows.length, findings.length, NOUNS.finding)}</span>
+                <span className="min-w-0 truncate">{shown.count}</span>
                 <span aria-hidden="true" className="shrink-0 whitespace-pre">
-                  {" · "}
+                  {SHOWN_SEP}
                 </span>
-                <Button variant="link" size="xs" className="h-auto shrink-0 px-0 text-xs font-normal" onClick={() => setStored(ALL)}>
-                  {SHOW_ALL}
-                </Button>
+                <LinkButton className="shrink-0 text-xs" onClick={() => setStored(ALL)}>
+                  {shown.verb}
+                </LinkButton>
               </>
             )}
           </p>

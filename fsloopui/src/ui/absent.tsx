@@ -76,9 +76,12 @@ export function NotFound({ kind, id, start = false, highlight, className }: { ki
   );
 }
 
+/** The objects a list holds by count, with the noun the count agrees: the findings, the reports of «Отчёты». */
+const COUNTED = { finding: NOUNS.finding, report: NOUNS.report } as const;
+
 /** What a list holds, in the form its kind is counted by — one builder per kind: a numbered list its first and last
- * number (null when it holds none), the findings their count, the units their ids. */
-export type Holds = { kind: NumberedKind; range: readonly [string, string] | null } | { kind: "finding"; count: number } | { kind: "unit"; ids: readonly string[] };
+ * number (null when it holds none), the findings and the reports their count, the units their ids. */
+export type Holds = { kind: NumberedKind; range: readonly [string, string] | null } | { kind: keyof typeof COUNTED; count: number } | { kind: "unit"; ids: readonly string[] };
 
 /** The plural a list of units takes before its ids. */
 const UNITS_WORD = "юниты";
@@ -117,10 +120,11 @@ function idRanges(ids: readonly string[]): string {
 }
 
 /** What the run holds, after a «не найдено»: «: в этом прогоне решения #1–#43», «: в этом прогоне соглашение 1»,
- * «: в этом прогоне 723 находки», «: в этом прогоне юниты u1–u32, f1–f10»; nothing when it holds none. */
+ * «: в этом прогоне 723 находки», «: в этом прогоне 98 отчётов», «: в этом прогоне юниты u1–u32, f1–f10»; nothing
+ * when it holds none. */
 function heldText(holds: Holds): string {
   const lead = ": в этом прогоне ";
-  if (holds.kind === "finding") return holds.count > 0 ? `${lead}${count(holds.count, NOUNS.finding)}` : "";
+  if ("count" in holds) return holds.count > 0 ? `${lead}${count(holds.count, COUNTED[holds.kind])}` : "";
   if (holds.kind === "unit") return holds.ids.length ? `${lead}${holds.ids.length === 1 ? OBJECT_WORDS.unit.word : UNITS_WORD} ${idRanges(holds.ids)}` : "";
   if (!holds.range) return "";
   const [first, last] = holds.range;

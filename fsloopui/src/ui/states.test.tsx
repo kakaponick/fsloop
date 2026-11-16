@@ -210,6 +210,14 @@ describe("p2-assess-critic-improve#improve-13: one not-found line on all four su
     expect(missingText({ kind: "unit", ids: ["u1", "u2", "u4", "u5", "u7"] }, "u3")).toBe("Юнит u3 не найден: в этом прогоне юниты u1–u2, u4–u5, u7.");
   });
 
+  test("p3-review-critic-craft-2#craft-11: a report's address reads the one line, with the run's report count", () => {
+    const text = missingText({ kind: "report", count: 98 }, "p9-review-critic-none");
+    expect(text).toBe("Отчёт p9-review-critic-none не найден: в этом прогоне 98 отчётов.");
+    expect(wordCount(text)).toBe(9);
+    expect(missingText({ kind: "report", count: 1 }, "x")).toBe("Отчёт x не найден: в этом прогоне 1 отчёт.");
+    expect(missingText({ kind: "report", count: 0 }, "x")).toBe("Отчёт x не найден.");
+  });
+
   test("p3-review-critic-craft-2#craft-15: the line reads in one ink — what is missing as loud as what the run holds", async () => {
     render(<MissingLine kind="unit" id="u99" ids={["u1", "u2", "u3"]} onClose={() => {}} slot="unit-missing" />);
     const sentence = document.querySelector("[data-slot=missing-sentence]") as HTMLElement;

@@ -228,23 +228,24 @@ export function partCounts(earlier: readonly ReportTab[], later: readonly Report
 
 // ── outcome words ────────────────────────────────────────────────────────────────────────────
 
-const SEVERITY_ORDER: readonly Severity[] = ["critical", "major", "minor", "none"];
-
 export interface SeverityCount {
   severity: Severity;
   n: number;
 }
 
-/** A report's findings by severity, critical first, only the severities present. */
+/** A finding's severity rank from the one map (rules/ui → Conventions 1) — the rank «Находки» sorts by too. */
+const rankOf = (severity: Severity | null | undefined): number => SEVERITY[severity ?? "none"].rank;
+
+/** A report's findings by severity, by the map's rank — critical first —, only the severities present. */
 export function severityCounts(findings: readonly Pick<Finding, "severity">[]): SeverityCount[] {
-  return SEVERITY_ORDER.map((severity) => ({ severity, n: findings.filter((f) => (f.severity ?? "none") === severity).length })).filter((c) => c.n > 0);
+  const order = (Object.keys(SEVERITY) as Severity[]).sort((a, b) => rankOf(a) - rankOf(b));
+  return order.map((severity) => ({ severity, n: findings.filter((f) => (f.severity ?? "none") === severity).length })).filter((c) => c.n > 0);
 }
 
-/** A report's findings as they are reviewed (rules/ui → Conventions 2): critical, major, minor, then those with no
- * severity — the critic's own order inside each. */
+/** A report's findings as they are reviewed (rules/ui → Conventions 2): by the map's rank — critical, major, minor,
+ * then those with no severity — the critic's own order inside each. */
 export function bySeverity<F extends Pick<Finding, "severity">>(findings: readonly F[]): F[] {
-  const rank = (f: F) => SEVERITY_ORDER.indexOf(f.severity ?? "none");
-  return findings.map((f, i) => ({ f, i })).sort((a, b) => rank(a.f) - rank(b.f) || a.i - b.i).map((x) => x.f);
+  return findings.map((f, i) => ({ f, i })).sort((a, b) => rankOf(a.f.severity) - rankOf(b.f.severity) || a.i - b.i).map((x) => x.f);
 }
 
 /** «2 critical · 5 major · 3 minor» — the severity words as the shared map writes them. */

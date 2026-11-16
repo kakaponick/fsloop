@@ -7,11 +7,11 @@
 // state in the browser (rules/ui → Conventions 12). Back returns to the same report, tab and scroll. New launches
 // wait in the rail's strip (Live data). Below the container width for rail + reading column, the rail folds into an
 // «Отчёт» combobox above the reader (ui → Layout Paradigm 2: a container query).
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { NOUNS } from "../../../shared/text.ts";
 import { cn } from "@/lib/utils";
-import { CountCombobox, EmptyState, emptyWhen, HeldStrip, NotFound, SCROLLER, type HeldNoun } from "@/ui";
+import { CountCombobox, EmptyState, emptyWhen, HeldStrip, MissingLine, SCROLLER, type HeldNoun } from "@/ui";
 import { AdaptiveToolbar, FilterControl, filterSummary, pushHistory, runQuery, SearchBox, StatusBar, useRunView, useTableView, type FilterDef, type ToolbarItem } from "@/table";
 import { useNow } from "../../app/clock.tsx";
 import { useUpdatedAt } from "../../app/live.tsx";
@@ -26,7 +26,6 @@ const NOUN: HeldNoun = { forms: NOUNS.report, gender: "m" };
 export const REPORT_PICKER = "Отчёт";
 /** The picker's no-choice word, the overview the reader then shows: «Отчёт: обзор» — one colon, read once (craft-5). */
 export const PICKER_OVERVIEW = "обзор";
-export const REPORT_NOT_FOUND_NEXT = ": в этом прогоне нет такого запуска — выберите отчёт в списке";
 
 /** Where the reader stood per run, report and tab: Back returns there (rules/ui → Layout 2). */
 const scrolls = new Map<string, number>();
@@ -58,6 +57,23 @@ function Reports({ run }: { run: LoadedRun }) {
   const reportId = params.get("report");
   const tab = params.get("tab");
   const item = resolveItem(reportId, items, held.known);
+  const itemId = item?.id ?? null;
+  // A running agent's address that now names a recorded launch takes the launch's id, replaced (craft-12) — and the
+  // reader keeps its place: `address` is the id the reader opened on, so neither the reader nor its scroll is reset.
+  const [aliases, setAliases] = useState<Readonly<Record<string, string>>>({});
+  const address = reportId === null ? null : (aliases[reportId] ?? reportId);
+  if (itemId !== null && address !== null && itemId !== reportId && aliases[itemId] !== address) setAliases({ ...aliases, [itemId]: address });
+  useEffect(() => {
+    if (itemId === null || reportId === null || itemId === reportId) return;
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.set("report", itemId);
+        return p;
+      },
+      { replace: true },
+    );
+  }, [itemId, reportId, setParams]);
   const q = runQuery({
     rows: shown.map((s) => s.item),
     rowId: (i) => i.id,
@@ -83,14 +99,14 @@ function Reports({ run }: { run: LoadedRun }) {
 
   // ── the reader's scroll, per report and tab ─────────────────────────────────────────────────────
   const reader = useRef<HTMLDivElement>(null);
-  const place = `${run.key}|${reportId ?? ""}|${tab ?? ""}`;
-  const lastReport = useRef(reportId);
+  const place = `${run.key}|${address ?? ""}|${tab ?? ""}`;
+  const lastReport = useRef(address);
   useLayoutEffect(() => {
     const el = reader.current;
     if (!el) return;
     const saved = scrolls.get(place);
-    const sameReport = lastReport.current === reportId;
-    lastReport.current = reportId;
+    const sameReport = lastReport.current === address;
+    lastReport.current = address;
     if (saved !== undefined || !sameReport) {
       el.scrollTop = saved ?? 0;
       return;
@@ -100,7 +116,21 @@ function Reports({ run }: { run: LoadedRun }) {
     const sections = el.querySelector<HTMLElement>("[data-slot=report-sections]");
     const top = sections ? sections.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop : 0;
     el.scrollTop = Math.min(el.scrollTop, Math.max(0, top));
-  }, [place, reportId]);
+  }, [place, address]);
+  // «Закрыть» on the not-found line: the address goes, replaced, and focus lands on the rail's Tab stop (craft-11)
+  const rail = useRef<HTMLElement>(null);
+  const closeMissing = () => {
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.delete("report");
+        p.delete("tab");
+        return p;
+      },
+      { replace: true },
+    );
+    rail.current?.querySelector<HTMLElement>('[data-flat-item][tabindex="0"]')?.focus({ preventScroll: true });
+  };
   const onTab = (next: string) =>
     setParams(
       (prev) => {
@@ -155,11 +185,12 @@ function Reports({ run }: { run: LoadedRun }) {
     <div data-slot="reports-view" className="@container/reports absolute inset-0 flex flex-col gap-2 px-5 pt-3 pb-1">
       <AdaptiveToolbar items={toolbar} label="Фильтры отчётов" />
       <div className="flex min-h-0 flex-1 border-t">
-        <nav aria-label={RAIL_LABEL} data-slot="report-rail" className="hidden w-60 shrink-0 flex-col border-r @min-[52rem]/reports:flex">
+        <nav ref={rail} aria-label={RAIL_LABEL} data-slot="report-rail" className="hidden w-60 shrink-0 flex-col border-r @min-[52rem]/reports:flex">
           {/* each scroller is the containing block of everything in it (`SCROLLER`): a finding row's sr-only never
               hangs below the view to give the page's body an overflow (craft-1) */}
-          {/* scroll padding: the sticky stage heading's 28 px, so a focus ↑/↓ moves to is never under it */}
-          <div data-slot="rail-scroll" className={cn(SCROLLER, "flex-1 scroll-pt-7 py-1 pr-1")}>
+          {/* scroll padding: the sticky stage heading's 28 px, so a focus ↑/↓ moves to is never under it; no top padding,
+              which would hold the sticky heading that far down with a row showing over it (craft-9) */}
+          <div data-slot="rail-scroll" className={cn(SCROLLER, "flex-1 scroll-pt-7 pr-1 pb-1")}>
             <Rail
               items={railShown}
               outside={q.outside}
@@ -189,16 +220,12 @@ function Reports({ run }: { run: LoadedRun }) {
                 <EmptyState form="not-yet" noun={NOUNS.report} step="map" className="py-16" />
               )
             ) : item ? (
-              // keyed by the address: a running launch that ends under it is the same reader, its rows kept
-              <Reader key={reportId ?? item.id} run={run} item={item} tab={tab} onTab={onTab} prev={order[at - 1] ?? null} next={at < 0 ? null : (order[at + 1] ?? null)} hrefOf={hrefOf} now={now} />
+              // keyed by the address it opened on: a running launch that ends under it is the same reader, its rows kept
+              <Reader key={address ?? item.id} run={run} item={item} tab={tab} onTab={onTab} prev={order[at - 1] ?? null} next={at < 0 ? null : (order[at + 1] ?? null)} hrefOf={hrefOf} now={now} />
             ) : (
               <div className="flex flex-col gap-6">
-                {reportId && (
-                  <p role="status" data-slot="report-missing" className="m-0">
-                    <NotFound kind="report" id={reportId} start />
-                    {REPORT_NOT_FOUND_NEXT}
-                  </p>
-                )}
+                {/* the one not-found line of every list, with the rail's report count (craft-11) */}
+                {reportId && <MissingLine kind="report" id={reportId} count={items.length} slot="report-missing" onClose={closeMissing} />}
                 <Overview surfaces={run.surfaces} findings={run.findings} hrefOf={(launch) => (run.launches.some((l) => l.id === launch) ? hrefOf(launch) : null)} />
                 <Spend tokens={run.tokens} />
               </div>

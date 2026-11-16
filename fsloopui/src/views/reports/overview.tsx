@@ -10,10 +10,10 @@ import type { MouseEvent } from "react";
 import type { Finding, RunTokens, Surface } from "../../../shared/model.ts";
 import { SEVERITY, stageOf } from "../../../shared/states.ts";
 import { count, NOUNS, num, tokens as tokensOf, type SpendRow } from "../../../shared/text.ts";
-import { Button } from "@/components/ui/button";
 import { Dot, FactList, GlossaryTooltip, NotRecorded, revealIn } from "@/ui";
 import { rankSurfaces } from "./model.ts";
 import { OVERVIEW_ITEM } from "./rail.tsx";
+import { LinkButton } from "./reader.tsx";
 import { SCORES_GLOSSARY, SurfaceScores } from "./scores.tsx";
 
 export const SPEND_TITLE = "Расход токенов";
@@ -94,9 +94,9 @@ export function Overview({ surfaces, findings, hrefOf }: { surfaces: readonly Su
           <p data-slot="overview-lead" className="m-0 h-5 whitespace-nowrap text-muted-foreground">
             <GlossaryTooltip term={OVERVIEW_LEAD[0]} entries={SCORES_GLOSSARY} />
             {OVERVIEW_LEAD[1]}
-            <Button variant="link" size="xs" className="h-auto px-0 align-baseline text-sm font-normal" onClick={toSpend}>
+            <LinkButton className="align-baseline text-sm" onClick={toSpend}>
               {OVERVIEW_LEAD[2]}
-            </Button>
+            </LinkButton>
           </p>
           <ol role="list" className="m-0 flex list-none flex-col p-0">
             {lines.map((s) => (

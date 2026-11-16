@@ -7,13 +7,13 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import userEvent from "@testing-library/user-event";
 import { afterAll, describe, expect, test, vi } from "vitest";
 import type { Launch } from "../../../shared/model.ts";
-import { glossaryLines, readPref } from "@/ui";
+import { glossaryLines, missingText, readPref } from "@/ui";
 import { isSelectFilter, type FilterDef } from "@/table";
-import { applyStylesheet, textWidth, usedBlockSize } from "../../app/layout-testing.ts";
+import { applyStylesheet, innerWidth, textWidth, usedBlockSize } from "../../app/layout-testing.ts";
 import { renderShell } from "../../app/testing.tsx";
 import { runPath } from "../../app/routes.ts";
-import { ReportsView, REPORT_NOT_FOUND_NEXT } from "./index.tsx";
-import { commonKind, filtersFor, groupsOf, itemState, pickerLabel, railItems, rankSurfaces, type RailItem } from "./model.ts";
+import { ReportsView } from "./index.tsx";
+import { commonKind, filtersFor, groupsOf, itemState, pickerLabel, railItems, rankSurfaces, sharedResultText, type RailItem } from "./model.ts";
 import { OVERVIEW_EMPTY, OVERVIEW_LEAD } from "./overview.tsx";
 import { OVERVIEW_ITEM } from "./rail.tsx";
 import { SCORES_GLOSSARY } from "./scores.tsx";
@@ -322,7 +322,7 @@ describe("the task walk (surfaces/reading.md → WALK «Отчёты»)", () => 
   test("craft-27: the overview's lead and its empty line name no side — the list is on the left only in the wide view", () => {
     expect(OVERVIEW_EMPTY).toBe("Критики craft не оценивали разделов интерфейса в этом прогоне — выберите отчёт в списке отчётов.");
     expect(OVERVIEW_EMPTY.split(/\s+/)).toHaveLength(15);
-    for (const s of [OVERVIEW_LEAD.join(""), OVERVIEW_EMPTY, REPORT_NOT_FOUND_NEXT]) expect(s).not.toMatch(/слева|справа/);
+    for (const s of [OVERVIEW_LEAD.join(""), OVERVIEW_EMPTY, missingText({ kind: "report", count: 98 }, "p9-review-critic-none")]) expect(s).not.toMatch(/слева|справа/);
   });
 
   test("improve-12 (2, 3), design-13, Strict 1: the lead is one line from first paint — «Оценки» its glossary term, the scores' one constant", async () => {
@@ -395,11 +395,59 @@ describe("the task walk (surfaces/reading.md → WALK «Отчёты»)", () => 
     expect(scroller.scrollTop).toBe(240);
   });
 
-  test("an unknown id in the URL reads «Отчёт <id> не найден», the overview under it", async () => {
-    renderView(fx, KEY, reportsPath({ report: "p9-review-critic-none" }), ReportsView);
+  test("p3-review-critic-craft-2#craft-11: an unknown id in the URL reads the one `MissingLine` — the run's report count, then «Закрыть», which drops the address and puts focus on the rail; the overview under it", async () => {
+    const user = userEvent.setup({ delay: null });
+    const view = renderView(fx, KEY, reportsPath({ report: "p9-review-critic-none", tab: "findings" }), ReportsView);
     await loaded();
-    expect(document.querySelector("[data-slot=report-missing]")).toHaveTextContent("Отчёт p9-review-critic-none не найден: в этом прогоне нет такого запуска — выберите отчёт в списке");
+    const line = document.querySelector("[data-slot=report-missing]") as HTMLElement;
+    expect(line).toHaveAttribute("role", "status");
+    // the rail's 98 reports: 97 recorded launches and the running one
+    expect(line).toHaveTextContent(/^Отчёт p9-review-critic-none не найден: в этом прогоне 98 отчётов\.\s*Закрыть$/);
+    expect(line.querySelector("[data-slot=missing-sentence]")).toHaveAttribute("title", "Отчёт p9-review-critic-none не найден: в этом прогоне 98 отчётов.");
     expect(document.querySelector("[data-slot=reports-overview]")).toBeInTheDocument();
+    await user.click(within(line).getByRole("button", { name: "Закрыть" }));
+    await waitFor(() => expect(view.probe.location?.search).toBe("?view=reports"));
+    expect(document.querySelector("[data-slot=report-missing]")).toBeNull();
+    expect(document.querySelector("[data-slot=report-rail] [data-slot=rail-overview]")).toHaveFocus();
+  });
+
+  test("p3-review-critic-craft-2#craft-9: the sticky stage heading pins at the rail scroller's very top — no padding above it, so no row shows over it", async () => {
+    renderOver(fx, run, reportsPath(), ReportsView);
+    const scroller = document.querySelector("[data-slot=rail-scroll]") as HTMLElement;
+    const heading = document.querySelector("[data-slot=rail-heading]") as HTMLElement;
+    await applyStylesheet();
+    // a sticky box sticks to the scrollport less the scroller's padding: 4 px of padding showed 4 px of a row above it
+    expect(getComputedStyle(scroller).paddingTop).toBe("0px");
+    expect(getComputedStyle(heading).position).toBe("sticky");
+    expect(getComputedStyle(heading).top).toBe("0px");
+  });
+
+  test("p3-review-critic-craft-2#craft-10: the result a group's implementers share is named once, on a reserved line under its heading", async () => {
+    // Copy 4: the builder against literals, with their word counts
+    expect(sharedResultText({ result: "done", n: 15 }, 16)).toBe("итог: done — у 15 из 16 отчётов");
+    expect(sharedResultText({ result: "done", n: 15 }, 16).split(" ")).toHaveLength(8);
+    // the noun genitive after «из», as the status bar writes it
+    expect(sharedResultText({ result: "blocked", n: 2 }, 21)).toBe("итог: blocked — у 2 из 21 отчёта");
+    expect(sharedResultText({ result: "blocked", n: 2 }, 2).split(" ")).toHaveLength(8);
+    expect(sharedResultText(null, 3)).toBe("общего итога нет");
+    expect(sharedResultText(null, 3).split(" ")).toHaveLength(3);
+    // one implementer of «юниты в работе · проход 1» blocked: the line names the 15 «done» its row no longer repeats
+    const own = run.launches.filter((l) => l.stage === "p1-units" && l.agent === "fsloop-implement");
+    const blocked = own[2];
+    const over = { ...run, launches: run.launches.map((l) => (l.id === blocked.id ? { ...l, sections: { ...l.sections, RESULT: { value: "blocked", items: [] } } } : l)) };
+    renderOver(fx, over, reportsPath(), ReportsView);
+    const group = (name: string) => screen.getByRole("region", { name }) as HTMLElement;
+    const line = group("юниты в работе, проход 1").querySelector("[data-slot=rail-result]") as HTMLElement;
+    expect(line).toHaveTextContent(/^итог: done — у 15 из 16 отчётов$/);
+    expect(line).toHaveAttribute("title", "итог: done — у 15 из 16 отчётов");
+    // right under the heading, before the first row
+    expect(line.previousElementSibling).toHaveAttribute("data-slot", "rail-heading");
+    // a group of critics alone has no result to share: no line
+    expect(group("ревью, проход 1").querySelector("[data-slot=rail-result]")).toBeNull();
+    // Strict 1: one line, its 20 px box fixed — and whole at the rail's 240 px (w-60)
+    await applyStylesheet();
+    expect(usedBlockSize(line)).toBe(20);
+    expect(textWidth(line.textContent ?? "", { size: 12 })).toBeLessThanOrEqual(innerWidth(line, document.querySelector("[data-slot=report-rail]") as HTMLElement, 240));
   });
 
   test("a report the filters hide shows anyway, «вне фильтра»", async () => {
@@ -444,10 +492,27 @@ describe("live: new launches wait in the rail's strip (Live data 1)", () => {
     // the reader follows the ended launch to its record
     expect(screen.getByRole("heading", { level: 2, name: "u2 implement" })).toBeInTheDocument();
     expect(document.querySelector("[data-slot=report-id]")).toHaveTextContent("p1-units-u2-implement");
+    // p3-review-critic-craft-2#craft-12: the address takes the recorded launch's id, replaced — and the reader is the
+    // one that opened on the running launch, its «Состояние» row kept (Strict 1)
+    await waitFor(() => expect(new URLSearchParams(view.probe.location?.search).get("report")).toBe("p1-units-u2-implement"));
+    expect([...document.querySelectorAll("[data-slot=report-reader] [data-slot=fact] dt")].map((dt) => dt.textContent)).toContain("Состояние");
 
     await user.click(within(strip).getByRole("button"));
     expect(ids()).toEqual([...small.launches.map((l) => l.id), "p1-units-u2-implement"]);
     expect(strip).toHaveTextContent("");
+  });
+});
+
+describe("p3-review-critic-craft-2#craft-12: a running agent's address after its launch was recorded", () => {
+  test("the page opened later on the agent's id reads the launch whose record names that agent, and the URL takes the launch's id", async () => {
+    const small = loadedRun(fx, SMALL, keyOf(SMALL));
+    // the record of the launch that ran as agent a77: nothing in memory knew it was running
+    const recorded: Launch = { ...small.launches[3], id: "p1-units-u2-implement", description: "u2 implement", unit: "u2", agentId: "a77" };
+    const view = renderOver(fx, { ...small, launches: [...small.launches, recorded], running: [] }, runPath(keyOf(SMALL), { view: "reports", report: "a77" }), ReportsView);
+    expect(document.querySelector("[data-slot=report-missing]")).toBeNull();
+    expect(screen.getByRole("heading", { level: 2, name: "u2 implement" })).toBeInTheDocument();
+    expect(document.querySelector("[data-slot=report-id]")).toHaveTextContent("p1-units-u2-implement");
+    await waitFor(() => expect(new URLSearchParams(view.probe.location?.search).get("report")).toBe("p1-units-u2-implement"));
   });
 });
 

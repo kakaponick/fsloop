@@ -24,7 +24,7 @@ SHAPE:
   - report partly parsed (`unparsed` lines): one line «N строк не разобраны — они на вкладке «Файл отчёта»», or «… — они в тексте отчёта ниже» when the file is the report's only part;
   - a report with no parts of its own (the map, a free-form report): the file alone, with no tab strip; a file with three or more top-level headings opens with «Содержание отчёта»;
   - the report file could not be read: «Повторить» reads it again;
-  - an unknown id in the URL: «Отчёт <id> не найден» (Conventions 5);
+  - an unknown id in the URL: «Отчёт <id> не найден: в этом прогоне 98 отчётов.» with «Закрыть», which drops the address and puts focus on the rail (`MissingLine`, Conventions 5); a running agent's id whose launch the run has since recorded opens that launch, its address replaced with the launch's id;
   - live, a new launch arrives: it waits in the rail's strip;
   - live, the open report is rewritten: the reader updates in place and keeps scroll and tab (Live data 3);
   - connection lost: u3's strip.
