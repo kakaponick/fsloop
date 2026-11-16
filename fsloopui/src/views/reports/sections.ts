@@ -1,11 +1,16 @@
 // The section-label map of «Отчёты» (surfaces/reading.md → ASSUMPTIONS; the design check: the one map this unit
-// owns) and the words code builds for a report: the tab set of each agent kind with its counts, a report's outcome
-// in words, the partly-parsed line. The tab set is fixed per kind (and per lens for a critic), so two reports of
-// one kind never shift the strip; an empty section stays with a muted «0». Agent kinds, launch states and severity
-// words come from shared/states.ts, never from here.
+// owns) and the words code builds for a report: the tab set of each agent kind with its counts, what each part of a
+// critic's report holds, a lens in words, a report's outcome in words, the partly-parsed line, the fold of a strip
+// too wide for its reader, and a craft report set against the surface's earlier one. The tab set is fixed per kind
+// (and per lens for a critic), so two reports of one kind never shift the strip; an empty section stays with a muted
+// «0»; «Кадры» and «Сравнение» stand only where they hold something. Agent kinds, launch states and severity words
+// come from shared/states.ts, never from here.
 import type { Finding, Launch } from "../../../shared/model.ts";
 import { SEVERITY, type Severity } from "../../../shared/states.ts";
 import { count, num, plural } from "../../../shared/text.ts";
+import type { GlossaryEntry } from "@/ui";
+// the file, not the index: this module stays pure, with no component behind it
+import { pack } from "@/table/pack.ts";
 
 /** A value the report left empty: «—», «-», «none» or nothing. */
 const NONE = /^(—|-|none)?$/i;
@@ -15,8 +20,8 @@ export const filled = (s: string | null | undefined): s is string => typeof s ==
 export const SECTION_LABELS = {
   FINDINGS: "Находки",
   UNVERIFIED: "Не проверено",
-  CANDIDATES: "Идеи вне прогона",
-  ORDER: "Порядок правок",
+  CANDIDATES: "Идеи",
+  ORDER: "План правок",
   ASSUMPTIONS: "Допущения",
   JUDGED: "Решённые вопросы",
   VERDICT: "Вердикты",
@@ -30,8 +35,42 @@ export const SECTION_LABELS = {
   PARITY: "Паритет",
   VERIFY: "Проверка кода",
   FRAMES: "Кадры",
+  COMPARE: "Сравнение",
   FILE: "Файл отчёта",
 } as const;
+
+/** What each part of a critic's report holds, said at the top of its panel: the tab's word answers «what is this»,
+ * the panel it opens the rest (ux 0, ux 1 — a compact string's other questions one step away). */
+export const SECTION_LEADS: Readonly<Record<string, string>> = {
+  UNVERIFIED: "Что критик не смог подтвердить по коду и кадрам — и чем это проверить.",
+  CANDIDATES: "Улучшения, которых не требуют правила проекта: критик предлагает их отдельно от находок.",
+  ORDER: "Очередь правок, которую предлагает критик: раздел интерфейса, команда impeccable и находки, которые она закрывает.",
+  ASSUMPTIONS: "Вопросы, на которые критик ответил сам, без вас: ответ и откуда он взят.",
+  JUDGED: "Решения исполнителей юнитов, которые прогон отдал на суд критика: принято — с правилом, которому решение отвечает, или стало находкой.",
+  VERDICT: "Исправлена ли каждая находка прошлого прохода: resolved — да, partial — отчасти, unresolved — нет.",
+  ROWS: "Поведение системы, которую проект переносит, строка за строкой: kept — перенесено, lost — потеряно, settled — решено иначе.",
+  CONVENTIONS: "Одно решение на задачу, которую юниты решали бы каждый по-своему.",
+  SHAPE: "Каким будет новый раздел интерфейса, до брифа его юнита: вопрос, путь пользователя, блоки, выбранный вариант.",
+};
+
+/** The words a critic's LENS line is made of («craft assess», «code verdict»), each with what it means. */
+const LENS_WORDS: Readonly<Record<string, string>> = {
+  craft: "интерфейс раздела: критика и аудит impeccable по кадру и коду",
+  code: "код юнитов: бриф, правила проекта, архитектура",
+  runtime: "система в работе: поведение кода по логам и выводу проверок",
+  shape: "форма нового раздела интерфейса до брифа его юнита",
+  design: "общие решения интерфейса для всех юнитов прохода",
+  parity: "перенос поведения системы, которую проект заменяет",
+  improve: "улучшения готового результата на пути пользователя",
+  assess: "оценка как есть, до правок прогона",
+  verdict: "исправлены ли находки прошлого прохода",
+};
+
+/** The glossary of a lens: each word it names that the map knows, in its order; a word it does not know is left
+ * unexplained rather than guessed. */
+export function lensGlossary(lens: string): GlossaryEntry[] {
+  return [...new Set(lens.trim().split(/\s+/))].filter((w) => w in LENS_WORDS).map((w) => ({ value: w, meaning: LENS_WORDS[w] }));
+}
 
 /** The parts of a merged implementer section: «Файлы» holds CHANGED and CREATED, «Тесты» RED and GREEN. */
 export const PART_LABELS: Record<string, string> = {
@@ -56,6 +95,7 @@ export type TabBody =
   | { kind: "items"; section: string; value: string | null; items: string[] }
   | { kind: "parts"; parts: { key: string; label: string; items: string[]; mono: boolean }[] }
   | { kind: "frames" }
+  | { kind: "compare" }
   | { kind: "file" };
 
 export interface ReportTab {
@@ -69,6 +109,7 @@ export interface ReportTab {
 export const FILE_TAB = "file";
 export const FINDINGS_TAB = "findings";
 export const FRAMES_TAB = "frames";
+export const COMPARE_TAB = "compare";
 
 /** Sections that are facts of the reader, not tabs: the lens and the craft scores. */
 const FACT_SECTIONS = new Set(["LENS", "AUDIT"]);
@@ -111,12 +152,13 @@ export const reportFindings = <F extends Pick<Finding, "launch" | "source">>(fin
 const fileTab: ReportTab = { id: FILE_TAB, label: SECTION_LABELS.FILE, count: 1, body: { kind: "file" } };
 
 /** The tabs of a report, fixed per agent kind, «Кадры» then «Файл отчёта» last; `findings` — the report's own
- * (`reportFindings`); `frames` — the frames of its surface, or those its findings cite. A critic always has «Кадры»
- * (a muted «0» when it has none), so two critics' strips match; another kind has it only when it has frames. A
- * running launch has no tabs. */
-export function reportTabs(l: Launch, findings: number, frames = 0): ReportTab[] {
+ * (`reportFindings`); `frames` — the frames of its surface, or those its findings cite. «Кадры» stands only when the
+ * report has frames, for every kind (craft-1: a muted «0» there carried nothing and pushed «Файл отчёта» off the
+ * strip); `compare` — a craft critic whose surface an earlier report scored gets «Сравнение» before them. A running
+ * launch has no tabs. */
+export function reportTabs(l: Launch, findings: number, frames = 0, { compare = false }: { compare?: boolean } = {}): ReportTab[] {
   const findingsTab = (): ReportTab => ({ id: FINDINGS_TAB, label: SECTION_LABELS.FINDINGS, count: findings, body: { kind: "findings" } });
-  const framesTab: ReportTab = { id: FRAMES_TAB, label: SECTION_LABELS.FRAMES, count: frames, body: { kind: "frames" } };
+  const framed: ReportTab[] = frames > 0 ? [{ id: FRAMES_TAB, label: SECTION_LABELS.FRAMES, count: frames, body: { kind: "frames" } }] : [];
   const kind = reportKind(l);
   const present = Object.keys(l.sections).filter((k) => !FACT_SECTIONS.has(k));
   if (kind === "critic") {
@@ -124,9 +166,9 @@ export function reportTabs(l: Launch, findings: number, frames = 0): ReportTab[]
     const extras = LENS_SECTIONS.filter((k) => present.includes(k) || LENS_IMPLIES.some(([re, s]) => s === k && re.test(lens)));
     const known = new Set<string>([...CRITIC_BASE, ...LENS_SECTIONS]);
     const others = present.filter((k) => !known.has(k));
-    return [findingsTab(), ...CRITIC_BASE.map((k) => itemsTab(l, k)), ...extras.map((k) => itemsTab(l, k)), ...others.map((k) => itemsTab(l, k)), framesTab, fileTab];
+    const compared: ReportTab[] = compare ? [{ id: COMPARE_TAB, label: SECTION_LABELS.COMPARE, count: 0, body: { kind: "compare" } }] : [];
+    return [findingsTab(), ...CRITIC_BASE.map((k) => itemsTab(l, k)), ...extras.map((k) => itemsTab(l, k)), ...others.map((k) => itemsTab(l, k)), ...compared, ...framed, fileTab];
   }
-  const framed = frames > 0 ? [framesTab] : [];
   if (kind === "implement") {
     const others = present.filter((k) => !IMPLEMENT_KNOWN.has(k));
     return [
@@ -150,8 +192,57 @@ export function emptyTabText(kind: ReportKind): string {
   return kind === "critic" ? "Критик ничего сюда не записал." : kind === "implement" ? "Исполнитель ничего сюда не записал." : "Запуск ничего сюда не записал.";
 }
 
-/** «Кадры» with none: frames are the run's, not the critic's writing, so the body says why there are none. */
-export const NO_FRAMES = "Кадров нет: отчёт не оценивал раздел интерфейса, а его находки не ссылаются на кадры.";
+/** A tab that carries no count: the file is one, the comparison is not a count of anything. */
+export const uncounted = (id: string): boolean => id === FILE_TAB || id === COMPARE_TAB;
+
+// ── the fold (craft-1; table #14) ────────────────────────────────────────────────────────────
+
+/** The strip's own room: its list's padding, the gap between tabs, the «Ещё N» trigger's reserved box. */
+export const FOLD = { padding: 6, gap: 4, trigger: 64 } as const;
+
+/** The tabs that fold into «Ещё N» when the strip is narrower than its tabs: from the right, in markup order — the
+ * open tab and «Файл отчёта» (where an unread line sends the user) never fold. `tabs` carry their measured widths,
+ * `strip` is the strip's width; every tab left in it shows its label whole. */
+export function foldTabs(tabs: readonly { id: string; width: number }[], active: string, strip: number): string[] {
+  return pack(
+    tabs.map((t) => ({ id: t.id, width: t.width, kind: t.id === active || t.id === FILE_TAB ? "pinned" : "ordinary" })),
+    strip - FOLD.padding,
+    { gap: FOLD.gap, overflow: FOLD.trigger },
+  );
+}
+
+// ── a craft report against the surface's earlier one (u6 shape, cand-3) ────────────────────────
+
+type Linked = Pick<Finding, "id" | "duplicateOf" | "repeatedBy">;
+
+/** The findings of two reports on one surface, matched only by the run's own record: a later finding the run wrote
+ * as a duplicate of an earlier one, or an earlier finding the run says a later one repeated. Nothing is matched by
+ * its wording — two critics word one defect differently, and a guess would be a false state. */
+export function compareFindings<F extends Linked>(earlier: readonly F[], later: readonly F[]): { fresh: F[]; kept: F[]; gone: F[] } {
+  const before = new Set(earlier.map((f) => f.id));
+  const repeated = new Map(earlier.flatMap((f) => (f.repeatedBy ? [[f.repeatedBy, f.id] as const] : [])));
+  const matched = new Set<string>();
+  const kept: F[] = [];
+  const fresh: F[] = [];
+  for (const f of later) {
+    const was = f.duplicateOf && before.has(f.duplicateOf) ? f.duplicateOf : repeated.get(f.id);
+    if (was) {
+      kept.push(f);
+      matched.add(was);
+    } else fresh.push(f);
+  }
+  return { fresh, kept, gone: earlier.filter((f) => !matched.has(f.id)) };
+}
+
+/** «Находки 18 → 3 · Не проверено 1 → 1 · …»: the later report's parts that hold writing, each counted in both. */
+export function partCounts(earlier: readonly ReportTab[], later: readonly ReportTab[]): string {
+  const counted = (t: ReportTab) => t.body.kind === "findings" || t.body.kind === "items" || t.body.kind === "parts";
+  const before = new Map(earlier.filter(counted).map((t) => [t.id, t.count]));
+  return later
+    .filter(counted)
+    .map((t) => `${t.label} ${num(before.get(t.id) ?? 0)} → ${num(t.count)}`)
+    .join(" · ");
+}
 
 // ── outcome words ────────────────────────────────────────────────────────────────────────────
 
@@ -189,11 +280,12 @@ export const verdictText = (c: Record<VerdictWord, number>): string => VERDICT_W
 /** An implementer's RESULT as written: «done», «partial», «blocked». */
 export const resultOf = (l: Pick<Launch, "sections">): string | null => (filled(l.sections.RESULT?.value) ? l.sections.RESULT.value.trim() : null);
 
-/** «3 строки не разобраны — они на вкладке «Файл отчёта»». */
-export function unparsedText(n: number): string {
+/** «3 строки не разобраны — они на вкладке «Файл отчёта»»; `inline` — a report whose file is its only part, shown
+ * under the line with no strip: «… — они в тексте отчёта ниже». */
+export function unparsedText(n: number, { inline = false }: { inline?: boolean } = {}): string {
   const lines = count(n, ["строка", "строки", "строк"]);
   const verb = plural(n, ["не разобрана", "не разобраны", "не разобраны"]);
-  return `${lines} ${verb} — ${n === 1 ? "она" : "они"} на вкладке «${SECTION_LABELS.FILE}»`;
+  return `${lines} ${verb} — ${n === 1 ? "она" : "они"} ${inline ? "в тексте отчёта ниже" : `на вкладке «${SECTION_LABELS.FILE}»`}`;
 }
 
 /** What the reader says in a running launch's place. */

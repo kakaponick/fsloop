@@ -12,8 +12,9 @@ import { isSelectFilter, type FilterDef } from "@/table";
 import { renderShell } from "../../app/testing.tsx";
 import { runPath } from "../../app/routes.ts";
 import { ReportsView, REPORT_NOT_FOUND_NEXT } from "./index.tsx";
-import { filtersFor, groupsOf, railItems, rankSurfaces } from "./model.ts";
+import { commonKind, filtersFor, groupsOf, railItems, rankSurfaces } from "./model.ts";
 import { OVERVIEW_EMPTY, OVERVIEW_LEAD } from "./overview.tsx";
+import { OVERVIEW_ITEM } from "./rail.tsx";
 import { fixtureApp, keyOf, loadedRun, NOW, renderOver, renderView } from "./testing.tsx";
 
 const N = 40; // the production maximum: 97 launches, one more running
@@ -24,7 +25,7 @@ const fx = fixtureApp({ only: [N, SMALL, INIT] });
 afterAll(() => fx.close());
 const run = loadedRun(fx, N, KEY);
 
-/** The rail's reports: its flat items but the first, «Обзор разделов интерфейса». */
+/** The rail's reports: its flat items but the first, «Обзор: оценки и токены». */
 const railLinks = () => [...document.querySelectorAll<HTMLAnchorElement>("[data-slot=report-rail] [data-flat-item]:not([data-slot=rail-overview])")];
 const loaded = () => waitFor(() => expect(railLinks()).toHaveLength(98), { timeout: 4000 });
 const bar = () => document.querySelector("[data-slot=status-bar]") as HTMLElement;
@@ -121,10 +122,11 @@ describe("the task walk (surfaces/reading.md → WALK «Отчёты»)", () => 
       "приёмка· проход 25",
     ]);
     for (const h of headings) expect(h.tabIndex).toBe(-1);
-    // a craft critic: description, kind word (its group mixes kinds), findings by severity as plain text
+    // a craft critic: description, no kind word — its group's 20 critics share it (cand-2), findings by severity as
+    // plain text
     const craft = railLinks().find((a) => a.dataset.flatItem === "p1-map-craft-accounts") as HTMLElement;
     expect(craft).toHaveTextContent("craft accounts");
-    expect(craft).toHaveTextContent("критик");
+    expect(craft.querySelector("[data-slot=rail-kind]")).toBeNull();
     expect(within(craft).getByText("3 critical · 6 major · 9 minor")).toBeInTheDocument();
     // the running launch: «работает · 12 мин», neutral, so no dot; an implementer: its result
     const running = railLinks().at(-1) as HTMLElement;
@@ -146,14 +148,24 @@ describe("the task walk (surfaces/reading.md → WALK «Отчёты»)", () => 
     expect(screen.getByRole("heading", { level: 2, name: "craft bots" })).toBeInTheDocument();
   });
 
-  test("craft-34: the kind word only where kinds mix in a group; a dot only where a state asks for the operator", async () => {
+  test("craft-34, cand-2: the kind word only on a row whose kind differs from its group's most common one; a dot only where a state asks for the operator", async () => {
     const view = renderView(fx, KEY, reportsPath(), ReportsView);
     await loaded();
     const link = (id: string) => railLinks().find((a) => a.dataset.flatItem === id) as HTMLElement;
     const kind = (id: string) => link(id).querySelector("[data-slot=rail-kind]");
-    // «карта · проход 1» holds the map and 20 craft critics: each row names its kind
+    // «карта · проход 1» holds the map and 20 craft critics: only the map says its kind, the 20 critics keep it in
+    // their title
     expect(kind("p1-map-map")).toHaveTextContent(/^карта$/);
-    expect(kind("p1-map-craft-accounts")).toHaveTextContent(/^критик$/);
+    expect(kind("p1-map-craft-accounts")).toBeNull();
+    expect(link("p1-map-craft-accounts").title).toMatch(/ — критик$/);
+    // and the running implementer among «приёмка · проход 2»'s critics
+    expect(railLinks().filter((a) => a.querySelector("[data-slot=rail-kind]")).map((a) => [a.dataset.flatItem, a.querySelector("[data-slot=rail-kind]")?.textContent])).toEqual([
+      ["p1-map-map", "карта"],
+      ["aa5b5ec85u30", "исполнитель"],
+    ]);
+    expect(commonKind(groupsOf(railItems(run))[0].items)).toBe("критик");
+    // a tie keeps the kind that came first: two kinds, one row each, mark the second
+    expect(commonKind([{ kind: "карта" }, { kind: "критик" }])).toBe("карта");
     // «ревью · проход 1» holds critics alone and «юниты в работе · проход 1» implementers alone: no kind word, the
     // item's title keeps it
     expect(kind("p1-review-critic-code")).toBeNull();
@@ -175,7 +187,7 @@ describe("the task walk (surfaces/reading.md → WALK «Отчёты»)", () => 
     const user = userEvent.setup({ delay: null });
     renderView(fx, KEY, reportsPath(), ReportsView);
     await loaded();
-    expect([...document.querySelectorAll<HTMLElement>("[data-toolbar-item]")].map((el) => el.dataset.toolbarItem)).toEqual(["search", "filter-agent", "filter-lens", "filter-surface"]);
+    expect([...document.querySelectorAll<HTMLElement>("[data-toolbar-item]")].map((el) => el.dataset.toolbarItem)).toEqual(["search", "filter-agent", "filter-lens", "filter-surface", "report-picker"]);
     expect(screen.getByRole("combobox", { name: "Агент" })).toHaveTextContent(/^Агент:все$/);
     expect(bar()).toHaveTextContent("98 запусков агента");
 
@@ -193,7 +205,7 @@ describe("the task walk (surfaces/reading.md → WALK «Отчёты»)", () => 
     expect(await screen.findByText("Нет отчётов, подходящих под фильтры")).toBeInTheDocument();
     expect(screen.getByText("Фильтры: Раздел: accounts · Поиск: «ни-одного-такого»")).toBeInTheDocument();
     // craft-27: the way back to the overview stays above the empty rail
-    expect(document.querySelector("[data-slot=report-rail] [data-slot=rail-overview]")).toHaveTextContent("Обзор разделов интерфейса");
+    expect(document.querySelector("[data-slot=report-rail] [data-slot=rail-overview]")).toHaveTextContent("Обзор: оценки и токены");
     await user.click(screen.getByRole("button", { name: "Сбросить фильтры" }));
     await loaded();
 
@@ -222,14 +234,16 @@ describe("the task walk (surfaces/reading.md → WALK «Отчёты»)", () => 
     expect(links.map((a) => a.getAttribute("href"))).toEqual([reportsPath({ report: "p1-map-craft-accounts" }), reportsPath({ report: "p1-map-craft-accounts" })]);
   });
 
-  test("craft-27: the wide rail opens on «Обзор разделов интерфейса» — the overview's address, current while no report is open", async () => {
+  test("craft-27, u6-shape cand-1: the wide rail opens on «Обзор: оценки и токены» — the overview's address, current while no report is open", async () => {
     const user = userEvent.setup({ delay: null });
     const view = renderView(fx, KEY, reportsPath({ report: "p1-map-craft-accounts" }), ReportsView);
     await loaded();
     const rail = screen.getByRole("group", { name: "Отчёты прогона" });
     const overview = rail.querySelectorAll<HTMLAnchorElement>("[data-flat-item]")[0];
     expect(overview).toHaveAttribute("data-slot", "rail-overview");
-    expect(overview).toHaveTextContent(/^Обзор разделов интерфейса$/);
+    // the overview holds the scores and the tokens: its name says both
+    expect(overview).toHaveTextContent(/^Обзор: оценки и токены$/);
+    expect(OVERVIEW_ITEM.split(/\s+/)).toHaveLength(4);
     expect(overview).toHaveAttribute("href", reportsPath());
     expect(overview).not.toHaveAttribute("aria-current");
     // its box is reserved like a report's: one line, a fixed height
@@ -347,15 +361,85 @@ describe("the strict rules (rules/ui → Strict)", () => {
     expect(document.querySelector("[data-slot=report-reader-scroll]")).toHaveClass("[scrollbar-gutter:stable]");
     expect(bar()).toHaveClass("h-8", "shrink-0");
     for (const c of document.querySelectorAll("[data-slot=report-sections] [data-slot=tab-count]")) expect(c).toHaveClass("min-w-count", "tabular-nums");
-    const agent = document.querySelector("[data-toolbar-item=filter-agent]") as HTMLElement;
-    expect(agent.querySelector("[data-slot=toolbar-sizer]")).not.toBeNull();
+    // a filter's trigger hugs the value the user picked — the change is the user's own click (ui → Widths; f9)
+    for (const id of ["filter-agent", "filter-lens", "filter-surface"]) expect(document.querySelector(`[data-toolbar-item=${id}] [data-slot=toolbar-sizer]`)).toBeNull();
     // the report's sections: a sticky strip, each finding one 32 px row (craft-13)
     expect(document.querySelector("[data-slot=report-sections] [role=tablist]")).toHaveClass("sticky", "top-0", "group-data-horizontal/tabs:h-10");
     for (const r of document.querySelectorAll("[data-slot=report-findings] [data-slot=finding-row]")) expect(r).toHaveClass("h-8");
-    // the fold: the rail's region and the picker's line both exist, the container decides which shows
+    // the ‹ › of the reader hold their place at both ends of the list
+    expect(document.querySelector("[data-slot=report-neighbours]")?.children).toHaveLength(2);
+    // the fold: the rail's region and the picker both exist, the container decides which shows (cand-4: the picker
+    // is the toolbar's, no line of its own)
     expect(document.querySelector("[data-slot=report-rail]")).toHaveClass("hidden", "@min-[52rem]/reports:flex", "w-60");
-    const picker = document.querySelector("[data-slot=report-picker]") as HTMLElement;
-    expect(picker).toHaveClass("h-10", "@min-[52rem]/reports:hidden");
-    expect(within(picker).getByRole("combobox", { name: "Отчёт: craft accounts · критик" })).toBeInTheDocument();
+    expect(document.querySelector("[data-slot=report-picker]")).toBeNull();
+    const picker = within(document.querySelector("[data-toolbar-item=report-picker]") as HTMLElement).getByRole("combobox");
+    expect(picker).toHaveClass("@min-[52rem]/reports:hidden");
+  });
+});
+
+describe("cand-4: the narrow view's «Отчёт» picker", () => {
+  test("cand-4: in the toolbar, its options naming each report's stage and state as the rail does", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderView(fx, KEY, reportsPath({ report: "p1-map-craft-accounts" }), ReportsView);
+    await loaded();
+    const picker = screen.getByRole("combobox", { name: "Отчёт: craft accounts · карта, проход 1 · 3 critical · 6 major · 9 minor" });
+    await user.click(picker);
+    const options = (await screen.findAllByRole("option")).map((o) => o.textContent);
+    expect(options).toHaveLength(98);
+    expect(options).toContain("craft accounts · карта, проход 1 · 3 critical · 6 major · 9 minor");
+    expect(options).toContain("u1 implement · юниты в работе, проход 1 · итог: done · 1 находка");
+    expect(options).toContain("critic code verdict · проверка исправлений, проход 1 · 1 resolved · 1 partial · 0 unresolved");
+    expect(options.at(-1)).toBe("u30 implement · приёмка, проход 2 · работает · 12 мин");
+  });
+});
+
+describe("cand-8: the rail's focus", () => {
+  test("cand-8: a focused item wears a 2 px ring in full muted ink — apart from the open item's 1 px ink mark", async () => {
+    renderView(fx, KEY, reportsPath({ report: "p1-map-craft-accounts" }), ReportsView);
+    await loaded();
+    for (const a of [document.querySelector("[data-slot=rail-overview]") as HTMLElement, ...railLinks()]) {
+      expect(a).toHaveClass("focus-visible:ring-2", "focus-visible:ring-ring", "focus-visible:ring-inset");
+      expect(a.className).not.toMatch(/ring-ring\/50/);
+    }
+    expect(railLinks().find((a) => a.dataset.flatItem === "p1-map-craft-accounts")).toHaveClass("shadow-target");
+  });
+});
+
+describe("u6-shape cand-1: tokens by stage and by agent kind in the overview", () => {
+  const spend = (input: number, output: number, cacheWrite: number, cacheRead: number) => ({ input, output, cacheWrite, cacheRead });
+  const tokens = {
+    stage: [
+      { key: "p1-map", launches: 21, spend: spend(900, 40_000, 250_000, 3_100_000) },
+      { key: "p1-review", launches: 4, spend: spend(0, 0, 0, 1_700_000) },
+    ],
+    kind: [
+      { key: "карта", launches: 1, spend: spend(900, 40_000, 250_000, 3_100_000) },
+      { key: "критик", launches: 24, spend: spend(0, 0, 0, 1_700_000) },
+    ],
+  };
+
+  test("u6-shape cand-1: «Расход токенов» — each stage and each kind with its launches and its tokens, the split in the title", () => {
+    renderOver(fx, { ...run, tokens }, reportsPath(), ReportsView);
+    const section = document.querySelector("[data-slot=reports-spend]") as HTMLElement;
+    expect(within(section).getByRole("heading", { level: 2 })).toHaveTextContent(/^Расход токенов$/);
+    const rows = (name: string) => [...within(section).getByRole("region", { name }).querySelectorAll<HTMLElement>("[data-slot=fact]")].map((r) => [r.querySelector("dt")?.textContent, r.querySelector("dd")?.textContent]);
+    expect(rows("По этапам")).toEqual([
+      ["проход 1 · карта", "21 запуск агента · 3,4 млн токенов"],
+      ["проход 1 · ревью", "4 запуска агента · 1,7 млн токенов"],
+    ]);
+    expect(rows("По агентам")).toEqual([
+      ["карта", "1 запуск агента · 3,4 млн токенов"],
+      ["критик", "24 запуска агента · 1,7 млн токенов"],
+    ]);
+    const first = section.querySelector("[data-slot=fact] dd span") as HTMLElement;
+    expect(first).toHaveAttribute("title", "вход 900 · выход 40 000 · запись в кэш 250 000 · чтение кэша 3 100 000");
+    // it follows the surfaces, which the overview leads with
+    const surfaces = document.querySelector("[data-slot=reports-overview]") as HTMLElement;
+    expect(surfaces.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test("u6-shape cand-1: a run whose launches recorded no tokens says so, never a zero", () => {
+    renderOver(fx, { ...run, tokens: { stage: [], kind: [] } }, reportsPath(), ReportsView);
+    expect(document.querySelector("[data-slot=reports-spend] [data-slot=spend-none]")).toHaveTextContent(/^не записано: в записях запусков прогона нет токенов$/);
   });
 });

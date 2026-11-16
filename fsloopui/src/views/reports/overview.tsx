@@ -1,13 +1,63 @@
 // The overview (surfaces/reading.md → BLOCKS 7; LEADS: no report open): what the user reads before choosing a
 // report — the run's surfaces ranked by their critical + major findings, each one running-text line with its craft
 // scores across stages, every number a link to the report that gave it. A running-text list, not a data table
-// (Settled): at most 28 lines, nothing to sort.
-import type { Finding, Surface } from "../../../shared/model.ts";
-import { SEVERITY } from "../../../shared/states.ts";
-import { num } from "../../../shared/text.ts";
-import { Dot } from "@/ui";
+// (Settled): at most 28 lines, nothing to sort. Under it, what the launches spent (u6-shape cand-1): tokens by stage
+// and by agent kind, as the run records them (`Run.tokens`, a launch's children counted with it).
+import type { Finding, RunTokens, Surface } from "../../../shared/model.ts";
+import { SEVERITY, stageOf } from "../../../shared/states.ts";
+import { count, NOUNS, num, tokens as tokensOf, type SpendRow } from "../../../shared/text.ts";
+import { Dot, FactList, NotRecorded } from "@/ui";
 import { rankSurfaces } from "./model.ts";
 import { SurfaceScores } from "./scores.tsx";
+
+export const SPEND_TITLE = "Расход токенов";
+export const SPEND_NONE = "в записях запусков прогона нет токенов";
+
+/** One spend list: a row per key — a stage in its full words, a kind as the map writes it — its launches and its
+ * tokens, the split in the title. */
+function SpendList({ title, rows, label }: { title: string; rows: readonly SpendRow[]; label: (key: string) => string }) {
+  return (
+    <section aria-label={title} className="flex min-w-0 flex-col gap-1">
+      <h3 className="m-0 text-xs font-normal text-muted-foreground">{title}</h3>
+      <FactList
+        label={title}
+        facts={rows.map((r) => {
+          const t = tokensOf(r.spend);
+          return {
+            key: r.key,
+            label: label(r.key),
+            value: (
+              <span title={t.title} className="tabular-nums">
+                {count(r.launches, NOUNS.launch)} · {t.compact}
+              </span>
+            ),
+          };
+        })}
+      />
+    </section>
+  );
+}
+
+/** «Расход токенов»: by stage, then by agent kind; «не записано» where the launches recorded none, never a zero. */
+export function Spend({ tokens }: { tokens: RunTokens }) {
+  return (
+    <section aria-labelledby="reports-spend" data-slot="reports-spend" className="flex max-w-measure flex-col gap-3">
+      <h2 id="reports-spend" className="m-0 text-lg font-semibold">
+        {SPEND_TITLE}
+      </h2>
+      {tokens.stage.length || tokens.kind.length ? (
+        <>
+          <SpendList title="По этапам" rows={tokens.stage} label={(k) => stageOf(k).full} />
+          <SpendList title="По агентам" rows={tokens.kind} label={(k) => k} />
+        </>
+      ) : (
+        <p data-slot="spend-none" className="m-0">
+          <NotRecorded cause={SPEND_NONE} />
+        </p>
+      )}
+    </section>
+  );
+}
 
 export const OVERVIEW_TITLE = "Разделы интерфейса";
 // The list of reports is a rail on the left in a wide view and the «Отчёт» picker above in a narrow one: the copy

@@ -1,7 +1,8 @@
 // The report rail (surfaces/reading.md → BLOCKS 2; rules/ui → Conventions 8): one flat list with one Tab stop — ↑/↓
-// move, Enter opens — of «Обзор разделов», then every launch in run order, under non-focusable stage headings with
+// move, Enter opens — of the overview, then every launch in run order, under non-focusable stage headings with
 // their counts. Each item is one link as a whole: the description (truncated, whole in its title) with its kind word
-// where its group mixes kinds, then its state as plain text — «2 major · 5 minor», «работает · 4 мин» — with a dot
+// where it differs from its group's most common kind, then its state as plain text — «2 major · 5 minor», «работает ·
+// 4 мин» — with a dot
 // only where the state asks for the operator («нет отчёта»): severity's tones live in the reader and the overview,
 // where they rank something (DESIGN.md → The Signal-Only Rule). The rail is height-bounded and scrolls inside; the
 // held-order strip under it keeps its line whether anything waits or not (Strict 1).
@@ -11,7 +12,7 @@ import type { Finding } from "../../../shared/model.ts";
 import { num } from "../../../shared/text.ts";
 import { cn } from "@/lib/utils";
 import { copyItem, Dot, flatItem, FlatList, markProps, Menu, OutOfFilter } from "@/ui";
-import { groupsOf, groupTitle, itemState, type HeldItem } from "./model.ts";
+import { commonKind, groupsOf, groupTitle, itemState, type HeldItem } from "./model.ts";
 
 export interface RailProps {
   items: readonly HeldItem[];
@@ -34,10 +35,13 @@ export interface RailProps {
 
 export const RAIL_LABEL = "Отчёты прогона";
 export const COPY_PATH = "путь к отчёту";
-/** The rail's first item; the narrow view's «Отчёт» picker names the same place in lower case. */
-export const OVERVIEW_ITEM = "Обзор разделов интерфейса";
+/** The rail's first item: the overview holds the surfaces' scores and the run's tokens (u6-shape cand-1); the narrow
+ * view's «Отчёт» picker names the same place in lower case. */
+export const OVERVIEW_ITEM = "Обзор: оценки и токены";
 
-const ITEM_CLASS = "rounded-md px-2 outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset";
+/** cand-8: the focus is a 2 px ring in full muted ink — the open item's mark is 1 px of ink on the muted ground, so a
+ * focused open item wears both and the two never read as one. */
+const ITEM_CLASS = "rounded-md px-2 outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
 
 export function Rail({ items, findings, current, outside, arrived, hrefOf, overviewHref, pathOf, empty, now }: RailProps) {
   const root = useRef<HTMLDivElement>(null);
@@ -64,8 +68,8 @@ export function Rail({ items, findings, current, outside, arrived, hrefOf, overv
         {empty}
         {!empty && groups.map((group, g) => {
           const title = groupTitle(group.stage);
-          // the kind word tells rows apart only where a group mixes kinds; elsewhere it stays in the title
-          const mixed = new Set(group.items.map((i) => i.kind)).size > 1;
+          // the kind word only on a row whose kind is not the group's usual one; every row keeps it in its title
+          const usual = commonKind(group.items);
           return (
             <section key={`${group.stage}-${g}`} aria-label={[title.word, title.pass].filter(Boolean).join(", ")} className="flex flex-col">
               <h3 data-slot="rail-heading" className="sticky top-0 z-10 m-0 flex h-7 items-center gap-1.5 bg-background px-2 text-xs font-normal text-muted-foreground">
@@ -92,7 +96,7 @@ export function Rail({ items, findings, current, outside, arrived, hrefOf, overv
                       {outside.has(item.id) ? (
                         <OutOfFilter className="ml-auto shrink-0" />
                       ) : (
-                        mixed && (
+                        item.kind !== usual && (
                           <span data-slot="rail-kind" className="ml-auto shrink-0 text-xs text-muted-foreground">
                             {item.kind}
                           </span>

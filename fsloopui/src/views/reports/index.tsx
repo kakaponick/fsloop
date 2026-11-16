@@ -11,13 +11,13 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { NOUNS } from "../../../shared/text.ts";
 import { CountCombobox, EmptyState, emptyWhen, HeldStrip, NotFound, type HeldNoun } from "@/ui";
-import { AdaptiveToolbar, FilterControl, filterSummary, isSelectFilter, pushHistory, runQuery, SearchBox, StatusBar, useRunView, useTableView, ANY_LABEL, type FilterDef, type ToolbarItem } from "@/table";
+import { AdaptiveToolbar, FilterControl, filterSummary, pushHistory, runQuery, SearchBox, StatusBar, useRunView, useTableView, type FilterDef, type ToolbarItem } from "@/table";
 import { useNow } from "../../app/clock.tsx";
 import { useUpdatedAt } from "../../app/live.tsx";
 import { runPath } from "../../app/routes.ts";
 import type { LoadedRun, ViewProps } from "../index.ts";
-import { filtersFor, heldItems, placeItems, railItems, REPORTS_VIEW, resolveItem, SEARCH, type RailItem } from "./model.ts";
-import { Overview } from "./overview.tsx";
+import { filtersFor, groupsOf, heldItems, itemState, pickerLabel, placeItems, railItems, REPORTS_VIEW, resolveItem, SEARCH, type RailItem } from "./model.ts";
+import { Overview, Spend } from "./overview.tsx";
 import { OVERVIEW_ITEM, Rail, RAIL_LABEL } from "./rail.tsx";
 import { Reader, reportPath } from "./reader.tsx";
 
@@ -66,8 +66,13 @@ function Reports({ run }: { run: LoadedRun }) {
   });
   const kept = new Set(q.rows.map((i) => i.id));
   const railShown = shown.filter((s) => kept.has(s.item.id));
+  const ended = new Set(railShown.filter((s) => s.ended).map((s) => s.item.id));
 
   const hrefOf = (id: string) => runPath(run.key, { view: "reports", report: id });
+  // the previous and the next report of the list as the user sees it — filtered, held, under its stage headings
+  // (p1-review cand-6)
+  const order = groupsOf(railShown.map((s) => s.item)).flatMap((g) => g.items.map((i) => i.id));
+  const at = item ? order.indexOf(item.id) : -1;
   const pathOf = (id: string) => {
     const l = run.launches.find((x) => x.id === id);
     return l?.report ? reportPath(run.dir, l.report) : null;
@@ -110,13 +115,32 @@ function Reports({ run }: { run: LoadedRun }) {
       flex: true,
       node: <SearchBox value={prefs.search} onChange={(v) => setPrefs({ search: v })} placeholder={SEARCH.placeholder} history={table.history} onCommit={(term) => setTable({ history: pushHistory(table.history, term) })} />,
     },
+    // a filter's trigger hugs the value the user picked: its change is the user's own (ui → Widths; f9)
     ...defs.map<ToolbarItem>((f) => ({
       id: `filter-${f.id}`,
       kind: "ordinary",
       active: Boolean(prefs.filters[f.id]?.length),
-      values: isSelectFilter(f as FilterDef<unknown>) ? [ANY_LABEL, ...f.options.map((o) => o.label)].map((v) => `${f.label}: ${v}`) : undefined,
       node: <FilterControl def={f} value={prefs.filters[f.id] ?? []} counts={q.counts[f.id]} onChange={(v) => setPrefs({ filters: { ...prefs.filters, [f.id]: v } })} />,
     })),
+    // cand-4: below the width for rail + reading column the rail folds into this picker, in the toolbar's line — no
+    // line of its own; each option names what the rail shows of its report: the stage heading and the state. Wide, it
+    // takes no room; narrow, the filters fold into «…» before it does.
+    {
+      id: "report-picker",
+      kind: "sticky",
+      node: (
+        <CountCombobox
+          label={REPORT_PICKER}
+          single
+          value={item ? [item.id] : []}
+          onValueChange={(v) => navigate(v[0] ? hrefOf(v[0]) : runPath(run.key, { view: "reports" }))}
+          options={groupsOf(railShown.map((s) => s.item)).flatMap((g) => g.items.map((i) => ({ value: i.id, label: pickerLabel(i, itemState(i, run.findings, now, { ended: ended.has(i.id) })) })))}
+          placeholder="Найти отчёт"
+          anyLabel={OVERVIEW_ITEM.toLowerCase()}
+          className="@min-[52rem]/reports:hidden"
+        />
+      ),
+    },
   ];
 
   const empty = items.length === 0 && shown.length === 0;
@@ -145,17 +169,6 @@ function Reports({ run }: { run: LoadedRun }) {
           <HeldStrip counts={{ fresh, moved, left: 0 }} noun={NOUN} onApply={() => setHeld(placeItems(items, held))} />
         </nav>
         <div className="flex min-w-0 flex-1 flex-col">
-          <div data-slot="report-picker" className="flex h-10 shrink-0 items-center gap-2 border-b @min-[52rem]/reports:hidden">
-            <CountCombobox
-              label={REPORT_PICKER}
-              single
-              value={item ? [item.id] : []}
-              onValueChange={(v) => navigate(v[0] ? hrefOf(v[0]) : runPath(run.key, { view: "reports" }))}
-              options={railShown.map((s) => ({ value: s.item.id, label: `${s.item.description} · ${s.item.kind}` }))}
-              placeholder="Найти отчёт"
-              anyLabel={OVERVIEW_ITEM.toLowerCase()}
-            />
-          </div>
           <div
             ref={reader}
             data-slot="report-reader-scroll"
@@ -169,7 +182,7 @@ function Reports({ run }: { run: LoadedRun }) {
                 <EmptyState form="not-yet" noun={NOUNS.report} step="map" className="py-16" />
               )
             ) : item ? (
-              <Reader key={item.id} run={run} item={item} tab={tab} onTab={onTab} now={now} />
+              <Reader key={item.id} run={run} item={item} tab={tab} onTab={onTab} prev={order[at - 1] ?? null} next={at < 0 ? null : (order[at + 1] ?? null)} hrefOf={hrefOf} now={now} />
             ) : (
               <div className="flex flex-col gap-6">
                 {reportId && (
@@ -179,6 +192,7 @@ function Reports({ run }: { run: LoadedRun }) {
                   </p>
                 )}
                 <Overview surfaces={run.surfaces} findings={run.findings} hrefOf={(launch) => (run.launches.some((l) => l.id === launch) ? hrefOf(launch) : null)} />
+                <Spend tokens={run.tokens} />
               </div>
             )}
           </div>

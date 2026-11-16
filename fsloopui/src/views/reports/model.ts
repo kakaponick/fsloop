@@ -112,6 +112,23 @@ export function groupsOf(items: readonly RailItem[]): RailGroup[] {
   return out;
 }
 
+/** The kind most of a group's rows share — a tie keeps the one that came first. The rail names a row's kind only
+ * where it differs from it (cand-2): «карта · проход 1» holds the map and 20 critics, and only the map says «карта». */
+export function commonKind(items: readonly Pick<RailItem, "kind">[]): string | null {
+  const counts = new Map<string, number>();
+  for (const i of items) counts.set(i.kind, (counts.get(i.kind) ?? 0) + 1);
+  let best: string | null = null;
+  for (const [kind, n] of counts) if (best === null || n > (counts.get(best) ?? 0)) best = kind;
+  return best;
+}
+
+/** The narrow view's «Отчёт» option for an item: what the rail shows of it — the description, its stage heading and
+ * its state line (cand-4: the picker stands in for the rail, so it recalls nothing the rail shows). */
+export function pickerLabel(item: RailItem, state: ItemState): string {
+  const title = groupTitle(item.stage);
+  return `${item.description} · ${title.word}${title.pass ? `, ${title.pass}` : ""} · ${state.text}`;
+}
+
 /** A group's heading: the stage word, «проход k» — «ревью», «проход 2»; a launch with no stage — «этап не записан». */
 export function groupTitle(stage: string | null): { word: string; pass: string | null } {
   if (!stage) return { word: "этап не записан", pass: null };
@@ -234,6 +251,16 @@ export function rankSurfaces(surfaces: readonly Surface[], findings: readonly Pi
       return { key: s.key, label: s.label, critical: own.filter((f) => f.severity === "critical").length, major: own.filter((f) => f.severity === "major").length, scores: s.scores };
     })
     .sort((a, b) => b.critical + b.major - (a.critical + a.major) || b.critical - a.critical || rank(a) - rank(b) || a.key.localeCompare(b.key));
+}
+
+/** The report that scored the same surface just before `launch` — a craft report's earlier counterpart (u6 shape,
+ * cand-3: p1-map against p2-assess); null for a surface's first report, or one that scores none. */
+export function earlierReport(surfaces: readonly Pick<Surface, "scores">[], launch: string): string | null {
+  for (const s of surfaces) {
+    const at = s.scores.findIndex((sc) => sc.launch === launch);
+    if (at > 0) return s.scores[at - 1].launch;
+  }
+  return null;
 }
 
 /** One score series: the stages that wrote it, in order, and the scale its last stage used. */
