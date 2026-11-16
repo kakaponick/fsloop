@@ -97,17 +97,35 @@ describe("empty state", () => {
 
   test("improve-4 (2), design-1: a named view filtered to none names the view and what fills it (rules/ui → Conventions 16), then the search and «Сбросить фильтры»", async () => {
     const onReset = vi.fn();
-    const named = { form: "filtered", noun: NOUNS.unit, filters: ["Поиск: «zzz»"], view: { label: "Заблокированы", fills: "заблокирован" }, onReset } as const;
-    expect(emptyStateText(named)).toEqual({ title: "В виде «Заблокированы» нет юнитов", description: "В вид входят: заблокирован. Фильтры: Поиск: «zzz»" });
-    expect(emptyStateText({ ...named, noun: NOUNS.finding, filters: [], view: { label: "С возражением", fills: "не согласен, не та серьёзность, ложная находка" } })).toEqual({
+    const named = { form: "filtered", noun: NOUNS.unit, filters: ["Поиск: «zzz»"], view: { label: "Заблокированы", fills: ["заблокирован"] }, onReset } as const;
+    // craft-6: «входит» agrees with one value
+    expect(emptyStateText(named)).toEqual({ title: "В виде «Заблокированы» нет юнитов", description: "В вид входит: заблокирован. Фильтры: Поиск: «zzz»" });
+    expect(emptyStateText({ ...named, noun: NOUNS.finding, filters: [], view: { label: "С возражением", fills: ["не согласен", "не та серьёзность", "ложная находка"] } })).toEqual({
       title: "В виде «С возражением» нет находок",
       description: "В вид входят: не согласен, не та серьёзность, ложная находка",
     });
     render(<EmptyState {...named} />);
     expect(screen.getByText("В виде «Заблокированы» нет юнитов")).toBeInTheDocument();
-    expect(screen.getByText("В вид входят: заблокирован. Фильтры: Поиск: «zzz»")).toBeInTheDocument();
+    expect(screen.getByText("В вид входит: заблокирован. Фильтры: Поиск: «zzz»")).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole("button", { name: "Сбросить фильтры" }));
     expect(onReset).toHaveBeenCalledOnce();
+  });
+
+  test("p3-review-critic-craft-2#craft-6: a view the search alone emptied names the search as the cause and what it hid; «входит» agrees in number; the way out is the cause's own", async () => {
+    const onReset = vi.fn();
+    const hid = { form: "filtered", noun: NOUNS.unit, filters: [], view: { label: "Заблокированы", fills: ["заблокирован"], hid: { search: "zzzzqq", count: 1 } }, onReset, resetLabel: "Очистить поиск" } as const;
+    const one = emptyStateText(hid);
+    expect(one).toEqual({ title: "Поиск «zzzzqq» скрыл 1 юнит вида «Заблокированы»", description: "В вид входит: заблокирован" });
+    expect(one.title.split(" ")).toHaveLength(7);
+    expect(one.description?.split(" ")).toHaveLength(4);
+    const many = emptyStateText({ ...hid, noun: NOUNS.finding, view: { label: "С возражением", fills: ["не согласен", "не та серьёзность", "ложная находка"], hid: { search: "toast", count: 12 } } });
+    expect(many).toEqual({ title: "Поиск «toast» скрыл 12 находок вида «С возражением»", description: "В вид входят: не согласен, не та серьёзность, ложная находка" });
+    expect(many.title.split(" ")).toHaveLength(8);
+    render(<EmptyState {...hid} />);
+    expect(screen.getByText("Поиск «zzzzqq» скрыл 1 юнит вида «Заблокированы»")).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Очистить поиск" }));
+    expect(onReset).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Сбросить фильтры" })).toBeNull();
   });
 });
 

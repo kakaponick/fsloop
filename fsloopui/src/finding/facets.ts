@@ -3,7 +3,7 @@
 // runs the same values the view's filters run, so the two never disagree. Nothing here reaches the app's routes:
 // the view's own modules read these constants while the app is still loading (`open.ts` holds the navigation).
 import type { Finding } from "../../shared/model.ts";
-import type { FindingStatus } from "../../shared/states.ts";
+import type { FindingStatus, Verdict } from "../../shared/states.ts";
 
 /** The findings view's table id: its view state is kept under it. */
 export const FINDINGS_TABLE = "findings";
@@ -14,6 +14,9 @@ export const NONE = "none";
 export const MAJOR_UP = "major+";
 /** The verdict filter's «с возражением»: every verdict but «согласен» — the user disputes the finding (cand-7). */
 export const OBJECTED = "objected";
+/** The verdicts that dispute a finding — «с возражением» (cand-7): the one set the filter's facet and the «Вид»'s second
+ * part both read, so a new verdict that does not dispute stays out of both. */
+export const DISPUTING: readonly Verdict[] = ["disagree", "wrong-severity", "false-positive"];
 
 /** «В исправление»: taken to fix and not yet done — waiting for a unit, in its unit, blocked, or back again. */
 export const FIX_STATES: readonly FindingStatus[] = ["queued", "in-progress", "blocked", "unresolved", "repeated"];
@@ -31,7 +34,7 @@ export const FACETS = {
   state: (f: FindingLike): string[] => [f.effectiveStatus],
   report: (f: FindingLike): string[] => [f.launch ?? (f.source === "own" ? OWN : NONE)],
   unit: (f: FindingLike): string[] => (f.units.length ? f.units : [NONE]),
-  verdict: (f: FindingLike): string[] => (f.verdict ? (f.verdict.verdict === "agree" ? [f.verdict.verdict] : [f.verdict.verdict, OBJECTED]) : [NONE]),
+  verdict: (f: FindingLike): string[] => (f.verdict ? (DISPUTING.includes(f.verdict.verdict) ? [f.verdict.verdict, OBJECTED] : [f.verdict.verdict]) : [NONE]),
   cause: (f: FindingLike): string[] => [f.cause ?? NONE],
   command: (f: FindingLike): string[] => [f.fixCommand ?? NONE],
 } as const;

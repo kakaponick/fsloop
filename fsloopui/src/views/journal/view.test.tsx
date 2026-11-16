@@ -493,6 +493,8 @@ describe("pass 2 (f16): volume, keyboard, the entry's address", () => {
     const cap = within(group).getByText("G");
     expect(cap.tagName).toBe("KBD");
     expect(cap.parentElement).not.toHaveAttribute("aria-hidden");
+    // code-3: the shared in-field cap, the search's own part
+    expect(cap.parentElement).toHaveAttribute("data-slot", "field-cap");
     expect(group.closest("[data-slot=tooltip-trigger]")).toBeNull();
     // the physical key G — the Russian layout's «п» too — focuses the field; then the cap hides, its box kept
     fireEvent.keyDown(document.body, { code: "KeyG", key: "п" });

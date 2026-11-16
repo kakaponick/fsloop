@@ -11,7 +11,7 @@ import { Link } from "react-router-dom";
 import type { Finding } from "../../../shared/model.ts";
 import { count, NOUNS, num } from "../../../shared/text.ts";
 import { cn } from "@/lib/utils";
-import { copyItem, Dot, flatItem, FlatList, markProps, Menu, OutOfFilter, REVEAL_GAP, revealIn } from "@/ui";
+import { copyItem, Dot, flatItem, FlatList, markProps, Menu, OutOfFilter, revealIn } from "@/ui";
 import { commonKind, commonResult, groupsOf, groupTitle, itemState, type HeldItem } from "./model.ts";
 
 export interface RailProps {
@@ -51,15 +51,14 @@ export function Rail({ items, findings, current, outside, arrived, hrefOf, overv
   // The open report is in view when the rail opens on it, or a link elsewhere changes it — the rail's own scroller
   // moves, and nothing above it (`@/ui` → revealIn; Strict 1, craft-1).
   // A report above the rail's view, or one under its sticky stage heading, comes to the heading's foot, 8 px clear;
-  // one past the view's end by as little as shows it (design-6: `revealIn` sets `scrollTop` and reads no scroll
-  // padding, so the heading's height is its `gap`).
+  // one past the view's end by as little as shows it — `revealIn`'s one rule under a sticky heading, `head` (design-6,
+  // code-4: it sets `scrollTop` and reads no scroll padding, so the heading's height is passed).
   useLayoutEffect(() => {
     if (!current) return;
     const el = [...(root.current?.querySelectorAll<HTMLElement>("[data-flat-item]") ?? [])].find((e) => e.dataset.flatItem === current);
     const scroller = root.current?.closest<HTMLElement>("[data-slot=rail-scroll]");
     if (!el || !scroller) return;
-    const under = el.getBoundingClientRect().top < scroller.getBoundingClientRect().top + RAIL_HEADING;
-    revealIn(scroller, el, under ? { gap: RAIL_HEADING + REVEAL_GAP, focus: false } : { nearest: true, focus: false });
+    revealIn(scroller, el, { head: RAIL_HEADING, focus: false });
   }, [current]);
   const groups = groupsOf(items.map((h) => h.item));
   const ended = new Set(items.filter((h) => h.ended).map((h) => h.item.id));

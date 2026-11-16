@@ -5,7 +5,7 @@ import type { Finding, Run } from "../../../shared/model.ts";
 import { FINDING_STATUS, NOT_RECORDED, SEVERITY, stageOf, STEPS, VERDICT, type FindingStatus, type Verdict } from "../../../shared/states.ts";
 import type { FilterDef, Preset, SearchDef } from "@/table";
 // From the file, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
-import { DONE_STATES, FACETS, FIX_STATES, MAJOR_UP, NONE, OBJECTED, OWN } from "@/finding/facets.ts";
+import { DISPUTING, DONE_STATES, FACETS, FIX_STATES, MAJOR_UP, NONE, OBJECTED, OWN } from "@/finding/facets.ts";
 
 // ── ranks (table #2: states by rank, never by alphabet) ─────────────────────────────────────────
 
@@ -25,18 +25,19 @@ export const DEFAULT_SORT = { id: "severity", desc: false } as const;
 
 // ── «Вид» (rules/ui → Conventions 16) ───────────────────────────────────────────────────────────
 
-/** A slice's second part (improve-4): the words of the states or verdicts it holds, from their maps. */
-const states = (keys: readonly FindingStatus[]): string => keys.map((k) => FINDING_STATUS[k].compact).join(", ");
-const DISPUTING = (Object.keys(VERDICT) as Verdict[]).filter((v) => v !== "agree");
+/** What a slice holds (improve-4), in the words of the states or verdicts it holds, from their maps; the kit's
+ * `presetDetail` makes its second part. */
+const states = (keys: readonly FindingStatus[]): string[] => keys.map((k) => FINDING_STATUS[k].compact);
 
 export const PRESETS: readonly Preset[] = [
   { id: "all", label: "Все", filters: {} },
   { id: "unrated", label: "Без оценки", filters: { verdict: [NONE] } },
-  // the three verdicts that dispute a finding, together: «…и с чем я не согласен?» (PRODUCT.md → Surfaces; cand-7)
-  { id: "objected", label: "С возражением", filters: { verdict: [OBJECTED] }, detail: DISPUTING.map((v) => VERDICT[v].compact).join(", ") },
-  { id: "fix", label: "В исправление", filters: { state: [...FIX_STATES] }, detail: states(FIX_STATES) },
+  // the three verdicts that dispute a finding, together: «…и с чем я не согласен?» (PRODUCT.md → Surfaces; cand-7) —
+  // the one disputing set the filter's facet reads too (code-7)
+  { id: "objected", label: "С возражением", filters: { verdict: [OBJECTED] }, holds: DISPUTING.map((v) => VERDICT[v].compact) },
+  { id: "fix", label: "В исправление", filters: { state: [...FIX_STATES] }, holds: states(FIX_STATES) },
   { id: "candidates", label: "Кандидаты", filters: { state: ["candidate"] } },
-  { id: "done", label: "Закоммичены", filters: { state: [...DONE_STATES] }, detail: states(DONE_STATES) },
+  { id: "done", label: "Закоммичены", filters: { state: [...DONE_STATES] }, holds: states(DONE_STATES) },
 ];
 
 // ── search (table #12) ──────────────────────────────────────────────────────────────────────────

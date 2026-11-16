@@ -8,7 +8,7 @@ import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
 import { NOUNS } from "../../../shared/text.ts";
 import { emptyStateText, glossaryLines, missingText, readPref } from "@/ui";
-import { assertLayout, fitsRegion, FRAME, headerWidth, isSelectFilter, mergeWidths, pack, runQuery, StatusBar, tableMinWidth, type FilterDef, type PackItem } from "@/table";
+import { assertLayout, fitsRegion, FRAME, headerWidth, isSelectFilter, mergeWidths, pack, presetDetail, runQuery, StatusBar, tableMinWidth, type FilterDef, type PackItem } from "@/table";
 import { GAP, OVERFLOW_WIDTH } from "../../table/toolbar.tsx";
 import { runKey as viewKey, type RunPrefs } from "../../table/view-state.ts";
 import { applyStylesheet, textWidth, usedBlockSize } from "../../app/layout-testing.ts";
@@ -212,7 +212,7 @@ describe("the view's configuration at the production shape", () => {
   });
 
   test("improve-4 (1): «Вид» names the states of each slice that holds several, from its own definition — every string against a literal", () => {
-    expect(PRESETS.map((p) => [p.label, p.detail ?? null])).toEqual([
+    expect(PRESETS.map((p) => [p.label, presetDetail(p) ?? null])).toEqual([
       ["Все", null],
       ["В работе", "пишется, проверяется, отладка, вливается"],
       ["Не начаты", "черновик, готов к работе"],
@@ -365,7 +365,7 @@ describe("the task walk over u1's handler (surfaces/units.md → WALK)", () => {
     await loaded();
   });
 
-  test("improve-4 (2): «Вид: Заблокированы» and a search that matches nothing — the view named with what fills it, then the search and «Сбросить фильтры»", async () => {
+  test("improve-4 (2), craft-6: «Вид: Заблокированы» and a search that matches nothing — the search named as the cause, with the unit it hid and what fills the view; «Очистить поиск» brings it back", async () => {
     const user = userEvent.setup();
     renderUnits(fx, KEY, runPath(KEY, { view: "units" }));
     await loaded();
@@ -376,11 +376,11 @@ describe("the task walk over u1's handler (surfaces/units.md → WALK)", () => {
     await waitFor(() => expect(ids()).toEqual(["u23"]));
     await user.click(screen.getByRole("searchbox"));
     await user.paste("ни-одного-юнита");
-    expect(await screen.findByText("В виде «Заблокированы» нет юнитов")).toBeInTheDocument();
-    expect(screen.getByText("В вид входят: заблокирован. Фильтры: Поиск: «ни-одного-юнита»")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Сбросить фильтры" }));
-    await loaded();
-    expect(screen.getByRole("combobox", { name: "Вид" })).toHaveTextContent(/^Вид:Все$/);
+    expect(await screen.findByText("Поиск «ни-одного-юнита» скрыл 1 юнит вида «Заблокированы»")).toBeInTheDocument();
+    expect(screen.getByText("В вид входит: заблокирован")).toBeInTheDocument();
+    await user.click(within(document.querySelector("[data-slot=empty-state]") as HTMLElement).getByRole("button", { name: "Очистить поиск" }));
+    await waitFor(() => expect(ids()).toEqual(["u23"]));
+    expect(screen.getByRole("combobox", { name: "Вид" })).toHaveTextContent(/^Вид:Заблокированы/);
   });
 
   test("improve-4 (3), design-11: «Свернуть все юниты» — the kit's part, blocked with the same reason while no row is open; it closes every open unit", async () => {

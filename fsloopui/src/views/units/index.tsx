@@ -7,11 +7,11 @@
 // The URL holds the open unit (`unit=`), replaced on expand; filters, search and sort are the table's view state in
 // the browser (rules/ui → Conventions 12). A link to a unit expands, scrolls to and marks it, «вне фильтра» when the
 // filters hide it.
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { NOUNS } from "../../../shared/text.ts";
 import { CountLink, Dot, MissingLine, type HeldNoun } from "@/ui";
-import { copyAction, DataTable, type BarOrder, type RowAction } from "@/table";
+import { copyAction, DataTable, type BarOrder, type RowAction, type TableNotice } from "@/table";
 // From the files, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
 import { countFindings, type FindingFilter } from "@/finding/facets.ts";
 import { openFindings } from "@/finding/open.ts";
@@ -90,7 +90,6 @@ function Units({ run }: { run: LoadedRun }) {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const edge = useUnitMarks(run.version, run.units, now);
-  const root = useRef<HTMLDivElement | null>(null);
 
   const rows = useMemo(() => unitRows(run), [run]);
   const filters = useMemo(() => filtersFor(run), [run]);
@@ -152,31 +151,37 @@ function Units({ run }: { run: LoadedRun }) {
   );
 
   // an address the run does not hold: the one not-found line in the table's notice slot under its toolbar, with the
-  // run's units (improve-13, design-17); «Закрыть» drops `unit=` and puts focus on the table's Tab stop
+  // run's units (improve-13, design-17); «Закрыть» drops `unit=`, and the kit's `close` puts focus on the table's Tab
+  // stop (code-2)
   const missing = param !== null && !holds(param) ? param : null;
   const unitIds = useMemo(() => run.units.map((u) => u.id), [run.units]);
-  const notice = missing ? (
-    <MissingLine
-      kind="unit"
-      id={missing}
-      ids={unitIds}
-      slot="unit-missing"
-      onClose={() => {
-        setParams(
-          (prev) => {
-            const next = new URLSearchParams(prev);
-            next.delete("unit");
-            return next;
-          },
-          { replace: true },
-        );
-        root.current?.querySelector<HTMLElement>('tr[data-row-id][tabindex="0"]')?.focus({ preventScroll: true });
-      }}
-    />
-  ) : undefined;
+  const notice: TableNotice | null = missing
+    ? {
+        id: missing,
+        line: (close) => (
+          <MissingLine
+            kind="unit"
+            id={missing}
+            ids={unitIds}
+            slot="unit-missing"
+            onClose={() => {
+              setParams(
+                (prev) => {
+                  const next = new URLSearchParams(prev);
+                  next.delete("unit");
+                  return next;
+                },
+                { replace: true },
+              );
+              close();
+            }}
+          />
+        ),
+      }
+    : null;
 
   return (
-    <div ref={root} data-slot="units-view" className="absolute inset-0 flex flex-col gap-2 px-5 pt-3 pb-1">
+    <div data-slot="units-view" className="absolute inset-0 flex flex-col gap-2 px-5 pt-3 pb-1">
       <DataTable<UnitRow>
         id={UNITS_TABLE}
         runKey={run.key}

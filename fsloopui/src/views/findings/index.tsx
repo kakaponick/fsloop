@@ -18,7 +18,7 @@ import type { Finding, Run } from "../../../shared/model.ts";
 import { stageOf, STEPS, type Step, type Verdict } from "../../../shared/states.ts";
 import { NOUNS } from "../../../shared/text.ts";
 import { emptyWhen, MissingLine, PLACE_WHAT, type HeldNoun } from "@/ui";
-import { copyAction, DataTable, revealRow, runQuery, useRunView, type EmptyWhen, type RowAction } from "@/table";
+import { copyAction, DataTable, revealRow, type EmptyWhen, type RowAction, type TableNotice } from "@/table";
 // From the files, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
 import { FindingArticle } from "@/finding/article.tsx";
 import { stateUnit } from "@/finding/cells.tsx";
@@ -143,16 +143,13 @@ function Findings({ run }: { run: LoadedRun }) {
   const onPageChange = (p: number) => replace({ page: p > 1 ? String(p) : null });
 
   // ── the reading pace: a verdict by its key, then the next finding without one (cand-4, improve-14) ──────
-  // the findings the filters and the search keep that have no verdict yet — through the kit's one query, so «none
-  // left» means none in the list the user reads, on any page
-  const [query] = useRunView(FINDINGS_TABLE, run.key);
-  const queryKey = JSON.stringify([query.filters, query.search]);
-  const left = useMemo(
-    () => runQuery({ rows, rowId, columns: [], filters, search: SEARCH, state: { sort: null, filters: query.filters, search: query.search } }).rows.filter((f) => !f.verdict).map(rowId),
-    // the stored view is re-read every render; its JSON is the key
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, filters, queryKey],
-  );
+  // the findings the table shows, on any page, that have no verdict yet — the ids the kit hands over, so «none left»
+  // means none in the list the user reads, and a new one waiting in the strip is not counted (code-1)
+  const [shown, setShown] = useState<readonly string[]>([]);
+  const left = useMemo(() => {
+    const on = new Set(shown);
+    return rows.filter((f) => !f.verdict && on.has(f.id)).map(rowId);
+  }, [rows, shown]);
   const walk = useRef<Walk | null>(null);
   const turnTo = (p: number) => replace({ page: p > 1 ? String(p) : null });
   /** Focus on the next finding through the kit's row reveal; its detail opened in place of the rated one's when that
@@ -259,20 +256,26 @@ function Findings({ run }: { run: LoadedRun }) {
   };
 
   // an address the run does not hold: the one not-found line in the table's notice slot under its toolbar, with the
-  // run's count of findings (improve-13, design-17); «Закрыть» drops `finding=` and puts focus on the table's Tab stop
+  // run's count of findings (improve-13, design-17); «Закрыть» drops `finding=`, and the kit's `close` puts focus on
+  // the table's Tab stop (code-2)
   const missing = param !== null && !holds(param) ? param : null;
-  const notice = missing ? (
-    <MissingLine
-      kind="finding"
-      id={missing}
-      count={run.findings.length}
-      slot="finding-missing"
-      onClose={() => {
-        replace({ finding: null });
-        root.current?.querySelector<HTMLElement>('tr[data-row-id][tabindex="0"]')?.focus({ preventScroll: true });
-      }}
-    />
-  ) : undefined;
+  const notice: TableNotice | null = missing
+    ? {
+        id: missing,
+        line: (close) => (
+          <MissingLine
+            kind="finding"
+            id={missing}
+            count={run.findings.length}
+            slot="finding-missing"
+            onClose={() => {
+              replace({ finding: null });
+              close();
+            }}
+          />
+        ),
+      }
+    : null;
 
   return (
     <div ref={root} data-slot="findings-view" className="absolute inset-0 flex flex-col gap-2 px-5 pt-3 pb-1">
@@ -299,6 +302,7 @@ function Findings({ run }: { run: LoadedRun }) {
         open={open}
         onOpenChange={onOpenChange}
         target={link.target}
+        onShownChange={setShown}
         marks={(f) => ({ edge: edge(f.id) })}
         updatedAt={updated === null ? null : new Date(updated).toISOString()}
         now={now}

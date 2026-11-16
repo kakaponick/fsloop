@@ -3,7 +3,7 @@
 // literal; never — the run is past that stage or closed; filtered to none — the active filters and «Сбросить
 // фильтры». An empty state is never a false one: a failed load is the part-failed message, not this.
 import { STAGE_WORDS, stageOf, STEPS, type Step } from "../../shared/states.ts";
-import type { Forms } from "../../shared/text.ts";
+import { count, type Forms } from "../../shared/text.ts";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { cn } from "@/lib/utils";
@@ -26,9 +26,12 @@ export type EmptyStateProps = (
       noun: Forms;
       filters: readonly string[];
       onReset: () => void;
+      /** The way out's words, when it is not «Сбросить фильтры»: «Очистить поиск» where the search alone emptied it. */
+      resetLabel?: string;
       /** The named view («Вид») the list is in, when it is one with filters of its own (rules/ui → Conventions 16):
-       * its label and what fills it — its states, from its own definition in the view's query. */
-      view?: { label: string; fills: string };
+       * its label and what fills it — its states, from its own definition in the view's query — and, when the view
+       * holds rows that the search alone hides, the search and how many it hid (craft-6). */
+      view?: { label: string; fills: readonly string[]; hid?: { search: string; count: number } };
     }
 ) & { className?: string };
 
@@ -44,8 +47,12 @@ export function emptyStateText(props: EmptyStateProps): { title: string; descrip
     case "filtered": {
       const filters = props.filters.length ? `Фильтры: ${props.filters.join(" · ")}` : null;
       if (!props.view) return { title: `Нет ${props.noun[2]}, подходящих под фильтры`, description: filters ?? undefined };
-      // a named view names itself and what fills it, then the search or filters beside it
-      return { title: `В виде «${props.view.label}» нет ${props.noun[2]}`, description: [`В вид входят: ${props.view.fills}`, filters].filter(Boolean).join(". ") };
+      const { label, fills, hid } = props.view;
+      const holds = `В вид ${fills.length === 1 ? "входит" : "входят"}: ${fills.join(", ")}`;
+      // the view holds rows and the search alone hid them: the search is the cause, named with what it hid (craft-6)
+      if (hid) return { title: `Поиск «${hid.search}» скрыл ${count(hid.count, props.noun)} вида «${label}»`, description: holds };
+      // a named view that holds none names itself and what fills it, then the search or filters beside it
+      return { title: `В виде «${label}» нет ${props.noun[2]}`, description: [holds, filters].filter(Boolean).join(". ") };
     }
   }
 }
@@ -75,7 +82,7 @@ export function EmptyState(props: EmptyStateProps) {
       {props.form === "filtered" && (
         <EmptyContent>
           <Button variant="outline" size="sm" onClick={props.onReset}>
-            {RESET_FILTERS}
+            {props.resetLabel ?? RESET_FILTERS}
           </Button>
         </EmptyContent>
       )}

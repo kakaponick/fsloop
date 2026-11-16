@@ -6,8 +6,9 @@
 // hit painter (`highlight`), so its hits wear the table's one mark; punctuation right after inline code keeps to it.
 // A caller that draws a code span its own way — a convention's place as its copy button — does it through
 // `renderCode`, the renderer's seam for code; the link seam stays for links.
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useRef, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { OverflowCue, useOverflowCue } from "./overflow-cue.tsx";
 
 /** The address of an id the text names, or null when the token is not an id of this run. */
 export type Resolve = (token: string) => string | null;
@@ -197,6 +198,42 @@ function Lines({ lines, ...rest }: { lines: string[] } & InlineOpts) {
 
 const INDENT = ["", "ml-5", "ml-10", "ml-15"];
 
+/** A markdown table in its own bordered box that scrolls sideways; while the table runs past the box's right edge, the
+ * shared cue marks that edge (craft-14) — so a cut column reads as more to scroll, not as the table's end. */
+function TableBlock({ head, rows, inline }: Omit<Extract<Block, { kind: "table" }>, "kind"> & { inline: InlineOpts }) {
+  const box = useRef<HTMLDivElement | null>(null);
+  const { past, measure } = useOverflowCue(box, "end");
+  return (
+    <div className="relative max-w-full">
+      <div ref={box} role="region" aria-label="Таблица" tabIndex={0} onScroll={measure} className="max-w-full overflow-x-auto rounded-md border [scrollbar-gutter:stable]">
+        <table className="w-max min-w-full border-collapse text-sm">
+          <thead>
+            <tr>
+              {head.map((cell, k) => (
+                <th key={k} scope="col" className="border-b px-2 py-1.5 text-left align-bottom text-xs font-normal text-muted-foreground">
+                  <Inline text={cell} {...inline} />
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, r) => (
+              <tr key={r} className="border-b last:border-b-0">
+                {row.map((cell, k) => (
+                  <td key={k} className="max-w-md px-2 py-1.5 align-top">
+                    <Inline text={cell} {...inline} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <OverflowCue edge="end" shown={past} className="rounded-md" />
+    </div>
+  );
+}
+
 export function RunningText({ text, resolve, renderLink = defaultLink, measure = true, highlight = plainText, renderCode, className }: RunningTextProps) {
   const blocks = parseBlocks(text ?? "");
   const inline: InlineOpts = { resolve, renderLink, paint: highlight, renderCode };
@@ -234,32 +271,7 @@ export function RunningText({ text, resolve, renderLink = defaultLink, measure =
             );
           }
           case "table":
-            return (
-              <div key={n} role="region" aria-label="Таблица" tabIndex={0} className="max-w-full overflow-x-auto rounded-md border [scrollbar-gutter:stable]">
-                <table className="w-max min-w-full border-collapse text-sm">
-                  <thead>
-                    <tr>
-                      {block.head.map((cell, k) => (
-                        <th key={k} scope="col" className="border-b px-2 py-1.5 text-left align-bottom text-xs font-normal text-muted-foreground">
-                          <Inline text={cell} {...inline} />
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {block.rows.map((row, r) => (
-                      <tr key={r} className="border-b last:border-b-0">
-                        {row.map((cell, k) => (
-                          <td key={k} className="max-w-md px-2 py-1.5 align-top">
-                            <Inline text={cell} {...inline} />
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            );
+            return <TableBlock key={n} head={block.head} rows={block.rows} inline={inline} />;
           case "code":
             return (
               <pre key={n} tabIndex={0} className="m-0 max-w-full overflow-x-auto rounded-md bg-code px-3 py-2 font-mono text-xs [scrollbar-gutter:stable]">

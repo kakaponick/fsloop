@@ -28,7 +28,7 @@ import { count, NOUNS, num } from "../../../shared/text.ts";
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@/components/ui/input-group";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
-import { AddressLink, AddressMenu, Dash, EmptyState, emptyWhen, FactList, fileFailure, flatItem, FlatList, folderFailure, HeldStrip, InView, Keys, markProps, MissingLine, numberRange, numberText, openItemMenu, OutOfFilter, PartFailed, RunningText, SCROLLER, useInView, useReveal, useShortcut, type Fact, type HeldNoun, type InViewRange } from "@/ui";
+import { AddressLink, AddressMenu, Dash, EmptyState, emptyWhen, FactList, FieldCap, fileFailure, flatItem, FlatList, folderFailure, HeldStrip, InView, Keys, markProps, MissingLine, numberRange, numberText, openItemMenu, OutOfFilter, PartFailed, RunningText, SCROLLER, useInView, useReveal, type Fact, type HeldNoun, type InViewRange } from "@/ui";
 import { AdaptiveToolbar, filterSummary, FilterControl, Highlight, pushHistory, runQuery, SearchBox, StatusBar, tokens, useRunView, useTableView, type FilterDef, type SearchDef, type ToolbarItem } from "@/table";
 import { useNow } from "../../app/clock.tsx";
 import { resolverFor, routerLink } from "../../app/links.tsx";
@@ -133,8 +133,6 @@ function Journal({ run }: { run: LoadedRun }) {
   const [miss, setMiss] = useState<string | null>(null);
   const gotoStatus = useId();
   const gotoField = useRef<HTMLInputElement>(null);
-  const [gotoFocused, setGotoFocused] = useState(false);
-  useShortcut(GOTO_KEY, () => gotoField.current?.focus());
   const entry = params.get("entry");
   // An entry a link names that still waits in the strip is placed at once (Conventions 12: a link shows its object).
   if (entry !== null && !placed.has(entry) && run.journal.some((e) => e.n === entry)) setPlaced(new Set([...placed, entry]));
@@ -310,20 +308,17 @@ function Journal({ run }: { run: LoadedRun }) {
                       setGoto(event.target.value);
                       setMiss(null);
                     }}
-                    onFocus={() => setGotoFocused(true)}
-                    onBlur={() => setGotoFocused(false)}
                     onKeyDown={(event) => {
                       if (event.key !== "Enter") return;
                       event.preventDefault();
                       jump();
                     }}
                   />
-                  {/* G's cap inside the field, at its end: hidden while the field is focused or filled, its box kept
-                      (the design check: a key that focuses a field — design-14) */}
+                  {/* G's cap inside the field, at its end — the shared in-field cap, which binds G to the field: hidden
+                      while the field is focused or filled, its box kept (the design check: a key that focuses a field —
+                      design-14; code-3) */}
                   <InputGroupAddon align="inline-end">
-                    <span aria-hidden={gotoFocused || goto ? true : undefined} className={cn(gotoFocused || goto ? "invisible" : undefined)}>
-                      <Keys codes={[GOTO_KEY]} />
-                    </span>
+                    <FieldCap field={gotoField} code={GOTO_KEY} filled={Boolean(goto)} />
                   </InputGroupAddon>
                 </InputGroup>
                 {/* the answer's line, reserved from the first paint (Strict 1); its whole text in its title */}

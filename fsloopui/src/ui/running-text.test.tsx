@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import "./test-setup.ts";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+import { applyStylesheet } from "../app/layout-testing.ts";
 import { parseBlocks, RunningText } from "./running-text.tsx";
 import { longText } from "./test-utils.tsx";
 
@@ -147,5 +148,46 @@ describe("running text", () => {
   test("an empty or absent text renders nothing", () => {
     const { container } = render(<RunningText text={null} />);
     expect(container.querySelector('[data-slot="running-text"]')?.childElementCount).toBe(0);
+  });
+});
+
+describe("p3-review-critic-craft-2#craft-14: a table wider than its box marks the edge it runs past", () => {
+  const TABLE = ["| finding | prototype | kept as |", "|---|---|---|", "| gap 1 | the run card's settings | `RunCard.settings`, read from run.json |"].join("\n");
+
+  test("an inset hairline at the box's right edge while the table runs past it (scrollWidth > clientWidth), hidden at the scroll's end; drawn over the box, it takes no room", async () => {
+    let content = 900;
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute("role") === "region" ? 600 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute("role") === "region" ? content : 0;
+    });
+    const { container, rerender } = render(<RunningText text={TABLE} />);
+    const region = screen.getByRole("region", { name: "Таблица" });
+    const cue = () => container.querySelector("[data-slot=overflow-cue]") as HTMLElement;
+    await applyStylesheet();
+    const s = getComputedStyle(cue());
+    expect(s.visibility).toBe("visible");
+    expect([s.position, s.top, s.right, s.bottom, s.left, s.pointerEvents]).toEqual(["absolute", "0px", "0px", "0px", "0px", "none"]);
+    // one inset hairline at the right edge, in the muted ink (light #6d6d69, DESIGN.md → Colors) — the theme's shadow
+    expect(s.boxShadow.replace(/rgba\(0, 0, 0, 0\) 0px 0px, /g, "")).toBe("rgb(109, 109, 105) -1px 0px inset");
+    expect(cue()).toHaveAttribute("aria-hidden", "true");
+    expect(getComputedStyle(cue().parentElement as HTMLElement).position).toBe("relative");
+    expect(cue().parentElement).toContainElement(region);
+    // scrolled to the end: nothing runs past the right edge any more
+    region.scrollLeft = 300;
+    fireEvent.scroll(region);
+    await applyStylesheet();
+    expect(getComputedStyle(cue()).visibility).toBe("hidden");
+    region.scrollLeft = 0;
+    fireEvent.scroll(region);
+    await applyStylesheet();
+    expect(getComputedStyle(cue()).visibility).toBe("visible");
+    // a table that fits its box: no cue
+    content = 600;
+    rerender(<RunningText text={`${TABLE}\n`} />);
+    await applyStylesheet();
+    expect(getComputedStyle(cue()).visibility).toBe("hidden");
+    vi.restoreAllMocks();
   });
 });

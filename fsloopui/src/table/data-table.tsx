@@ -8,17 +8,18 @@
 import { getCoreRowModel, useReactTable, type ColumnDef, type VisibilityState } from "@tanstack/react-table";
 import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, ChevronRightIcon } from "lucide-react";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent as ReactWheelEvent } from "react";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { EmptyState, GlossaryTooltip, HeldStrip, Loading, markProps, OPEN_FRAME, OutOfFilter, PartFailed, REVEAL_GAP, revealIn, WHEEL_GESTURE_GAP, type EmptyWhen, type Gender, type GlossaryEntry, type HeldNoun, type MarkState } from "@/ui";
+import { CLOSE, EmptyState, GlossaryTooltip, HeldStrip, Loading, markProps, OPEN_FRAME, OutOfFilter, OverflowCue, PartFailed, useOverflowCue, revealIn, WHEEL_GESTURE_GAP, type EmptyWhen, type Gender, type GlossaryEntry, type HeldNoun, type MarkState } from "@/ui";
 import { clampWidth, mergeWidths, placeColumns, RESIZE_STEP, SELECT_WIDTH, sameColumns, sameWidths, tableMinWidth, type ColumnLayout } from "./columns.ts";
 import { ColumnsMenu } from "./columns-menu.tsx";
 import { CollapseAll } from "./collapse-all.tsx";
 import { CUSTOM_LABEL, FilterControl, filterSummary, PRESET_LABEL, presetFills, PresetSelect } from "./filters.tsx";
 import { FILL_ROWS, nextSort, normalizeFilters, pageOf, pageOfIndex, presetOf, runQuery, tokens as toTokens, type FilterDef, type Preset, type Rank, type RowsPerPage, type SearchDef, type SortSpec } from "./query.ts";
 import { OPEN_ACTION, pinnable, RowMenu, type RowAction } from "./row-menu.tsx";
-import { Highlight, SearchBox } from "./search.tsx";
+import { CLEAR_LABEL, Highlight, SearchBox } from "./search.tsx";
 import { StatusBar, type BarOrder, type StripForms } from "./status-bar.tsx";
 import { AdaptiveToolbar, type ToolbarItem } from "./toolbar.tsx";
 import { pushHistory, useRunView, useTableView } from "./view-state.ts";
@@ -88,8 +89,9 @@ export interface DataTableProps<R> {
   /** The rows' noun after «Свернуть все» («находки», «юниты»): a table whose rows expand draws the kit's
    * «Свернуть все» in its right cluster, after the facts (improve-4; the design check's convention). */
   collapseAll?: string;
-  /** One line under the toolbar — the list's not-found line (design-17): its 28 px reserved while it holds one. */
-  notice?: ReactNode;
+  /** One line under the toolbar — the list's not-found line (design-17): its 28 px reserved from the first paint of a
+   * notice until the user closes it, a live change that brings the named row included (craft-2). Falsy: no line. */
+  notice?: TableNotice | null | false;
   /** The page from the URL; changes are reported to `onPageChange` for the URL (Conventions 12). */
   page?: number;
   onPageChange?: (page: number) => void;
@@ -103,13 +105,32 @@ export interface DataTableProps<R> {
   /** The data's last update and the shared clock, for the status bar's age. */
   updatedAt?: string | null;
   now?: string | number;
+  /** The ids the table shows, on every page, in its held order — a live row waiting in the strip is not one of them —
+   * reported whenever they change: what a view counts as the list the user reads (code-1). */
+  onShownChange?: (ids: readonly string[]) => void;
   /** Binds `/` to this table's search (one per view). */
   searchShortcut?: boolean;
   className?: string;
 }
 
+/** The notice slot's line: the address its list lacks — a link's `finding=`, `unit=` — and the line itself. */
+export interface TableNotice {
+  /** The id the address names and the rows do not hold. */
+  id: string;
+  /** The line; its way out calls `close`, the kit's — which releases the slot and puts focus on the table's Tab stop —
+   * after its own work (dropping the address), so no view reaches into the kit's markup (code-2). */
+  line: (close: () => void) => ReactNode;
+}
+
 export const OPEN_LABEL = "Открыть";
 export const CLOSE_LABEL = "Свернуть";
+
+const ARRIVED: Record<HeldNoun["gender"], string> ={ m: "появился", f: "появилась", n: "появилось" };
+
+/** The notice slot's line once the row its address named arrives with a live change (craft-2): «Юнит u33 появился.»,
+ * «Находка … появилась.» — the noun and its agreement the table's own. */
+const arrivedWords = (noun: HeldNoun) => ({ word: `${noun.forms[0][0].toUpperCase()}${noun.forms[0].slice(1)}`, verb: ARRIVED[noun.gender] });
+export const arrivedText = (noun: HeldNoun, id: string): string => `${arrivedWords(noun).word} ${id} ${arrivedWords(noun).verb}.`;
 export const SELECT_ALL = "Выбрать все строки по фильтрам";
 export const SELECT_ROW = "Выбрать строку";
 
@@ -129,13 +150,6 @@ const ENDS = ["pointerup", "pointercancel", "blur"] as const;
  * dark paper, so a column's sort read only on hover. */
 const sortIcon = (dir: false | "asc" | "desc") => (dir === "desc" ? <ArrowDownIcon /> : dir === "asc" ? <ArrowUpIcon /> : <ArrowUpDownIcon />);
 
-/** The cue that rows or a detail run past the box's bottom edge (the design check's convention): a hairline of muted
- * ink drawn as an inset shadow over the box — never a border or padding, so it takes no room (Strict 1). */
-const OVERFLOW_CUE = "pointer-events-none absolute inset-0 rounded-lg shadow-[inset_0_-1px_0_0_var(--muted-foreground)]";
-/** Whether the box's content runs past its bottom edge: it scrolls (`scrollHeight > clientHeight`) and is not at its
- * end. */
-const pastEnd = (el: HTMLElement | null): boolean => el !== null && el.scrollHeight - el.scrollTop - el.clientHeight > 1;
-
 /** Focus on a table row, brought into the table's own box (improve-3): only that box scrolls, through `revealIn` — a
  * row under the sticky header to just under it, a row past the box's end by as little as brings it in, a row in view
  * not at all — never `scrollIntoView`, which also scrolls the page around the table. The table's arrows use it, and so
@@ -143,9 +157,7 @@ const pastEnd = (el: HTMLElement | null): boolean => el !== null && el.scrollHei
 export function revealRow(tr: HTMLElement): void {
   const box = tr.closest<HTMLElement>("[data-slot=table-scroll]");
   if (!box) return tr.focus({ preventScroll: true });
-  const head = box.querySelector("thead")?.getBoundingClientRect().height || ROW_HEIGHT;
-  if (tr.getBoundingClientRect().top < box.getBoundingClientRect().top + head) revealIn(box, tr, { gap: head + REVEAL_GAP });
-  else revealIn(box, tr, { nearest: true });
+  revealIn(box, tr, { head: box.querySelector("thead")?.getBoundingClientRect().height || ROW_HEIGHT });
 }
 
 /** An element inside a row that handles its own click. */
@@ -158,7 +170,10 @@ export function DataTable<R>(props: DataTableProps<R>) {
   const { id, runKey, label, rows, failed, rowId, rowTitle, noun, columns, filters = [], presets = [], search, actions = [], detail, defaultSort = null, defaultPaged = true, empty, counts, barOrder, toolbarEnd, collapseAll, notice, marks, updatedAt, now, searchShortcut = true, className } = props;
   const [tprefs, setT] = useTableView(id, { sort: defaultSort, paged: defaultPaged });
   const [rprefs, setR] = useRunView(id, runKey);
-  const target = props.target ?? null;
+  // the row the notice's «Открыть» brought in (craft-2): shown, opened and marked as a link's row is, while the caller
+  // names none of its own
+  const [opened, setOpened] = useState<string | null>(null);
+  const target = props.target ?? opened;
 
   // ── the query ──────────────────────────────────────────────────────────────────────────────
   const queryKey = JSON.stringify([tprefs.sort, rprefs.filters, rprefs.search, target]);
@@ -191,6 +206,17 @@ export function DataTable<R>(props: DataTableProps<R>) {
     return { display, outside, counts: { fresh, moved, left: left.length } };
   }, [resultIds, frozenIds, byId, result]);
   const display = held.display;
+  // the ids shown, handed to the view whenever they change (code-1): never the query's result, which holds the rows
+  // that wait in the strip too
+  const shownKey = useRef<string | null>(null);
+  const onShownChange = props.onShownChange;
+  useEffect(() => {
+    if (!result) return;
+    const key = display.join("\n");
+    if (key === shownKey.current) return;
+    shownKey.current = key;
+    onShownChange?.(display);
+  });
 
   // ── paging, open rows, selection: in memory; the page and open rows reported for the URL ───────
   // «по экрану» (table #1 Fill): the rows the scroll box shows, measured from a collapsed row; until measured — a
@@ -348,18 +374,9 @@ export function DataTable<R>(props: DataTableProps<R>) {
     revealRowId(rid);
   };
 
-  // ── the cue of rows or a detail past the box's bottom edge (improve-3; the design check's convention) ────
-  const [past, setPast] = useState(false);
-  const measurePast = () => setPast(pastEnd(scroller.current));
-  // after every commit — a page, an opened detail, a live row change what the box holds — on a scroll and a resize
-  useLayoutEffect(measurePast);
-  useEffect(() => {
-    const el = scroller.current;
-    if (!el) return;
-    const observer = new ResizeObserver(() => setPast(pastEnd(scroller.current)));
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [tableShown]);
+  // ── the cue of rows or a detail past the box's bottom edge (improve-3; the design check's convention): `@/ui`'s
+  // one cue, shown while they run past it and hidden at the scroll's end (code-29) ──────────────────────
+  const { past, measure: measurePast } = useOverflowCue(scroller, "bottom", tableShown);
 
   // ── selection (table #5; the design check: a checkbox column, Shift range, drag, Space; never a plain click) ─
   const toggleSelect = (rid: string) => {
@@ -617,6 +634,36 @@ export function DataTable<R>(props: DataTableProps<R>) {
     if (detailRow.getBoundingClientRect().bottom > end) scrollToTop(rid);
   });
 
+  // ── the notice slot (design-17): held from a notice's first paint until the user closes it (craft-2) ────────
+  // A live change that brings the row the address named takes the view's line away; the slot keeps its 28 px and says
+  // the row arrived, with «Открыть» and «Закрыть», so the table under it never jumps. A notice its view drops while
+  // the row is still missing — the address went another way — releases the slot.
+  const [slotFor, setSlotFor] = useState<string | null>(null);
+  if (notice && notice.id !== slotFor) setSlotFor(notice.id);
+  const arrived = !notice && slotFor !== null && byId.has(slotFor) ? slotFor : null;
+  if (!notice && slotFor !== null && arrived === null) setSlotFor(null);
+  /** The slot's way out, the kit's own (code-2): the slot released, focus on the table's Tab stop. */
+  const closeNotice = () => {
+    setSlotFor(null);
+    const el = tabRow ? rowEls.current.get(tabRow) : undefined;
+    el?.focus({ preventScroll: true });
+  };
+  /** A row to focus once it renders on its page: the arrived row «Открыть» brought in. */
+  const focusOnRender = useRef<string | null>(null);
+  const openArrived = (rid: string) => {
+    setSlotFor(null);
+    setOpened(rid);
+    if (!openSet.has(rid)) setOpen([...openState, rid]);
+    setFocusId(rid);
+    focusOnRender.current = rid;
+  };
+  useEffect(() => {
+    const el = focusOnRender.current ? rowEls.current.get(focusOnRender.current) : undefined;
+    if (!el) return;
+    focusOnRender.current = null;
+    el.focus({ preventScroll: true });
+  });
+
   // ── the body ───────────────────────────────────────────────────────────────────────────────
   let body: ReactNode;
   if (failed) body = <div className="flex size-full items-center justify-center rounded-lg border p-4"><PartFailed what={failed.what} cause={failed.cause} gender={failed.gender} onRetry={failed.onRetry} /></div>;
@@ -629,12 +676,22 @@ export function DataTable<R>(props: DataTableProps<R>) {
     );
   else if (!display.length) {
     // a named view with filters of its own names itself and what fills it; its filters are the view, so only the
-    // search is listed beside it (rules/ui → Conventions 16; improve-4)
+    // search is listed beside it (rules/ui → Conventions 16; improve-4). A view that holds rows the search alone hides
+    // names the search as the cause, and its way out clears the search and keeps the view (craft-6).
     const named = presetOf(rprefs.filters, presets);
-    const view = named && Object.keys(normalizeFilters(named.filters)).length ? { label: named.label, fills: presetFills(named, filters) } : undefined;
+    const term = rprefs.search.trim();
+    const hid = term && result.unsearched > 0 ? { search: term, count: result.unsearched } : undefined;
+    const view = named && Object.keys(normalizeFilters(named.filters)).length ? { label: named.label, fills: presetFills(named, filters), hid } : undefined;
     body = (
       <div className="flex size-full items-center justify-center rounded-lg border">
-        <EmptyState form="filtered" noun={noun.forms} filters={filterSummary(filters, view ? {} : rprefs.filters, rprefs.search)} view={view} onReset={() => setQuery({ filters: {}, search: "" })} />
+        <EmptyState
+          form="filtered"
+          noun={noun.forms}
+          filters={filterSummary(filters, view ? {} : rprefs.filters, rprefs.search)}
+          view={view}
+          resetLabel={view?.hid ? CLEAR_LABEL : undefined}
+          onReset={() => setQuery(view?.hid ? { search: "" } : { filters: {}, search: "" })}
+        />
       </div>
     );
   } else
@@ -773,14 +830,14 @@ export function DataTable<R>(props: DataTableProps<R>) {
   return (
     <div data-slot="data-table" className={cn("@container flex size-full min-h-0 flex-col gap-2", className)}>
       <AdaptiveToolbar items={items} label={`Фильтры: ${label}`} />
-      {notice != null && (
+      {(notice || arrived !== null) && (
         <div data-slot="table-notice" className="flex h-7 shrink-0 items-center overflow-hidden text-sm whitespace-nowrap">
-          {notice}
+          {notice ? notice.line(closeNotice) : arrived !== null && <ArrivedLine noun={noun} id={arrived} onOpen={() => openArrived(arrived)} onClose={closeNotice} />}
         </div>
       )}
       <div ref={region} data-slot="table-region" className="relative min-h-0 flex-1">
         {body}
-        {tableShown && <span aria-hidden="true" data-slot="overflow-cue" className={cn(OVERFLOW_CUE, !past && "invisible")} />}
+        {tableShown && <OverflowCue edge="bottom" shown={past} className="rounded-lg" />}
       </div>
       <HeldStrip counts={held.counts} noun={noun} onApply={() => setFrozen({ key: queryKey, ids: resultIds })} className="-mt-2 border-t-0" />
       <StatusBar
@@ -795,6 +852,27 @@ export function DataTable<R>(props: DataTableProps<R>) {
         order={barOrder}
       />
     </div>
+  );
+}
+
+/** The notice slot's line once the row its address named arrived (craft-2): one line like the not-found line it
+ * replaces — the sentence truncating, whole in its title, the id in mono — then «Открыть» and «Закрыть», which keep
+ * their boxes; a polite status, so a screen reader hears that the row came. */
+function ArrivedLine({ noun, id, onOpen, onClose }: { noun: HeldNoun; id: string; onOpen: () => void; onClose: () => void }) {
+  const { word, verb } = arrivedWords(noun);
+  const text = arrivedText(noun, id);
+  return (
+    <p role="status" data-slot="notice-arrived" className="m-0 flex max-w-measure min-w-0 items-baseline gap-x-2">
+      <span className="min-w-0 truncate" title={text}>
+        {word} <span className="font-mono text-xs">{id}</span> {verb}.
+      </span>
+      <Button variant="ghost" size="xs" className="shrink-0" onClick={onOpen}>
+        {OPEN_LABEL}
+      </Button>
+      <Button variant="ghost" size="xs" className="shrink-0" onClick={onClose}>
+        {CLOSE}
+      </Button>
+    </p>
   );
 }
 

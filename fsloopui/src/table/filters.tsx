@@ -4,7 +4,7 @@
 // names a preset of filters: choosing one replaces the filters and leaves sort, columns and search alone; filters
 // changed by hand read «Свой набор».
 import { CountCombobox, CountSelect, SELECT_MAX_OPTIONS, type CountOption } from "@/ui";
-import { normalizeFilters, presetOf, type FilterDef, type Filters, type Preset } from "./query.ts";
+import { normalizeFilters, presetDetail, presetOf, type FilterDef, type Filters, type Preset } from "./query.ts";
 
 /** The select's value for «все»: a select cannot hold an empty value. */
 export const ANY = "*";
@@ -53,7 +53,7 @@ export interface PresetSelectProps {
  * its label does not say it (improve-4); «Свой набор» while the filters match none. */
 export function PresetSelect({ presets, filters, counts, onChoose, className }: PresetSelectProps) {
   const current = presetOf(filters, presets);
-  const options: CountOption[] = presets.map((p) => ({ value: p.id, label: p.label, detail: p.detail, count: counts?.[p.id] }));
+  const options: CountOption[] = presets.map((p) => ({ value: p.id, label: p.label, detail: presetDetail(p), count: counts?.[p.id] }));
   if (!current) options.push({ value: CUSTOM_PRESET, label: CUSTOM_LABEL });
   return (
     <CountSelect
@@ -69,29 +69,26 @@ export function PresetSelect({ presets, filters, counts, onChoose, className }: 
   );
 }
 
-/** What fills a named view, for its empty state (rules/ui → Conventions 16): its own `detail`, else the values its
+/** A filter's chosen values in its options' words, in the options' order; a value no option names reads as itself,
+ * after them. The one value→label lookup of a named view's fills and of the filters' summary. */
+function optionLabels<R>(def: FilterDef<R>, values: readonly string[]): string[] {
+  const named = def.options.filter((o) => values.includes(o.value));
+  return [...named.map((o) => o.label), ...values.filter((v) => !named.some((o) => o.value === v))];
+}
+
+/** What fills a named view, for its empty state (rules/ui → Conventions 16): the words it holds, else the values its
  * filters keep in their options' words — «кандидат». */
-export function presetFills<R>(preset: Preset, defs: readonly FilterDef<R>[]): string {
-  if (preset.detail) return preset.detail;
+export function presetFills<R>(preset: Preset, defs: readonly FilterDef<R>[]): string[] {
+  if (preset.holds?.length) return [...preset.holds];
   const active = normalizeFilters(preset.filters);
-  return defs
-    .flatMap((def) => {
-      const values = active[def.id];
-      return values ? def.options.filter((o) => values.includes(o.value)).map((o) => o.label) : [];
-    })
-    .join(", ");
+  return defs.flatMap((def) => (active[def.id] ? optionLabels(def, active[def.id]) : []));
 }
 
 /** The active filters and the search in words, for the filtered-to-none state: «Серьёзность: major, critical». */
 export function filterSummary<R>(defs: readonly FilterDef<R>[], filters: Filters, search: string): string[] {
   const active = normalizeFilters(filters);
   const out: string[] = [];
-  for (const def of defs) {
-    const values = active[def.id];
-    if (!values) continue;
-    const labels = def.options.filter((o) => values.includes(o.value)).map((o) => o.label);
-    out.push(`${def.label}: ${(labels.length ? labels : values).join(", ")}`);
-  }
+  for (const def of defs) if (active[def.id]) out.push(`${def.label}: ${optionLabels(def, active[def.id]).join(", ")}`);
   if (search.trim()) out.push(`${SEARCH_WORD}: «${search.trim()}»`);
   return out;
 }

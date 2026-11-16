@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "../ui/test-setup.ts";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -11,7 +11,8 @@ import { applyStylesheet, usedBlockSize } from "../app/layout-testing.ts";
 import { OPEN_FRAME } from "../ui/marks.tsx";
 import { UiProvider } from "../ui/provider.tsx";
 import { COLLAPSE_BLOCKED, collapseAllLabel } from "./collapse-all.tsx";
-import { DataTable, revealRow, type DataTableProps, type TableColumn } from "./data-table.tsx";
+import { arrivedText, DataTable, revealRow, type DataTableProps, type TableColumn } from "./data-table.tsx";
+import { filterSummary, presetFills } from "./filters.tsx";
 import type { FilterDef, Preset, SearchDef } from "./query.ts";
 import { copyAction, type RowAction } from "./row-menu.tsx";
 import { SearchBox } from "./search.tsx";
@@ -1107,7 +1108,7 @@ describe("p2-assess-critic-improve#improve-3: the table kit, read at a glance", 
     expect(getComputedStyle(row("f-002")).getPropertyValue("--tw-ring-shadow")).not.toMatch(/2px/);
   });
 
-  test("improve-3 (3): a hairline cue at the box's bottom edge exactly while its rows or a detail run past it (scrollHeight > clientHeight); drawn over the box, it takes no room", async () => {
+  test("improve-3 (3), code-29: a hairline cue at the box's bottom edge while its rows or a detail run past it (scrollHeight > clientHeight), hidden once the box is scrolled to its end; drawn over the box, it takes no room", async () => {
     let content = 900;
     vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
       return this.dataset.slot === "table-scroll" ? 450 : 0;
@@ -1140,6 +1141,25 @@ describe("p2-assess-critic-improve#improve-3: the table kit, read at a glance", 
     rerender(view({ rows: FEW }));
     await applyStylesheet();
     expect(getComputedStyle(cue()).visibility).toBe("hidden");
+  });
+
+  test("p3-review-critic-code#code-28: the cue's look is the theme's — `--shadow-overflow` and `--shadow-overflow-end` in the theme, and no product part writes an arbitrary shadow", () => {
+    const src = join(__dirname, "..");
+    const css = readFileSync(join(src, "styles", "index.css"), "utf8").replace(/\r\n/g, "\n");
+    expect(css).toContain("--shadow-overflow: inset 0 -1px 0 0 var(--muted-foreground);");
+    expect(css).toContain("--shadow-overflow-end: inset -1px 0 0 0 var(--muted-foreground);");
+    const hits: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (statSync(p).isDirectory()) {
+          // the library's own source keeps its own look; the product's parts take the theme's
+          if (name !== "ui" || !dir.endsWith("components")) walk(p);
+        } else if (/\.tsx?$/.test(name) && !/\.test\./.test(name) && /shadow-\[/.test(readFileSync(p, "utf8"))) hits.push(name);
+      }
+    };
+    walk(src);
+    expect(hits).toEqual([]);
   });
 
   test("improve-3 (4): ↑/↓ move focus inside the table's own box through `revealIn` — under the sticky header, by as little as brings the row in — and never call scrollIntoView", async () => {
@@ -1205,7 +1225,7 @@ describe("p2-assess-critic-improve#improve-3: the table kit, read at a glance", 
 describe("p2-assess-critic-improve#improve-4: «Вид» with its states and «Свернуть все» in the kit; the notice slot (design-17)", () => {
   const NAMED: Preset[] = [
     { id: "all", label: "Все", filters: {} },
-    { id: "fix", label: "В исправление", filters: { status: ["in-progress", "fixed"] }, detail: "исправляется, исправлена" },
+    { id: "fix", label: "В исправление", filters: { status: ["in-progress", "fixed"] }, holds: ["исправляется", "исправлена"] },
     { id: "cand", label: "Кандидаты", filters: { status: ["candidate"] } },
   ];
   const choose = async (user: ReturnType<typeof userEvent.setup>, steps: number) => {
@@ -1226,23 +1246,41 @@ describe("p2-assess-critic-improve#improve-4: «Вид» with its states and «�
     await waitFor(() => expect(screen.getByRole("combobox", { name: "Вид" })).toHaveTextContent(/^Вид:В исправление$/));
   });
 
-  test("improve-4 (2): a named view filtered to none names the view and what fills it, then the search; «Сбросить фильтры» returns to «Все»", async () => {
+  test("improve-4 (2), craft-6: a named view the search alone emptied names the search as the cause and what it hid; «Очистить поиск» clears the search and keeps the view", async () => {
     const user = userEvent.setup();
     renderUi(view({ presets: NAMED }));
     await choose(user, 1);
     await user.type(screen.getByRole("searchbox"), "zzz");
-    expect(screen.getByText("В виде «В исправление» нет находок")).toBeInTheDocument();
-    expect(screen.getByText("В вид входят: исправляется, исправлена. Фильтры: Поиск: «zzz»")).toBeInTheDocument();
-    // a view with no second part of its own: what fills it in its filter's own words
-    await choose(user, 1);
+    // the view holds 40 findings (20 in work, 20 fixed); the search hid every one
+    expect(screen.getByText("Поиск «zzz» скрыл 40 находок вида «В исправление»")).toBeInTheDocument();
+    expect(screen.getByText("В вид входят: исправляется, исправлена")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Сбросить фильтры" })).toBeNull();
+    // the same words as the search's own clear button: one action, one word (ux 1)
+    await user.click(within(document.querySelector("[data-slot=empty-state]") as HTMLElement).getByRole("button", { name: "Очистить поиск" }));
+    expect(pageIds()).toHaveLength(40);
+    expect(screen.getByRole("combobox", { name: "Вид" })).toHaveTextContent(/^Вид:В исправление$/);
+    expect(screen.getByRole("searchbox")).toHaveValue("");
+  });
+
+  test("improve-4 (2), craft-6: a named view that holds none names itself and what fills it — «входит» for one value, in its filter's own words; «Сбросить фильтры» returns to «Все»", async () => {
+    const user = userEvent.setup();
+    renderUi(view({ presets: NAMED, rows: ROWS.filter((r) => r.status !== "candidate") }));
+    await choose(user, 2);
     expect(await screen.findByText("В виде «Кандидаты» нет находок")).toBeInTheDocument();
-    expect(screen.getByText("В вид входят: candidate. Фильтры: Поиск: «zzz»")).toBeInTheDocument();
+    expect(screen.getByText("В вид входит: candidate")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Сбросить фильтры" }));
-    expect(pageIds()).toHaveLength(50);
+    expect(pageIds()).toHaveLength(40);
     expect(screen.getByRole("combobox", { name: "Вид" })).toHaveTextContent(/^Вид:Все$/);
     // «Все» holds no filter of its own: a search empties it into the plain form
     await user.type(screen.getByRole("searchbox"), "zzz");
     expect(screen.getByText("Нет находок, подходящих под фильтры")).toBeInTheDocument();
+  });
+
+  test("p3-review-critic-code#code-11: one label helper — a value with no option reads as itself in a named view's fills and in the filters' summary alike", () => {
+    expect(presetFills({ id: "odd", label: "Архив", filters: { status: ["archived"] } }, FILTERS)).toEqual(["archived"]);
+    expect(presetFills({ id: "fix", label: "В исправление", filters: { status: ["fixed", "in-progress"] } }, FILTERS)).toEqual(["in-progress", "fixed"]);
+    expect(filterSummary(FILTERS, { status: ["archived", "fixed"] }, "")).toEqual(["Состояние: fixed, archived"]);
+    expect(filterSummary(FILTERS, { status: ["archived"] }, " zzz ")).toEqual(["Состояние: archived", "Поиск: «zzz»"]);
   });
 
   test("improve-4 (3), design-11: «Свернуть все <noun>» is one kit part — an icon-only 28 px button always in its box at the toolbar's end, blocked with the one reason while no row is open", async () => {
@@ -1288,11 +1326,102 @@ describe("p2-assess-critic-improve#improve-4: «Вид» with its states and «�
   test("design-17: the notice slot — a line under the toolbar, its 28 px reserved while it holds a notice; none drawn without one", async () => {
     const { container, rerender } = renderUi(view());
     expect(container.querySelector("[data-slot=table-notice]")).toBeNull();
-    rerender(view({ notice: <span>Находка f-999 не найдена</span> }));
+    rerender(view({ notice: { id: "f-999", line: () => <span>Находка f-999 не найдена</span> } }));
     const notice = container.querySelector("[data-slot=table-notice]") as HTMLElement;
     expect(notice.previousElementSibling).toHaveAttribute("data-slot", "adaptive-toolbar");
     expect(notice).toHaveTextContent(/^Находка f-999 не найдена$/);
     await applyStylesheet();
     expect(usedBlockSize(notice)).toBe(28);
+  });
+
+  test("p3-review-critic-code#code-32: a falsy notice — the `missing && …` idiom's `false` or `\"\"` — reserves no blank line", () => {
+    const { container, rerender } = renderUi(view({ notice: false }));
+    expect(container.querySelector("[data-slot=table-notice]")).toBeNull();
+    rerender(view({ notice: "" as unknown as false }));
+    expect(container.querySelector("[data-slot=table-notice]")).toBeNull();
+    rerender(view({ notice: null }));
+    expect(container.querySelector("[data-slot=table-notice]")).toBeNull();
+  });
+});
+
+describe("p3-review: the notice slot holds its line through a live change, and the kit owns «focus the table»", () => {
+  /** A view over the kit as «Находки» and «Юниты» are: an address the rows lack reads a line whose «Закрыть» drops the
+   * address and hands focus back through the kit. */
+  function Host({ rows }: { rows: readonly F[] }) {
+    const [param, setParam] = useState<string | null>("f-999");
+    const missing = param !== null && !rows.some((r) => r.id === param) ? param : null;
+    return view({
+      rows,
+      notice: missing
+        ? {
+            id: missing,
+            line: (close) => (
+              <span>
+                Находка {missing} не найдена
+                <button
+                  type="button"
+                  onClick={() => {
+                    setParam(null);
+                    close();
+                  }}
+                >
+                  Закрыть
+                </button>
+              </span>
+            ),
+          }
+        : null,
+    });
+  }
+  const ARRIVED = [...ROWS, ...make(1, 998)]; // f-999 arrives with a live update
+  const slot = () => document.querySelector("[data-slot=table-notice]") as HTMLElement | null;
+
+  test("p3-review-critic-code#code-2: the line's «Закрыть» goes through the kit — the slot released, focus on the table's Tab stop; the view reaches into none of the kit's markup", async () => {
+    const user = userEvent.setup();
+    renderUi(<Host rows={ROWS} />);
+    expect(slot()).toHaveTextContent("Находка f-999 не найдена");
+    await user.click(within(slot() as HTMLElement).getByRole("button", { name: "Закрыть" }));
+    expect(slot()).toBeNull();
+    expect(document.activeElement).toBe(row("f-001"));
+    expect(row("f-001")).toHaveAttribute("tabindex", "0");
+  });
+
+  test("p3-review-critic-craft-2#craft-2: the named row arriving live keeps the line's 28 px box — «Находка f-999 появилась» with «Открыть» and «Закрыть» — so nothing under it moves (Strict 1)", async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderUi(<Host rows={ROWS} />);
+    await applyStylesheet();
+    expect(usedBlockSize(slot() as HTMLElement)).toBe(28);
+    rerender(<Host rows={ARRIVED} />);
+    const line = slot() as HTMLElement;
+    expect(line).not.toBeNull();
+    expect(line.nextElementSibling).toHaveAttribute("data-slot", "table-region");
+    await applyStylesheet();
+    expect(usedBlockSize(line)).toBe(28);
+    expect(within(line).getByRole("status")).toHaveTextContent(/^Находка f-999 появилась\.ОткрытьЗакрыть$/);
+    expect(arrivedText(NOUN, "f-999")).toBe("Находка f-999 появилась.");
+    expect(arrivedText(NOUN, "f-999").split(" ")).toHaveLength(3);
+    expect(arrivedText({ forms: NOUNS.unit, gender: "m" }, "u33")).toBe("Юнит u33 появился.");
+    // «Открыть» opens it as a link would: its page, expanded, marked, focused; the line has done its work
+    await user.click(within(line).getByRole("button", { name: "Открыть" }));
+    await waitFor(() => expect(row("f-999")).toHaveAttribute("aria-expanded", "true"));
+    expect(row("f-999")).toHaveAttribute("data-target");
+    expect(document.activeElement).toBe(row("f-999"));
+    expect(slot()).toBeNull();
+  });
+
+  test("p3-review-critic-craft-2#craft-2: «Закрыть» on the arrived line releases the slot and puts focus on the table's Tab stop", async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderUi(<Host rows={ROWS} />);
+    rerender(<Host rows={ARRIVED} />);
+    await user.click(within(slot() as HTMLElement).getByRole("button", { name: "Закрыть" }));
+    expect(slot()).toBeNull();
+    expect(document.activeElement).toBe(row("f-001"));
+  });
+
+  test("p3-review-critic-craft-2#craft-2: a line its view drops while the named row is still missing (the address went another way) releases the slot", () => {
+    const { rerender } = renderUi(view({ notice: { id: "f-999", line: () => <span>Находка f-999 не найдена</span> } }));
+    expect(slot()).not.toBeNull();
+    rerender(view({ notice: null }));
+    expect(slot()).toBeNull();
   });
 });

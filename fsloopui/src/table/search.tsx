@@ -9,7 +9,7 @@ import { Fragment, useRef, useState, type ReactNode } from "react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
 import { cn } from "@/lib/utils";
-import { Hint, Keys, useShortcut } from "@/ui";
+import { FieldCap, Hint } from "@/ui";
 import { hitRanges } from "./query.ts";
 
 export const SEARCH_LABEL = "Поиск";
@@ -33,8 +33,6 @@ export interface SearchBoxProps {
 export function SearchBox({ value, onChange, placeholder, history, onCommit, shortcut = true, className }: SearchBoxProps) {
   const own = useRef<HTMLInputElement | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [focused, setFocused] = useState(false);
-  useShortcut("Slash", () => own.current?.focus(), { enabled: shortcut });
   const choose = (term: string) => {
     onChange(term);
     onCommit(term);
@@ -53,9 +51,7 @@ export function SearchBox({ value, onChange, placeholder, history, onCommit, sho
         placeholder={placeholder}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        onFocus={() => setFocused(true)}
         onBlur={() => {
-          setFocused(false);
           if (value.trim()) onCommit(value);
         }}
         onKeyDown={(event) => {
@@ -74,11 +70,7 @@ export function SearchBox({ value, onChange, placeholder, history, onCommit, sho
           out of the flow — so the toolbar folds its other items before the placeholder is cut (table #12) */}
       <span aria-hidden="true" data-flex-sizer="" data-text={placeholder} className="pointer-events-none invisible absolute top-0 left-0 px-1.5 text-base whitespace-nowrap after:content-[attr(data-text)] md:text-sm" />
       <InputGroupAddon align="inline-end" className="gap-0.5">
-        {shortcut && (
-          <span aria-hidden={focused || value ? true : undefined} className={cn(focused || value ? "invisible" : undefined)}>
-            <Keys codes={["Slash"]} />
-          </span>
-        )}
+        <FieldCap field={own} code="Slash" filled={Boolean(value)} enabled={shortcut} />
         <Hint label={CLEAR_LABEL} keys={["Escape"]}>
           <InputGroupButton size="icon-xs" aria-label={CLEAR_LABEL} tabIndex={value ? 0 : -1} aria-hidden={value ? undefined : true} className={cn(!value && "invisible")} onClick={() => choose("")}>
             <XIcon />

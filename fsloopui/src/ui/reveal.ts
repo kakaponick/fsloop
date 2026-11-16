@@ -21,11 +21,22 @@ export interface RevealOptions {
   nearest?: boolean;
   /** Focus `el` after the scroll, with no scroll of its own; off where focus stays with the user (the outline). */
   focus?: boolean;
+  /** The height of a sticky heading at the scroller's top (the design check of pass 3: a sticky heading in a scroller,
+   * and a reveal into it): an object under it or above the view comes to the heading's foot, `REVEAL_GAP` clear; one
+   * past the view's end by as little as shows it; one in view stays. The one rule of the table's rows and the report
+   * rail (code-4); `gap` and `nearest` are its own. */
+  head?: number;
 }
 
-/** Scrolls `scroller` — and only it — so `el` stands `gap` under its top (or, `nearest`, just inside its view), then
- * focuses `el` with no scroll of its own. */
-export function revealIn(scroller: HTMLElement, el: HTMLElement, { gap = REVEAL_GAP, nearest = false, focus = true }: RevealOptions = {}): void {
+/** Scrolls `scroller` — and only it — so `el` stands `gap` under its top (or, `nearest`, just inside its view; or,
+ * `head`, under a sticky heading), then focuses `el` with no scroll of its own. */
+export function revealIn(scroller: HTMLElement, el: HTMLElement, options: RevealOptions = {}): void {
+  const { head } = options;
+  if (head !== undefined) {
+    const under = el.getBoundingClientRect().top < scroller.getBoundingClientRect().top + head;
+    return revealIn(scroller, el, under ? { gap: head + REVEAL_GAP, focus: options.focus } : { nearest: true, focus: options.focus });
+  }
+  const { gap = REVEAL_GAP, nearest = false, focus = true } = options;
   const box = scroller.getBoundingClientRect();
   const r = el.getBoundingClientRect();
   if (nearest && r.bottom > box.bottom && r.top >= box.top) scroller.scrollTop += r.bottom - box.bottom + gap;

@@ -48,6 +48,11 @@
      sides, its detail's sides and bottom — one block, drawn inside the boxes so opening moves nothing. */
   --shadow-open-row: inset 0 1px 0 0 var(--frame), inset 1px 0 0 0 var(--frame), inset -1px 0 0 0 var(--frame);
   --shadow-open-detail: inset 0 -1px 0 0 var(--frame), inset 1px 0 0 0 var(--frame), inset -1px 0 0 0 var(--frame);
+  /* The cue of content past a box (DESIGN.md → Data Table, Running Text; `OverflowCue`): a hairline of muted ink at
+     the edge the content runs past — the bottom of a table's box, the right of a wide table in running text — drawn
+     inside the box, so it takes no room. */
+  --shadow-overflow: inset 0 -1px 0 0 var(--muted-foreground);
+  --shadow-overflow-end: inset -1px 0 0 0 var(--muted-foreground);
 }
 
 @theme inline {

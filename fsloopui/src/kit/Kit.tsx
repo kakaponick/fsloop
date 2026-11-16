@@ -1,11 +1,12 @@
 // The kit page, /kit in dev: every shared component of src/ui in its states, over fixture data at production's
 // sizes, for frames and review. A unit that adds a shared part adds its section to SECTIONS.
 import { CopyIcon, EllipsisIcon } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { LIVENESS } from "../../shared/liveness.ts";
 import { DECISION, FINDING_STATUS, LAUNCH_STATE, SEVERITY, UNIT_STATE, VERDICT, type StateEntry } from "../../shared/states.ts";
 import { NOUNS } from "../../shared/text.ts";
 import { Button } from "@/components/ui/button";
+import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@/components/ui/input-group";
 import { Separator } from "@/components/ui/separator";
 import {
   AddressLink,
@@ -23,6 +24,7 @@ import {
   Dash,
   EmptyState,
   FactList,
+  FieldCap,
   flatItem,
   FlatList,
   FrameStrip,
@@ -40,6 +42,8 @@ import {
   notify,
   NotRecorded,
   OutOfFilter,
+  OverflowCue,
+  useOverflowCue,
   PartFailed,
   PLACE_WHAT,
   RunningText,
@@ -324,6 +328,7 @@ function ListsSection() {
               <div className="px-3 py-1.5">Обычная строка</div>
             </div>
           </Case>
+          <OverflowCueCase />
           <AddressCase />
           <Case label="На экране: номера, которые список показывает, — в строке состояния, в рамке самой широкой формы">
             <div className="flex max-w-xl flex-col gap-1 text-xs text-muted-foreground tabular-nums">
@@ -345,6 +350,26 @@ function ListsSection() {
 
 /** The one form of an object on its list: its number a link to its address, its menu copying it, the list one Tab
  * stop with each item's own links gated, the reveal moving the list's own scroller and nothing above it. */
+/** The cue of content past a box (`OverflowCue`): a hairline at the edge the rows run past, gone at the scroll's end. */
+function OverflowCueCase() {
+  const box = useRef<HTMLDivElement | null>(null);
+  const { past, measure } = useOverflowCue(box, "bottom");
+  return (
+    <Case label="Строки уходят за нижний край рамки — тонкая линия у края; прокручено до конца — линии нет">
+      <div className="relative max-w-xl">
+        <div ref={box} onScroll={measure} className={`${SCROLLER} h-24 rounded-md border`}>
+          {Array.from({ length: 8 }, (_, i) => (
+            <div key={i} className="px-3 py-1.5">
+              Строка {i + 1}
+            </div>
+          ))}
+        </div>
+        <OverflowCue edge="bottom" shown={past} className="rounded-md" />
+      </div>
+    </Case>
+  );
+}
+
 function AddressCase() {
   const [target, setTarget] = useState<string | null>(null);
   const { scroller, hold } = useReveal(target, (box, n) => box.querySelector<HTMLElement>(`article[data-kit-entry="${n}"]`));
@@ -476,6 +501,7 @@ function OverlaysSection() {
         <span className="flex items-center gap-1.5 text-muted-foreground">
           Поиск <Keys codes={["Slash"]} />
         </span>
+        <FieldCapCase />
       </div>
       <div className="flex flex-wrap items-center gap-4">
         <span>
@@ -506,6 +532,24 @@ function OverlaysSection() {
         </Button>
       </div>
     </Section>
+  );
+}
+
+/** The in-field cap of a key that focuses a field (`FieldCap`): G focuses the field; the cap steps aside while the
+ * field is focused or filled, its box kept. */
+function FieldCapCase() {
+  const field = useRef<HTMLInputElement>(null);
+  const [value, setValue] = useState("");
+  return (
+    <InputGroup className="h-7 w-56">
+      <InputGroupAddon align="inline-start">
+        <InputGroupText>Перейти к #</InputGroupText>
+      </InputGroupAddon>
+      <InputGroupInput ref={field} aria-label="Перейти к #: номер решения" inputMode="numeric" autoComplete="off" placeholder="#1–#143" value={value} onChange={(event) => setValue(event.target.value)} />
+      <InputGroupAddon align="inline-end">
+        <FieldCap field={field} code="KeyG" filled={Boolean(value)} />
+      </InputGroupAddon>
+    </InputGroup>
   );
 }
 

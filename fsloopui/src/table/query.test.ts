@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { ALL_ROWS, hitRanges, nextSort, pageOf, pageOfIndex, presetOf, runQuery, tokens, type FilterDef, type Preset, type QueryState, type SearchDef, type SortColumn } from "./query.ts";
+import { ALL_ROWS, hitRanges, nextSort, pageOf, pageOfIndex, presetDetail, presetOf, runQuery, tokens, type FilterDef, type Preset, type QueryState, type SearchDef, type SortColumn } from "./query.ts";
 
 interface Row {
   id: string;
@@ -108,6 +108,24 @@ describe("filters", () => {
     expect(presetOf({ status: ["fixed"] }, presets)).toBeNull();
     const r = runQuery({ rows: ROWS, rowId: (x) => x.id, columns: COLUMNS, filters: FILTERS, search: SEARCH, state: state({ search: "row" }), presets });
     expect(r.presetCounts).toEqual({ all: 5, fix: 2 });
+  });
+
+  test("p3-review-critic-craft-2#craft-6: the rows the filters keep before the search — what a search alone hides", () => {
+    // severity major: craft-1, ux-2, audit-2; no row holds «zzzz»
+    const r = run({ filters: { severity: ["major"] }, search: "zzzz" });
+    expect(r.matched).toBe(0);
+    expect(r.unsearched).toBe(3);
+    expect(run({ filters: { severity: ["major"] } }).unsearched).toBe(3);
+    expect(run({ search: "zzzz" }).unsearched).toBe(6);
+  });
+
+  test("p3-review-critic-code#code-12: a preset's second part — one helper beside the preset, its words joined by «, », only for several", () => {
+    const work: Preset = { id: "work", label: "В работе", filters: { status: ["implement", "verify", "debug", "land"] }, holds: ["пишется", "проверяется", "отладка", "вливается"] };
+    expect(presetDetail(work)).toBe("пишется, проверяется, отладка, вливается");
+    expect(presetDetail(work)?.split(" ")).toHaveLength(4);
+    // one value: its label says it alone, no second part (p3 Review, JUDGED); no words of its own: none either
+    expect(presetDetail({ id: "blocked", label: "Заблокированы", filters: { status: ["blocked"] }, holds: ["заблокирован"] })).toBeUndefined();
+    expect(presetDetail({ id: "all", label: "Все", filters: {} })).toBeUndefined();
   });
 });
 

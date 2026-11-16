@@ -11,8 +11,12 @@ import { afterAll, describe, expect, test } from "vitest";
 import { criticReport, lines } from "../../../fixtures/make.ts";
 import { readRun } from "../../../server/run.ts";
 import { openFindings } from "@/finding";
+import { FINDINGS_TABLE } from "@/finding/facets.ts";
+import { runKey as viewKey } from "@/table/view-state.ts";
+import { writePref } from "@/ui";
 import { runPath } from "../../app/routes.ts";
 import { findingsApp, keyOf, renderFindings } from "./testing.tsx";
+import { ALL_RATED } from "./verdict.tsx";
 
 const N = 24; // a live run: two craft critics of the map, one unit at work
 const KEY = keyOf(N);
@@ -92,5 +96,28 @@ describe("live updates of «Находки»", () => {
     expect(within(row(id)).getByText("вне фильтра")).toBeInTheDocument();
     await waitFor(() => expect(app.human(N).some((l) => l.finding === id && l.verdict === "agree")).toBe(true));
     expect(ids()).toEqual(order);
+  });
+
+  test("p3-review-critic-code#code-1: «none left» counts the findings the table shows — a new one held behind «N новых · показать» is not left; key 1 on the last one shown stops with «В этом списке всё оценено»", async () => {
+    const user = userEvent.setup({ delay: null });
+    writePref(viewKey(FINDINGS_TABLE, KEY), { filters: {}, search: "" });
+    renderFindings(app, KEY, path);
+    await waitFor(() => expect(bodyRows().length).toBeGreaterThan(2), { timeout: 4000 });
+    // one finding without a verdict whose id no other id holds, and a search that keeps it and the next report's
+    const rated = new Set(app.human(N).map((l) => l.finding));
+    const all = ids();
+    const x = all.find((id) => !rated.has(id) && all.filter((o) => o.includes(id)).length === 1) as string;
+    writePref(viewKey(FINDINGS_TABLE, KEY), { filters: {}, search: `${x} zebra` });
+    await waitFor(() => expect(ids()).toEqual([x]));
+    // a critic's report grows by two findings on «zebra», which the search keeps: they wait in the strip, unshown
+    const schedules = Array.from({ length: 14 }, (_, k) => lines.craft(k + 1, "schedules", k === 0 ? "p1-baseline-schedules-" : null));
+    const grown = criticReport({ lens: "craft assess", audit: "«schedules» audit 10/20 · critique 29/40", findings: [...schedules, lines.craft(15, "zebra", null), lines.craft(16, "zebra", null)], candidates: [lines.candidate(1, "schedules")], order: ["schedules: /impeccable clarify, then polish"] });
+    app.fx.write(N, "reports/p1-map-craft-schedules.md", grown);
+    await waitFor(() => expect(strip()).toHaveTextContent(/новы.* находк.* · показать/), { timeout: 4000 });
+    expect(ids()).toEqual([x]);
+    row(x).focus();
+    await user.keyboard("1");
+    await waitFor(() => expect(document.querySelector(`tr[data-detail-for="${x}"] [data-slot=verdict-line]`)).toHaveTextContent(new RegExp(`^${ALL_RATED}$`)));
+    expect(ids()).toEqual([x]);
   });
 });

@@ -69,14 +69,10 @@ export const DEFAULT_SORT = { id: "pass", desc: true } as const;
 
 // ── «Вид» (rules/ui → Conventions 16): the slices of «Что прогон делает сейчас» ─────────────────
 
-/** A slice of the units' states: its filter, and — where it holds several — their words from the state map as its
- * second part (improve-4), the same words that title its group in the status bar. */
-const slice = (id: string, label: string, states: readonly UnitState[]): Preset => ({
-  id,
-  label,
-  filters: { state: [...states] },
-  ...(states.length > 1 ? { detail: states.map((s) => UNIT_STATE[s].compact).join(", ") } : {}),
-});
+/** A slice of the units' states: its filter, and their words from the state map — what fills it, and where it holds
+ * several its second part through the kit's `presetDetail` (improve-4), the same words that title its group in the
+ * status bar. */
+const slice = (id: string, label: string, states: readonly UnitState[]): Preset => ({ id, label, filters: { state: [...states] }, holds: states.map((s) => UNIT_STATE[s].compact) });
 
 export const PRESETS: readonly Preset[] = [
   { id: "all", label: "Все", filters: {} },

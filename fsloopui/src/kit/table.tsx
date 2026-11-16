@@ -92,9 +92,9 @@ const FINDING_FILTERS: FilterDef<KitFinding>[] = [
 const FINDING_PRESETS: Preset[] = [
   { id: "all", label: "Все", filters: {} },
   { id: "unrated", label: "Без оценки", filters: { verdict: ["none"] } },
-  { id: "fix", label: "В исправление", filters: { state: ["queued", "in-progress", "blocked"] }, detail: (["queued", "in-progress", "blocked"] as const).map((s) => FINDING_STATUS[s].compact).join(", ") },
+  { id: "fix", label: "В исправление", filters: { state: ["queued", "in-progress", "blocked"] }, holds: (["queued", "in-progress", "blocked"] as const).map((s) => FINDING_STATUS[s].compact) },
   { id: "candidates", label: "Кандидаты", filters: { state: ["candidate"] } },
-  { id: "fixed", label: "Закоммичены", filters: { state: ["fixed", "closed"] }, detail: (["fixed", "closed"] as const).map((s) => FINDING_STATUS[s].compact).join(", ") },
+  { id: "fixed", label: "Закоммичены", filters: { state: ["fixed", "closed"] }, holds: (["fixed", "closed"] as const).map((s) => FINDING_STATUS[s].compact) },
 ];
 
 const FINDING_SEARCH: SearchDef<KitFinding> = {

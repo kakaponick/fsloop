@@ -84,6 +84,36 @@ describe("p2-verdict-critic-craft-verdict-3#craft-1: the shared reveal moves the
     expect(into).not.toHaveBeenCalled();
   });
 
+  test("p3-review-critic-code#code-4: revealIn `head` — the one rule of a reveal under a sticky heading: under or above the heading, to its foot 8 px clear; past the view's end, by as little as shows it; in view, not at all", () => {
+    placeBoxes();
+    render(
+      <div data-testid="rail" data-top="100" data-height="400" className={SCROLLER}>
+        <a href="#u" data-testid="under" data-in="rail" data-top="310" data-height="40">
+          under
+        </a>
+        <a href="#b" data-testid="below" data-in="rail" data-top="900" data-height="32">
+          below
+        </a>
+        <a href="#v" data-testid="shown" data-in="rail" data-top="700" data-height="32">
+          shown
+        </a>
+      </div>,
+    );
+    const rail = screen.getByTestId("rail");
+    rail.scrollTop = 200;
+    // its top at 110, under the 28 px heading over 100–128: to the heading's foot, 8 px clear — 136
+    revealIn(rail, screen.getByTestId("under"), { head: 28, focus: false });
+    expect(rail.scrollTop).toBe(174);
+    expect(screen.getByTestId("under").getBoundingClientRect().top).toBe(136);
+    // its bottom at 758, past the box's end at 500: up by as little as shows it, 8 px clear
+    revealIn(rail, screen.getByTestId("below"), { head: 28, focus: false });
+    expect(rail.scrollTop).toBe(440);
+    // in view, below the heading: nothing moves
+    revealIn(rail, screen.getByTestId("shown"), { head: 28, focus: false });
+    expect(rail.scrollTop).toBe(440);
+    expect(document.activeElement).toBe(document.body);
+  });
+
   test("SCROLLER: a list's scroller is the containing block of everything in it — an sr-only text deep in the list never overflows the page's body", () => {
     // the cause of the 48 px displacement: f16 put «—» (Dash, its «нет значения» sr-only, `position: absolute`) into
     // the journal's entries; the list's scroller was not positioned, so the text's containing block was the view's

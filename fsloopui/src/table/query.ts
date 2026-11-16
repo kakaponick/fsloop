@@ -56,10 +56,15 @@ export interface Preset {
   id: string;
   label: string;
   filters: Filters;
-  /** What the slice holds, when its label does not say it alone — its states, from the view's own state map: «пишется,
-   * проверяется, отладка, вливается». The «Вид» option's muted second part, and what fills it when it is empty. */
-  detail?: string;
+  /** What the slice holds, in the words of the view's own state map: [«пишется», «проверяется», «отладка»,
+   * «вливается»]. What fills the view when it is empty, and — where it holds several — the «Вид» option's muted second
+   * part (`presetDetail`). Absent: its filters' values in their options' words. */
+  holds?: readonly string[];
 }
+
+/** A preset's muted second part (the design check of pass 3): the words it holds joined by «, » — only where it holds
+ * several; a label that names its one value says it alone. The one place the second part is built. */
+export const presetDetail = (preset: Preset): string | undefined => (preset.holds && preset.holds.length > 1 ? preset.holds.join(", ") : undefined);
 
 export interface QueryState {
   sort: SortSpec | null;
@@ -86,6 +91,8 @@ export interface QueryResult<R> {
   outside: Set<string>;
   /** Rows the filters and the search keep: «{matched} из {total}». */
   matched: number;
+  /** Rows the filters keep before the search: what a search alone hides when `matched` is 0. */
+  unsearched: number;
   total: number;
   /** Per filter, per option value: the rows that pass the search and every other filter and carry the value;
    * `""` holds the count for «все». */
@@ -197,6 +204,7 @@ export function runQuery<R>({ rows, rowId, columns, filters, search, state, incl
   const kept: R[] = [];
   const outside = new Set<string>();
   let matched = 0;
+  let unsearched = 0;
   for (const row of rows) {
     const searched = searchPasses(row, toks, search);
     const values = filters.map((f) => f.values(row));
@@ -216,6 +224,7 @@ export function runQuery<R>({ rows, rowId, columns, filters, search, state, incl
         if (presetSets[pi].every((set, i) => !set || values[i].some((v) => set.has(v)))) presetCounts[p.id]++;
       });
     }
+    if (mask === all) unsearched++;
     if (searched && mask === all) {
       matched++;
       kept.push(row);
@@ -225,7 +234,7 @@ export function runQuery<R>({ rows, rowId, columns, filters, search, state, incl
     }
   }
   const column = state.sort ? columns.find((c) => c.id === state.sort?.id) : undefined;
-  return { rows: sortRows(kept, column, state.sort?.desc ?? false), outside, matched, total: rows.length, counts, presetCounts };
+  return { rows: sortRows(kept, column, state.sort?.desc ?? false), outside, matched, unsearched, total: rows.length, counts, presetCounts };
 }
 
 /** «все» as a page size: no split. */

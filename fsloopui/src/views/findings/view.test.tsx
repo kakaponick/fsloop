@@ -11,10 +11,10 @@ import { FINDING_STATUS, SEVERITY, VERDICT, type Verdict } from "../../../shared
 import { readRun } from "../../../server/run.ts";
 import { emptyStateText, glossaryLines, missingText, UiProvider, writePref } from "@/ui";
 import { tableKey } from "@/table/view-state.ts";
-import { ANY_LABEL, assertLayout, CUSTOM_LABEL, fitsRegion, FRAME, headerWidth, isSelectFilter, mergeWidths, pack, PRESET_LABEL, runQuery, SELECT_WIDTH, type FilterDef, type PackItem } from "@/table";
+import { ANY_LABEL, assertLayout, CUSTOM_LABEL, fitsRegion, FRAME, headerWidth, isSelectFilter, mergeWidths, pack, PRESET_LABEL, presetDetail, runQuery, SELECT_WIDTH, type FilterDef, type PackItem } from "@/table";
 import { FLEX_FLOOR, GAP, OVERFLOW_WIDTH } from "@/table/toolbar.tsx";
 import { CAUSE, CONFIDENCE, countFindings, enumFact, FACT, FindingArticle, openFindings, reportWord, SECTION, stateText, textSections } from "@/finding";
-import { FINDINGS_TABLE, OBJECTED } from "@/finding/facets.ts";
+import { DISPUTING, FACETS, FINDINGS_TABLE, OBJECTED } from "@/finding/facets.ts";
 import { applyStylesheet, textWidth as measure, usedBlockSize } from "../../app/layout-testing.ts";
 import { renderShell } from "../../app/testing.tsx";
 import { runPath } from "../../app/routes.ts";
@@ -119,7 +119,7 @@ describe("the view's configuration at the production shape", () => {
   });
 
   test("improve-4 (1): «Вид» names what a slice of several values holds, from its own definition — every string against a literal", () => {
-    expect(PRESETS.map((p) => [p.label, p.detail ?? null])).toEqual([
+    expect(PRESETS.map((p) => [p.label, presetDetail(p) ?? null])).toEqual([
       ["Все", null],
       ["Без оценки", null],
       ["С возражением", "не согласен, не та серьёзность, ложная находка"],
@@ -127,6 +127,14 @@ describe("the view's configuration at the production shape", () => {
       ["Кандидаты", null],
       ["Закоммичены", "исправлена, закрыта"],
     ]);
+  });
+
+  test("p3-review-critic-code#code-7: «С возражением» — one disputing set, which the filter's facet and the view's second part both read", () => {
+    expect(DISPUTING).toEqual(["disagree", "wrong-severity", "false-positive"]);
+    for (const v of Object.keys(VERDICT) as Verdict[]) expect(FACETS.verdict({ verdict: { verdict: v, note: null, at: null } } as Finding).includes(OBJECTED), v).toBe(DISPUTING.includes(v));
+    expect(FACETS.verdict({ verdict: null } as Finding)).toEqual(["none"]);
+    const objected = PRESETS.find((p) => p.id === "objected");
+    expect(objected && presetDetail(objected)).toBe("не согласен, не та серьёзность, ложная находка");
   });
 
   test("cand-7: «С возражением» — the three verdicts that dispute a finding, one «Вид» and one «Оценка» option", () => {
