@@ -105,7 +105,21 @@ describe("launches", () => {
     const s = launchState({ running: true, startedAt: new Date(NOW - 12 * 60_000).toISOString() }, NOW);
     expect(s).toEqual({ state: "running", label: "работает · 12 мин", tone: "neutral" });
     expect(launchState({ running: false, reportMissing: true }, NOW).label).toBe("нет отчёта");
-    expect(launchState({ running: false, seconds: 3 * 60 + 20 }, NOW).label).toBe("завершён · 3 мин");
+    expect(launchState({ running: false, seconds: 3 * 60 + 20 }, NOW).label).toBe("завершён за 3 мин");
+  });
+
+  test("p3-decompose-design-check#design-2: a done launch reads its time as how long it took — one form on the rail, the reader and a unit's detail", () => {
+    const words = (s: string) => s.split(" ").length;
+    const done = (seconds: number | null) => launchState({ running: false, seconds }, NOW);
+    expect(done(9 * 60 + 12)).toEqual({ state: "done", label: "завершён за 9 мин", tone: "neutral" });
+    expect(words(done(9 * 60 + 12).label)).toBe(4);
+    // the widest: hours, compact as in a cell
+    expect(done(2 * 3600 + 5 * 60).label).toBe("завершён за 2 ч");
+    // under a minute — never seconds (rules/ui → Conventions 10)
+    expect(done(40).label).toBe("завершён меньше чем за минуту");
+    expect(words(done(40).label)).toBe(5);
+    // no time recorded: the word alone
+    expect(done(null).label).toBe("завершён");
   });
 
   test("a critic's report is «отчёт критика», any other «отчёт запуска»", () => {

@@ -44,6 +44,10 @@
   /* The two change marks (rules/ui → Conventions 9): a changed row's neutral edge, a linked object's frame. */
   --shadow-edge: inset 3px 0 0 var(--muted-foreground);
   --shadow-target: inset 0 0 0 1px var(--foreground);
+  /* The open row's frame (DESIGN.md → Change Marks, `OPEN_FRAME`): 1 px in the host's `--frame` ink, the row's top and
+     sides, its detail's sides and bottom — one block, drawn inside the boxes so opening moves nothing. */
+  --shadow-open-row: inset 0 1px 0 0 var(--frame), inset 1px 0 0 0 var(--frame), inset -1px 0 0 0 var(--frame);
+  --shadow-open-detail: inset 0 -1px 0 0 var(--frame), inset 1px 0 0 0 var(--frame), inset -1px 0 0 0 var(--frame);
 }
 
 @theme inline {

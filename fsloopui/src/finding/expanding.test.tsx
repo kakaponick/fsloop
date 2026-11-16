@@ -11,6 +11,8 @@ import { readRun } from "../../server/run.ts";
 import { UiProvider } from "../ui/provider.tsx";
 import { runPath } from "../app/routes.ts";
 import { fixtureApp, keyOf, NOW } from "../app/testing.tsx";
+import { OPEN_FRAME } from "../ui/marks.tsx";
+import { stateText, stateTextIn } from "./cells.tsx";
 import { ExpandingFindings } from "./expanding.tsx";
 import { findingToggle, OPEN_IN_FINDINGS } from "./words.ts";
 
@@ -77,7 +79,9 @@ describe("gap 3: the shared expanding finding rows", () => {
     const missing = container.querySelector("li[data-finding='p9-review-critic-code#code-99']") as HTMLElement;
     expect(missing).toHaveTextContent("находка p9-review-critic-code#code-99 не найдена");
     // the row's own 32 px line, aligned past the chevrons' column (Strict 1)
-    expect(missing.firstElementChild).toHaveClass("h-8", "pl-7");
+    expect(missing.firstElementChild).toHaveClass("h-8", "pl-8");
+    const row = container.querySelector("[data-slot=finding-line]") as HTMLElement;
+    expect(row).toHaveClass("pl-1");
     expect(within(missing).queryByRole("button")).toBeNull();
     expect(screen.getAllByRole("button", { name: /^Развернуть находку / })).toHaveLength(1);
   });
@@ -86,7 +90,7 @@ describe("gap 3: the shared expanding finding rows", () => {
     const ruled = show(five);
     expect(ruled.container.querySelector("[data-slot=report-findings]")).toHaveClass("border-t");
     expect(ruled.container.querySelector("[data-slot=report-findings] > li")).toHaveClass("border-b");
-    expect(ruled.container.querySelector("[data-slot=finding-line]")).toHaveClass("hover:bg-muted", "data-[state=open]:bg-muted/40");
+    expect(ruled.container.querySelector("[data-slot=finding-line]")).toHaveClass("hover:bg-muted");
     ruled.unmount();
     const plain = show(five, false);
     expect(plain.container.querySelector("[data-slot=report-findings]")).not.toHaveClass("border-t");
@@ -111,5 +115,48 @@ describe("gap 3: the shared expanding finding rows", () => {
     // ruled, on the page's paper, the ghost's muted ground shows, and stays
     const ruled = show(five);
     expect(within(ruled.container.querySelector("[data-slot=finding-line]") as HTMLElement).getByRole("button", { name: `Развернуть находку ${five[0].local}` })).toHaveClass("hover:bg-muted");
+  });
+
+  test("p2-assess-critic-improve#improve-1 (2): an open row and its detail sit in the table's 1 px frame — the one export of @/ui — not on a muted ground; ruled or plain", async () => {
+    const user = userEvent.setup({ delay: null });
+    for (const ruled of [true, false]) {
+      const view = show(five, ruled);
+      const [line, closed] = [...view.container.querySelectorAll<HTMLElement>("[data-slot=finding-line]")];
+      await user.click(within(line).getByRole("button", { name: `Развернуть находку ${five[0].local}` }));
+      const detail = line.nextElementSibling as HTMLElement;
+      expect(detail).toHaveAttribute("data-slot", "finding-detail");
+      expect(line).toHaveClass(OPEN_FRAME.muted, OPEN_FRAME.row);
+      expect(detail).toHaveClass(OPEN_FRAME.muted, OPEN_FRAME.detail);
+      for (const el of [line, detail]) expect([...el.classList].filter((c) => /bg-muted\/40/.test(c))).toEqual([]);
+      // a closed row draws no frame; the frame is inset, so opening changes no box
+      expect(closed).not.toHaveClass(OPEN_FRAME.row);
+      expect([...line.classList].filter((c) => /^(p[xytrbl]?|m[xytrbl]?|border)-/.test(c))).toEqual([...closed.classList].filter((c) => /^(p[xytrbl]?|m[xytrbl]?|border)-/.test(c)));
+      view.unmount();
+    }
+  });
+
+  test("p2-assess-critic-improve#improve-1 (3): in its own unit's detail a row leaves out the unit — «исправлена», not «исправлена · u22»; another unit stays", () => {
+    const f = { ...five[0], effectiveStatus: "fixed" as const, unit: "u22", units: ["u22"] };
+    const g = { ...five[1], effectiveStatus: "fixed" as const, unit: "u5", units: ["u5", "u22"] };
+    const { container } = render(
+      <MemoryRouter>
+        <UiProvider>
+          <ExpandingFindings run={run} items={[f, g]} label="Закрывает 2 находки" now={NOW} slot="unit-closes" ruled={false} unit="u22" />
+        </UiProvider>
+      </MemoryRouter>,
+    );
+    const states = [...container.querySelectorAll<HTMLElement>("[data-slot=finding-row] > span:last-child")];
+    expect(states.map((s) => s.textContent)).toEqual(["исправлена", "исправлена · u5"]);
+    expect(states.map((s) => s.title)).toEqual(["исправлена", "исправлена · u5"]);
+    expect(stateTextIn(f, "u22")).toBe("исправлена");
+    expect(stateText(f)).toBe("исправлена · u22");
+    expect(stateTextIn(g, "u22").split(" ")).toHaveLength(3);
+  });
+
+  test("p3-decompose-design-check#design-19: the list is a list — `role=\"list\"` on its `list-none` ol", () => {
+    const { container } = show(five);
+    const ol = container.querySelector("[data-slot=report-findings]") as HTMLElement;
+    expect(ol).toHaveClass("list-none");
+    expect(ol).toHaveAttribute("role", "list");
   });
 });

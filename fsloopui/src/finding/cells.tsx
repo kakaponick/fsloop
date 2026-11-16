@@ -12,18 +12,25 @@ type Severe = Pick<Finding, "severity">;
 /** The severity's map entry; a finding without one reads «не записано» with a neutral dot (Conventions 4). */
 export const severityState = (f: Severe): DotState => (f.severity ? SEVERITY[f.severity] : { tone: "neutral", label: NOT_RECORDED });
 
-/** The unit a state names after its word: the fixing unit, else the first unit whose brief closes it. */
-export const stateUnit = (f: Pick<Finding, "unit" | "units">): string | null => f.unit ?? f.units[0] ?? null;
+/** The unit a state names after its word: the fixing unit, else the first unit whose brief closes it — none in that
+ * unit's own detail (`host`), where it would repeat the unit the page is about (ux 2). */
+export const stateUnit = (f: Pick<Finding, "unit" | "units">, host?: string): string | null => {
+  const unit = f.unit ?? f.units[0] ?? null;
+  return unit === host ? null : unit;
+};
 
 /** «исправляется · u3», «кандидат»: the compact state, the unit last so truncation cuts only it. */
-export const stateText = (f: Pick<Finding, "effectiveStatus" | "unit" | "units">): string => [FINDING_STATUS[f.effectiveStatus].compact, stateUnit(f)].filter(Boolean).join(" · ");
+export const stateText = (f: Pick<Finding, "effectiveStatus" | "unit" | "units">): string => stateTextIn(f, undefined);
+
+/** The same, in a list `host` holds: in that unit's own detail the word alone. */
+export const stateTextIn = (f: Pick<Finding, "effectiveStatus" | "unit" | "units">, host: string | undefined): string => [FINDING_STATUS[f.effectiveStatus].compact, stateUnit(f, host)].filter(Boolean).join(" · ");
 
 export function SeverityCell({ finding, form = "compact" }: { finding: Severe; form?: "compact" | "full" }) {
   return <StatusDot state={severityState(finding)} form={form} truncate />;
 }
 
-export function StateCell({ finding }: { finding: Pick<Finding, "effectiveStatus" | "unit" | "units"> }) {
-  const unit = stateUnit(finding);
+export function StateCell({ finding, host }: { finding: Pick<Finding, "effectiveStatus" | "unit" | "units">; host?: string }) {
+  const unit = stateUnit(finding, host);
   return <StatusDot state={FINDING_STATUS[finding.effectiveStatus]} detail={unit ?? undefined} truncate />;
 }
 

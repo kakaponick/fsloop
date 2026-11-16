@@ -1,6 +1,7 @@
 // The words of «Юниты» that code builds (rules/ui → Copy 3–4: each is tested with the widest real input against a
 // literal): the detail's section headings, a check's outcome and its attempts, the toolbar facts, a missing unit, the
 // cell's cause. State words come from shared/states.ts; the plural, durations and Moscow time from shared/text.ts.
+import { launchState } from "../../../shared/states.ts";
 import { count, NOUNS, type Forms } from "../../../shared/text.ts";
 import { notFoundText, type GlossaryEntry, type HeldNoun } from "@/ui";
 
@@ -9,6 +10,11 @@ export const SECTION = {
   launches: "Запуски агентов",
   checks: "Проверки юнита",
 } as const;
+
+/** A committed unit's launches and checks behind one «Подробнее» (ux 9 → Provenance): the fold's name for assistive
+ * technology, and its storage key. */
+export const PROVENANCE_LABEL = "Запуски агентов и проверки юнита";
+export const PROVENANCE_FOLD = "unit-provenance";
 
 /** The header row of each list in the detail (ux 1: a column says what its values are; a time says start or end). */
 export const LAUNCH_HEAD = ["Агент и задача", "Модель", "Начало", "Состояние", "Токены"] as const;
@@ -41,6 +47,19 @@ export { checkOutcome } from "../../../shared/states.ts";
 
 /** The log a check's line comes from: «verify.log.lines» → «verify». */
 export const logName = (file: string): string => file.replace(/\.log\.lines$|\.lines$/, "");
+
+/** The word before a log's name on its group row of «Проверки юнита»: «лог land», the name in mono. */
+export const LOG_WORD = "лог";
+
+/** What fsloop recorded on its own: the launch's state, its time, and a check's log line — the header glossaries
+ * (ui → Glossary: once, on the header that names the set; never on an item). The values are `launchState`'s own
+ * forms, so the glossary reads what the cells read. */
+export const LAUNCH_STATE_GLOSSARY: readonly GlossaryEntry[] = [
+  { value: launchState({ running: true, startedAt: new Date(0).toISOString() }, 12 * 60_000).label, meaning: "агент ещё не вернул отчёт; время — с его запуска" },
+  { value: launchState({ running: false, seconds: 9 * 60 }, 0).label, meaning: "агент вернул отчёт; время — сколько он работал" },
+  { value: launchState({ running: false, reportMissing: true }, 0).label, meaning: "запуск записан, но файла его отчёта нет" },
+];
+export const LOG_LINE_GLOSSARY: readonly GlossaryEntry[] = [{ value: "Строка лога", meaning: "что проверка вывела последней строкой, как записано в логе" }];
 
 /** The cause of a waiting unit: «ждёт u2, u23». */
 export const waitsText = (ids: readonly string[]): string | null => (ids.length ? `ждёт ${ids.join(", ")}` : null);

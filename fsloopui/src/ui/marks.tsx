@@ -60,6 +60,19 @@ export function markProps({ edge = false, target = false }: MarkState, className
   };
 }
 
+/** The open row's frame (DESIGN.md → Data Table; the design check's one export for the table and ExpandingFindings):
+ * an open row and its detail read as one block — the muted ground alone is about 1.1:1 on the dark paper, so a 1 px
+ * inset frame runs round them, in muted ink (over 3:1 on both themes), ink on a link's target. The row draws its top
+ * and sides, the detail its sides and bottom; inset, so opening moves nothing. A host sets the ink (`muted` or
+ * `target`) on both parts. */
+export const OPEN_FRAME = {
+  muted: "[--frame:var(--muted-foreground)]",
+  target: "[--frame:var(--foreground)]",
+  /** The theme's `--shadow-open-row` and `--shadow-open-detail` (src/styles/index.css), beside the other two marks. */
+  row: "shadow-open-row",
+  detail: "shadow-open-detail",
+} as const;
+
 export const OUT_OF_FILTER = "вне фильтра";
 
 /** «вне фильтра» on a row the active filters hide but a link or a live change keeps in view. */

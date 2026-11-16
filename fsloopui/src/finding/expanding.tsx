@@ -10,7 +10,7 @@ import { useId, useLayoutEffect, useRef, useState, type MouseEvent } from "react
 import type { Finding, Run } from "../../shared/model.ts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { flatItem, FlatList, Hint, NotFound } from "@/ui";
+import { flatItem, FlatList, Hint, NotFound, OPEN_FRAME } from "@/ui";
 import { ObjectLink } from "../app/links.tsx";
 import { FindingArticle } from "./article.tsx";
 import { FindingRow } from "./row.tsx";
@@ -31,6 +31,8 @@ export interface ExpandingFindingsProps {
   /** A hairline between rows, a muted hover and an open ground — a list on the page's paper; off for one that already
    * sits on the muted ground (a unit's detail), where the row's hover and the chevron's grounds are ink over muted. */
   ruled?: boolean;
+  /** The unit whose detail holds the list: a row's state leaves it out (`FindingRow` → `host`). */
+  unit?: string;
 }
 
 /** The chevron's hover and open grounds on the muted ground of a unit's detail: the ghost button's own are that same
@@ -40,7 +42,7 @@ const ON_MUTED = "hover:bg-foreground/8 dark:hover:bg-foreground/8 aria-expanded
 /** A click on a row's own text toggles it; a link or a button inside the row keeps its own action. */
 const ownClick = (e: MouseEvent<HTMLElement>) => !(e.target as HTMLElement).closest("a, button");
 
-export function ExpandingFindings({ run, items, label, now, slot, ruled = true }: ExpandingFindingsProps) {
+export function ExpandingFindings({ run, items, label, now, slot, ruled = true, unit }: ExpandingFindingsProps) {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   const list = useRef<HTMLOListElement>(null);
   const base = useId();
@@ -56,12 +58,12 @@ export function ExpandingFindings({ run, items, label, now, slot, ruled = true }
   });
   return (
     <FlatList label={label} onOpen={toggle}>
-      <ol ref={list} data-slot={slot} className={cn("m-0 flex list-none flex-col p-0", ruled && "border-t")}>
+      <ol ref={list} role="list" data-slot={slot} className={cn("m-0 flex list-none flex-col p-0", ruled && "border-t")}>
         {items.map((item) => {
           if (typeof item === "string")
             return (
               <li key={item} data-finding={item} className={cn("min-w-0", ruled && "border-b")}>
-                <span className="flex h-8 items-center pl-7">
+                <span className="flex h-8 items-center pl-8">
                   <NotFound kind="finding" id={item} />
                 </span>
               </li>
@@ -76,7 +78,7 @@ export function ExpandingFindings({ run, items, label, now, slot, ruled = true }
                 data-slot="finding-line"
                 data-state={isOpen ? "open" : "closed"}
                 onClick={(e) => ownClick(e) && toggle(f.id)}
-                className={cn("grid cursor-default grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-x-1", ruled ? "pr-2 hover:bg-muted data-[state=open]:bg-muted/40" : "hover:bg-foreground/4")}
+                className={cn("grid cursor-default grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-x-1 pr-2 pl-1", ruled ? "hover:bg-muted" : "hover:bg-foreground/4", isOpen && [OPEN_FRAME.muted, OPEN_FRAME.row])}
               >
                 <Hint label={name}>
                   <Button
@@ -92,10 +94,10 @@ export function ExpandingFindings({ run, items, label, now, slot, ruled = true }
                     <ChevronRightIcon aria-hidden="true" className={cn("transition-transform motion-reduce:transition-none", isOpen && "rotate-90")} />
                   </Button>
                 </Hint>
-                <FindingRow run={run} finding={f} />
+                <FindingRow run={run} finding={f} host={unit} />
               </div>
               {isOpen && (
-                <div id={panel} data-slot="finding-detail" className={cn("flex flex-col gap-2 pt-1 pb-4 pl-7", ruled && "bg-muted/40 pr-4")}>
+                <div id={panel} data-slot="finding-detail" className={cn("flex flex-col gap-2 pt-1 pr-4 pb-4 pl-8", OPEN_FRAME.muted, OPEN_FRAME.detail)}>
                   <p className="m-0 flex justify-end">
                     <ObjectLink run={run} kind="finding" id={f.id} className="text-xs">
                       {OPEN_IN_FINDINGS}

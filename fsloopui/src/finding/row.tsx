@@ -5,11 +5,13 @@
 import type { Finding, Run } from "../../shared/model.ts";
 import { cn } from "@/lib/utils";
 import { ObjectLink } from "../app/links.tsx";
-import { SeverityCell, StateCell, stateText } from "./cells.tsx";
+import { SeverityCell, StateCell, stateTextIn } from "./cells.tsx";
 
 type RowRun = Pick<Run, "findings" | "units" | "launches" | "journal"> & { key: string };
 
-export function FindingRow({ run, finding: f, className }: { run: RowRun; finding: Finding; className?: string }) {
+/** `host` — the unit whose detail lists the row: its state then leaves that unit out («исправлена», not «исправлена ·
+ * u22»), since the page already names it (ux 2). */
+export function FindingRow({ run, finding: f, host, className }: { run: RowRun; finding: Finding; host?: string; className?: string }) {
   return (
     <div data-slot="finding-row" className={cn("grid h-8 grid-cols-[6.5rem_7rem_minmax(0,1fr)_9rem] items-center gap-x-3", className)}>
       <SeverityCell finding={f} />
@@ -21,8 +23,8 @@ export function FindingRow({ run, finding: f, className }: { run: RowRun; findin
       <span className="min-w-0 truncate" title={f.summary}>
         {f.summary}
       </span>
-      <span className="min-w-0" title={stateText(f)}>
-        <StateCell finding={f} />
+      <span className="min-w-0" title={stateTextIn(f, host)}>
+        <StateCell finding={f} host={host} />
       </span>
     </div>
   );

@@ -34,6 +34,40 @@ export interface FactListProps {
 
 export const MORE = "Подробнее";
 
+/** The fold's trigger, the one part every fold draws (the design check: a fold behind «Подробнее»): a chevron and
+ * «Подробнее» in muted ink, on the library's Collapsible — FactList's last row, a page's sections. */
+export function FoldTrigger() {
+  return (
+    <CollapsibleTrigger className="group/more -ml-1 inline-flex items-center gap-1 rounded-sm px-1 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50">
+      <ChevronRightIcon aria-hidden="true" className="size-3.5 transition-transform group-data-[state=open]/more:rotate-90 motion-reduce:transition-none" />
+      {MORE}
+    </CollapsibleTrigger>
+  );
+}
+
+export interface FoldProps {
+  /** The storage key of its open state: `fold:<key>`, open or closed as the user last left it. */
+  foldKey: string;
+  /** What it folds, for assistive technology. */
+  label: string;
+  children: ReactNode;
+  className?: string;
+}
+
+/** Sections behind «Подробнее» (`ux 9` → Provenance: once done it lives behind «Details»): the trigger on its own
+ * reserved 28 px line, what it opens under it — so opening moves nothing above it, the trigger included (Strict 1). */
+export function Fold({ foldKey, label, children, className }: FoldProps) {
+  const [open, setOpen] = usePref(`fold:${foldKey}`, false);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} data-slot="fold" role="group" aria-label={label} className={cn("flex min-w-0 flex-col gap-4", className)}>
+      <div className="flex h-7 items-center">
+        <FoldTrigger />
+      </div>
+      <CollapsibleContent className="flex min-w-0 flex-col gap-4">{children}</CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 /** A folded label's room in the label column: zero height, drawn as generated content — no text anyone reads — and
  * wrapping as the label itself would, so the column sizes as if every label were shown. */
 function LabelSizer({ text }: { text: string }) {
@@ -68,10 +102,7 @@ export function FactList({ facts, more = [], foldKey = "facts", label, className
         {more.length > 0 && (
           <>
             <div className="col-span-2">
-              <CollapsibleTrigger className="group/more -ml-1 inline-flex items-center gap-1 rounded-sm px-1 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50">
-                <ChevronRightIcon aria-hidden="true" className="size-3.5 transition-transform group-data-[state=open]/more:rotate-90 motion-reduce:transition-none" />
-                {MORE}
-              </CollapsibleTrigger>
+              <FoldTrigger />
             </div>
             <CollapsibleContent className="contents">
               {more.map((fact) => (

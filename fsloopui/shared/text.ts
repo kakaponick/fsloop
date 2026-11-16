@@ -122,14 +122,16 @@ function compactNumber(n: number): { text: string; scaled: boolean } {
   return { text: String(n), scaled: false };
 }
 
-/** A launch's tokens: input + output + cache as one compact total with its noun, the split for its title. */
-export function tokens(spend: Spend): { total: number; compact: string; title: string } {
+/** A launch's tokens: input + output + cache as one compact total with its noun, the split for its title; `number` —
+ * the compact total alone, for a column under a «Токены» header. */
+export function tokens(spend: Spend): { total: number; compact: string; number: string; title: string } {
   const total = spend.input + spend.output + spend.cacheWrite + spend.cacheRead;
   const c = compactNumber(total);
   const noun = c.scaled ? NOUNS.token[2] : plural(total, NOUNS.token);
   return {
     total,
     compact: `${c.text} ${noun}`,
+    number: c.text,
     title: `вход ${num(spend.input)} · выход ${num(spend.output)} · запись в кэш ${num(spend.cacheWrite)} · чтение кэша ${num(spend.cacheRead)}`,
   };
 }

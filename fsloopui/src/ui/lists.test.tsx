@@ -7,7 +7,8 @@ import { describe, expect, test, vi } from "vitest";
 import { NOUNS } from "../../shared/text.ts";
 import { CountLink } from "./count-link.tsx";
 import { CountTabs } from "./count-tabs.tsx";
-import { FactList } from "./fact-list.tsx";
+import { applyStylesheet, usedBlockSize } from "../app/layout-testing.ts";
+import { FactList, Fold } from "./fact-list.tsx";
 import { flatItem, FlatList } from "./flat-list.tsx";
 import { HeldStrip, heldStripText } from "./held-strip.tsx";
 import { resetPrefsMemory } from "./storage.ts";
@@ -79,6 +80,58 @@ describe("fact list", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Подробнее" }));
     expect(sizers()).toHaveLength(2);
     expect([...container.querySelectorAll("dt")].map((dt) => dt.textContent)).toEqual(["Этап", "Активность", "Режим", "Модели", "Рабочая копия", "Версия"]);
+  });
+});
+
+describe("p3-decompose-design-check#design-5: the fold behind «Подробнее» — one part, FactList's and a page section's", () => {
+  test("sections fold behind the same trigger FactList draws; open or closed as last left (fold:<key>)", async () => {
+    const user = userEvent.setup();
+    const first = render(
+      <>
+        <FactList facts={[{ label: "Режим", value: "worktree" }]} more={[{ label: "Версия", value: "4" }]} foldKey="facts-a" />
+        <Fold foldKey="sections-a" label="Запуски и проверки">
+          <section aria-label="Запуски агентов">запуски</section>
+        </Fold>
+      </>,
+    );
+    const triggers = screen.getAllByRole("button", { name: "Подробнее" });
+    expect(triggers).toHaveLength(2);
+    // one part: the same markup and look in both hosts
+    expect(triggers[0].outerHTML.replace(/ (id|aria-controls)="[^"]*"/g, "")).toBe(triggers[1].outerHTML.replace(/ (id|aria-controls)="[^"]*"/g, ""));
+    expect(screen.queryByText("запуски")).toBeNull();
+    await user.click(triggers[1]);
+    expect(screen.getByText("запуски")).toBeInTheDocument();
+    expect(window.localStorage.getItem("fsloopui:fold:sections-a")).toBe("true");
+    first.unmount();
+    resetPrefsMemory();
+    render(
+      <Fold foldKey="sections-a" label="Запуски и проверки">
+        <p>запуски</p>
+      </Fold>,
+    );
+    expect(screen.getByRole("button", { name: "Подробнее" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("запуски")).toBeInTheDocument();
+  });
+
+  test("Strict 1: the trigger stands on its own reserved 28 px line above what it opens — opening moves nothing above it, nor the trigger", async () => {
+    const { container } = render(
+      <Fold foldKey="sections-b" label="Запуски и проверки">
+        <p>запуски</p>
+      </Fold>,
+    );
+    const fold = container.querySelector("[data-slot=fold]") as HTMLElement;
+    const line = screen.getByRole("button", { name: "Подробнее" }).parentElement as HTMLElement;
+    expect(line.parentElement).toBe(fold);
+    expect(fold.firstElementChild).toBe(line);
+    await applyStylesheet();
+    expect(usedBlockSize(line)).toBe(28);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Подробнее" }));
+    await applyStylesheet();
+    // what opened follows the trigger's line; the line keeps its box
+    expect(fold.firstElementChild).toBe(line);
+    expect(line.nextElementSibling).toHaveTextContent("запуски");
+    expect(usedBlockSize(line)).toBe(28);
+    expect(fold).toHaveAttribute("aria-label", "Запуски и проверки");
   });
 });
 

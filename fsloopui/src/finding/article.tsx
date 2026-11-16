@@ -54,8 +54,8 @@ function Section({ title, children, id }: { title: string; children: ReactNode; 
   );
 }
 
-const Sep = () => (
-  <span aria-hidden="true" className="text-muted-foreground">
+const Sep = ({ slot }: { slot?: string }) => (
+  <span aria-hidden="true" data-slot={slot} className="text-muted-foreground">
     ·
   </span>
 );
@@ -90,7 +90,14 @@ function FactLine({ run, finding: f, inRow }: { run: ArticleRun; finding: Findin
       </span>
     ),
   });
-  facts.push({ key: "stage", node: <span>{stageOf(f.stage).full}</span> });
+  facts.push({
+    key: "stage",
+    node: (
+      <span>
+        {label(FACT.stage)} {stageOf(f.stage).full}
+      </span>
+    ),
+  });
   facts.push({
     key: "location",
     node: f.location ? (
@@ -108,12 +115,13 @@ function FactLine({ run, finding: f, inRow }: { run: ArticleRun; finding: Findin
       </span>
     ),
   });
+  // each «·» ends the fact before it, inside that fact's unbreakable box: a wrapped line opens with a label, never «·»
   return (
     <p data-slot="finding-facts" className="m-0 flex flex-wrap items-center gap-x-2 gap-y-1">
       {facts.map((fact, i) => (
         <span key={fact.key} className="inline-flex min-w-0 items-center gap-2">
-          {i > 0 && <Sep />}
           {fact.node}
+          {i < facts.length - 1 && <Sep slot="fact-sep" />}
         </span>
       ))}
     </p>
@@ -137,7 +145,7 @@ function Decision({ run, finding: f }: { run: ArticleRun; finding: Finding }) {
         )}
       </p>
       {units.length > 0 && (
-        <ul className="m-0 flex list-none flex-col gap-1 p-0">
+        <ul role="list" className="m-0 flex list-none flex-col gap-1 p-0">
           {units.map(({ id, unit }) => (
             <li key={id} className="flex min-w-0 flex-wrap items-center gap-x-2">
               <ObjectLink run={run} kind="unit" id={id}>

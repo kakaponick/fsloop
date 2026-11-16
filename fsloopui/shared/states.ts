@@ -232,7 +232,8 @@ export const LAUNCH_STATE = {
 
 export type LaunchState = keyof typeof LAUNCH_STATE;
 
-/** A launch's state with its age: «работает · 12 мин» (neutral), «завершён · 3 мин», «нет отчёта». */
+/** A launch's state with its time: «работает · 12 мин» (neutral, its age), «завершён за 3 мин» (how long it took),
+ * «нет отчёта». */
 export function launchState(
   l: { running: boolean; startedAt?: string | null; seconds?: number | null; reportMissing?: boolean },
   now: number | string,
@@ -242,6 +243,8 @@ export function launchState(
     return { state: "running", label: age === null ? LAUNCH_STATE.running.compact : `${LAUNCH_STATE.running.compact} · ${duration(age, { compact: true })}`, tone: LAUNCH_STATE.running.tone };
   }
   if (l.reportMissing) return { state: "missing", label: LAUNCH_STATE.missing.compact, tone: LAUNCH_STATE.missing.tone };
-  const took = l.seconds ? ` · ${duration(l.seconds * 1000, { compact: true })}` : "";
+  // how long it took, through the one duration: «за 9 мин»; under a minute «меньше чем за минуту», never seconds
+  const ms = l.seconds ? l.seconds * 1000 : null;
+  const took = ms === null ? "" : ms < 60_000 ? " меньше чем за минуту" : ` за ${duration(ms, { compact: true })}`;
   return { state: "done", label: `${LAUNCH_STATE.done.compact}${took}`, tone: LAUNCH_STATE.done.tone };
 }

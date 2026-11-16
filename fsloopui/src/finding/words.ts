@@ -19,11 +19,13 @@ export const SECTION = {
   frames: "Кадры находки",
 } as const;
 
-/** The fact line's labels: «уверенность критика», «охват правки» (the raw value's title), «место src/…». */
+/** The fact line's labels: «уверенность критика», «охват правки» (the raw value's title — the line's own words name
+ * them: «критик скорее уверен», «правка в общем компоненте»), «отчёт …», «этап проход 1 · карта», «место src/…». */
 export const FACT = {
   confidence: "уверенность критика",
   cause: "охват правки",
   report: "отчёт",
+  stage: "этап",
   location: "место",
 } as const;
 

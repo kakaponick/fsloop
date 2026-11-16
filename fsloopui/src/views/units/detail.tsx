@@ -13,14 +13,14 @@ import type { Finding, Run, Unit, UnitCheck } from "../../../shared/model.ts";
 import { agentKind, launchState, UNIT_STATE } from "../../../shared/states.ts";
 import { mskDateTime, mskTime, tokens } from "../../../shared/text.ts";
 import { cn } from "@/lib/utils";
-import { Dash, FactList, HeldStrip, NotRecorded, PartFailed, StatusDot, type Fact, type HeldNoun } from "@/ui";
+import { Dash, FactList, Fold, GlossaryTooltip, HeldStrip, NotRecorded, PartFailed, StatusDot, type Fact, type GlossaryEntry, type HeldNoun } from "@/ui";
 // From the files, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
 import { ExpandingFindings } from "@/finding/expanding.tsx";
 import { ObjectLink } from "../../app/links.tsx";
 import { TITLE_MIN } from "./columns.tsx";
 import { useHeld } from "./held.ts";
 import { briefFailure, checkGroups, closingIds, launchRows, type CheckLine } from "./query.ts";
-import { attemptsText, briefPart, CHECK_HEAD, closesTitle, FACT, HELD_NOUN, LAUNCH_HEAD, SECTION } from "./words.ts";
+import { attemptsText, briefPart, CHECK_HEAD, closesTitle, FACT, HELD_NOUN, LAUNCH_HEAD, LAUNCH_STATE_GLOSSARY, LOG_LINE_GLOSSARY, LOG_WORD, PROVENANCE_FOLD, PROVENANCE_LABEL, SECTION } from "./words.ts";
 
 type DetailRun = Pick<Run, "id" | "units" | "findings" | "launches" | "running" | "journal" | "errors"> & { key: string };
 
@@ -62,18 +62,23 @@ function SectionStrip({ fresh, noun, onApply }: { fresh: number; noun: HeldNoun;
   return <HeldStrip counts={{ fresh, moved: 0, left: 0 }} noun={noun} onApply={onApply} className="min-w-0 flex-1 border-t-0" />;
 }
 
-/** A list's header row: what each column holds, in small muted type on the lines' grid. */
-function HeadRow({ grid, labels, end }: { grid: string; labels: readonly string[]; end?: number }) {
+/** A list's header row: what each column holds, in small muted type on the lines' grid; a header that names a set a new
+ * user cannot read alone carries its glossary, once, for every line under it (ui → Glossary). */
+function HeadRow({ grid, labels, end, glossary = {} }: { grid: string; labels: readonly string[]; end?: number; glossary?: Readonly<Record<string, readonly GlossaryEntry[]>> }) {
   return (
     <div role="row" data-slot="list-head" className={cn(grid, "h-7 border-b text-xs text-muted-foreground")}>
       {labels.map((l, i) => (
         <span key={l} role="columnheader" className={cn("truncate", i === end && "text-right")}>
-          {l}
+          {glossary[l] ? <GlossaryTooltip term={l} entries={glossary[l]} className="text-left" /> : l}
         </span>
       ))}
     </div>
   );
 }
+
+/** The header glossaries: the launch's state and time, a check's log line. */
+const LAUNCH_GLOSSARY = { [LAUNCH_HEAD[3]]: LAUNCH_STATE_GLOSSARY };
+const CHECK_GLOSSARY = { [CHECK_HEAD[4]]: LOG_LINE_GLOSSARY };
 
 const Mono = ({ children, className }: { children: ReactNode; className?: string }) => <span className={cn("font-mono text-xs break-all", className)}>{children}</span>;
 
@@ -81,7 +86,7 @@ const Mono = ({ children, className }: { children: ReactNode; className?: string
  * «не найден». */
 function Waits({ run, ids }: { run: DetailRun; ids: readonly string[] }) {
   return (
-    <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+    <ul role="list" className="m-0 flex list-none flex-col gap-0.5 p-0">
       {ids.map((id) => {
         const other = run.units.find((u) => u.id === id);
         return (
@@ -144,12 +149,13 @@ function Closes({ run, unit, id, now }: { run: DetailRun; unit: Unit; id: string
   const title = closesTitle(ids.length);
   return (
     <Section title={title} id={id} strip={<SectionStrip fresh={held.fresh} noun={HELD_NOUN.finding} onApply={held.apply} />}>
-      {held.shown.length > 0 && <ExpandingFindings run={run} items={held.shown.map((fid) => byId.get(fid) ?? fid)} label={title} now={now} slot="unit-closes" ruled={false} />}
+      {held.shown.length > 0 && <ExpandingFindings run={run} items={held.shown.map((fid) => byId.get(fid) ?? fid)} label={title} now={now} slot="unit-closes" ruled={false} unit={unit.id} />}
     </Section>
   );
 }
 
-/** One launch on one line: who and what · model · start · state with its duration · tokens with the split in the title. */
+/** One launch on one line: who and what · model · start · state with its time («завершён за 9 мин») · tokens, the
+ * compact number under «Токены» with the split in the title. */
 function LaunchLine({ run, row, now }: { run: DetailRun; row: ReturnType<typeof launchRows>[number]; now: number }) {
   const l = row.launch;
   const who = l ? agentKind(l) : agentKind(row.live);
@@ -178,7 +184,7 @@ function LaunchLine({ run, row, now }: { run: DetailRun; row: ReturnType<typeof 
         <StatusDot state={{ tone: state.tone, label: state.label }} truncate />
       </span>
       <span role="cell" className="truncate text-right tabular-nums" title={spend?.title}>
-        {spend ? spend.compact : <Dash />}
+        {spend ? spend.number : <Dash />}
       </span>
     </div>
   );
@@ -190,7 +196,7 @@ function Launches({ run, unit, now, id }: { run: DetailRun; unit: Unit; now: num
     <Section title={SECTION.launches} id={id} strip={<SectionStrip fresh={held.fresh} noun={HELD_NOUN.launch} onApply={held.apply} />}>
       {held.shown.length ? (
         <div role="table" aria-labelledby={id} data-slot="unit-launches" className="flex flex-col">
-          <HeadRow grid={LAUNCH_GRID} labels={LAUNCH_HEAD} end={LAUNCH_HEAD.length - 1} />
+          <HeadRow grid={LAUNCH_GRID} labels={LAUNCH_HEAD} end={LAUNCH_HEAD.length - 1} glossary={LAUNCH_GLOSSARY} />
           {held.shown.map((row) => (
             <LaunchLine key={row.key} run={run} row={row} now={now} />
           ))}
@@ -208,8 +214,9 @@ interface LoggedCheck {
   line: CheckLine;
 }
 
-/** «Проверки»: one header row, then each log by name with its labels, each once with its last outcome and «N
- * попыток»; a failed exit is neutral unless the unit is blocked (Conventions 2). */
+/** «Проверки»: one header row, then each log as «лог verify» with its labels, each once with its last outcome and «N
+ * попыток»; the log line as fsloop wrote it, in mono — never rewritten into a duration; an empty cell is the shared
+ * «—». A failed exit is neutral unless the unit is blocked (Conventions 2). */
 function Checks({ unit, checks, now, id }: { unit: Unit; checks: readonly UnitCheck[] | null; now: number; id: string }) {
   const lines: LoggedCheck[] = checks ? checkGroups(checks).flatMap((g) => g.lines.map((line) => ({ log: g.log, line }))) : [];
   const held = useHeld(lines, (c) => `${c.log}\u0000${c.line.label}`);
@@ -226,12 +233,12 @@ function Checks({ unit, checks, now, id }: { unit: Unit; checks: readonly UnitCh
         <NotRecorded />
       ) : groups.length ? (
         <div role="table" aria-labelledby={id} data-slot="unit-checks" className="flex flex-col">
-          <HeadRow grid={CHECK_GRID} labels={CHECK_HEAD} />
+          <HeadRow grid={CHECK_GRID} labels={CHECK_HEAD} glossary={CHECK_GLOSSARY} />
           {groups.map((g) => (
             <div key={g.log} role="rowgroup" className="flex min-w-0 flex-col">
               <div role="row" data-slot="check-log" className="flex h-7 items-end">
-                <span role="rowheader" className="font-mono text-xs text-muted-foreground">
-                  {g.log}
+                <span role="rowheader" className="text-xs text-muted-foreground">
+                  {LOG_WORD} <span className="font-mono">{g.log}</span>
                 </span>
               </div>
               {g.lines.map((c) => {
@@ -246,13 +253,13 @@ function Checks({ unit, checks, now, id }: { unit: Unit; checks: readonly UnitCh
                       <StatusDot state={{ tone, label: c.outcome }} truncate />
                     </span>
                     <span role="cell" className="text-muted-foreground tabular-nums">
-                      {attempts ?? ""}
+                      {attempts ?? <Dash />}
                     </span>
                     <span role="cell" className="truncate tabular-nums" title={c.endedAt ? mskDateTime(c.endedAt) : undefined}>
-                      {c.endedAt ? mskTime(c.endedAt, now) : ""}
+                      {c.endedAt ? mskTime(c.endedAt, now) : <Dash />}
                     </span>
-                    <span role="cell" className="min-w-0 truncate text-muted-foreground" title={c.note ?? undefined}>
-                      {c.note ?? ""}
+                    <span role="cell" className="min-w-0 truncate" title={c.note ?? undefined}>
+                      {c.note ? <Mono className="break-normal">{c.note}</Mono> : <Dash />}
                     </span>
                   </div>
                 );
@@ -271,12 +278,26 @@ export function UnitDetail({ run, unit, checks, now }: UnitDetailProps) {
   const base = `unit-${unit.id}`;
   // the fact rows this open shows, whatever a live change makes of them (Strict 1)
   const [kept] = useState<ReadonlySet<string>>(() => new Set(factRows(run, unit).flatMap((r) => (r.holds ? [r.key] : []))));
+  // how the unit was produced (ux 9 → Provenance): open while it is in work, waits or is blocked; once committed,
+  // behind one «Подробнее». Decided once per open, so a unit committed under an open detail folds nothing (Strict 1).
+  const [folded] = useState(() => unit.state === "committed");
+  const provenance = (
+    <>
+      <Launches run={run} unit={unit} now={now} id={`${base}-launches`} />
+      <Checks unit={unit} checks={checks} now={now} id={`${base}-checks`} />
+    </>
+  );
   return (
     <article data-slot="unit-detail" aria-label={`Юнит ${unit.id}`} className="flex flex-col gap-4">
       <Closes run={run} unit={unit} id={`${base}-closes`} now={now} />
       <FactList facts={unitFacts(run, unit, kept)} foldKey="unit" label={`Юнит ${unit.id}: факты`} className="max-w-measure" />
-      <Launches run={run} unit={unit} now={now} id={`${base}-launches`} />
-      <Checks unit={unit} checks={checks} now={now} id={`${base}-checks`} />
+      {folded ? (
+        <Fold foldKey={PROVENANCE_FOLD} label={PROVENANCE_LABEL}>
+          {provenance}
+        </Fold>
+      ) : (
+        provenance
+      )}
     </article>
   );
 }

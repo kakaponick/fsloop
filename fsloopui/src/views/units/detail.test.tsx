@@ -8,12 +8,13 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterAll, describe, expect, test } from "vitest";
 import type { Unit, UnitCheck } from "../../../shared/model.ts";
-import { UiProvider } from "@/ui";
+import { glossaryLines, UiProvider } from "@/ui";
+import { applyStylesheet, usedBlockSize } from "../../app/layout-testing.ts";
 import { runPath } from "../../app/routes.ts";
 import { ROW_TITLE_CHARS, UnitDetail, unitFacts, type UnitDetailProps } from "./detail.tsx";
 import { checkGroups, checksOf, launchRows } from "./query.ts";
 import { fixtureApp, keyOf, loadedRun, MIN, NOW } from "./testing.tsx";
-import { attemptsText, CHECK_HEAD, checkOutcome, closesTitle, LAUNCH_HEAD, logName } from "./words.ts";
+import { attemptsText, CHECK_HEAD, checkOutcome, closesTitle, LAUNCH_HEAD, LAUNCH_STATE_GLOSSARY, LOG_LINE_GLOSSARY, LOG_WORD, logName } from "./words.ts";
 
 const N = 40;
 const fx = fixtureApp({ only: [N] });
@@ -123,7 +124,7 @@ describe("a unit's detail at the production limits", () => {
       const line = section(t).querySelector("[data-slot=unit-launch], [data-slot=unit-check]") as HTMLElement;
       expect([...head(t).classList].filter((c) => c.startsWith("grid-cols-"))).toEqual([...line.classList].filter((c) => c.startsWith("grid-cols-")));
     }
-    expect(within(section("Проверки юнита")).getAllByRole("rowheader").map((h) => h.textContent)).toEqual(["verify", "land"]);
+    expect(within(section("Проверки юнита")).getAllByRole("rowheader").map((h) => h.textContent)).toEqual(["лог verify", "лог land"]);
   });
 
   test("«Закрывает 28 находок»: u4's read-only rows, each linking to its address; the unknown id «не найдена»; no verdict", () => {
@@ -150,10 +151,11 @@ describe("a unit's detail at the production limits", () => {
     expect(within(lines[0]).getByRole("link", { name: first.description as string })).toHaveAttribute("href", runPath(KEY, { view: "reports", report: first.id }));
     expect(lines[0]).toHaveTextContent("claude-opus-5-5");
     expect(lines[0]).toHaveTextContent(/\d\d\.\d\d \d\d:\d\d МСК/);
-    expect(lines[0]).toHaveTextContent("завершён · 9 мин");
-    const tokens = [...lines[0].querySelectorAll("span")].find((s) => s.textContent?.endsWith("токенов")) as HTMLElement;
-    // the fixture's spend: input 9xx, output 40 000, cache write 250 000, cache read 3 100 000 — about 3,39 million
-    expect(tokens.textContent).toBe("3,4 млн токенов");
+    expect(lines[0]).toHaveTextContent("завершён за 9 мин");
+    const tokens = within(lines[0]).getAllByRole("cell")[4];
+    // the fixture's spend: input 9xx, output 40 000, cache write 250 000, cache read 3 100 000 — about 3,39 million;
+    // the compact number alone under «Токены» (improve-8 (5))
+    expect(tokens.textContent).toBe("3,4 млн");
     expect(tokens).toHaveAttribute("title", expect.stringMatching(/^вход \d+ · выход 40\s000 · запись в кэш 250\s000 · чтение кэша 3\s100\s000$/));
     expect(lines[5]).toHaveTextContent("исполнитель u24 implement");
     expect(lines[5]).toHaveTextContent("работает · 12 мин");
@@ -244,6 +246,57 @@ describe("a unit's detail at the production limits", () => {
     }
   });
 
+  test("p2-assess-critic-improve#improve-8 (2)–(4), design-8: «лог land» heads its group; «Строка лога» is the line as written, in mono; an empty «Попытки», «Конец» or line is the shared «—»", () => {
+    expect(LOG_WORD).toBe("лог");
+    const more: UnitCheck[] = [...checks, { file: "debug.lines", n: 1, label: "repro", exit: 0, line: null, seconds: null, endedAt: null }];
+    mount(unit, more);
+    const heads = within(section("Проверки юнита")).getAllByRole("rowheader");
+    expect(heads.map((h) => h.textContent)).toEqual(["лог verify", "лог land", "лог debug"]);
+    expect(heads.map((h) => (h.textContent ?? "").split(" ").length)).toEqual([2, 2, 2]);
+    for (const h of heads) expect(h.querySelector(".font-mono")?.textContent).toMatch(/^(verify|land|debug)$/);
+    const lines = section("Проверки юнита").querySelectorAll<HTMLElement>("[data-slot=unit-check]");
+    const cells = (i: number) => within(lines[i]).getAllByRole("cell");
+    // «tests»: retried ten times, its line as fsloop wrote it — never rewritten into a duration
+    expect(cells(2)[4].querySelector(".font-mono")).toHaveTextContent(/^2 failed$/);
+    expect(cells(2)[4]).toHaveAttribute("title", "2 failed");
+    // «push» ran once: no attempts to count — the shared «—»; its line «main» as written
+    expect(cells(3)[2].querySelector("[data-slot=dash]")).not.toBeNull();
+    expect(cells(3)[4].querySelector(".font-mono")).toHaveTextContent(/^main$/);
+    // «repro»: no end, no line recorded
+    expect(cells(4)[3].querySelector("[data-slot=dash]")).not.toBeNull();
+    expect(cells(4)[4].querySelector("[data-slot=dash]")).not.toBeNull();
+    for (let i = 0; i < 5; i++) for (const c of cells(i)) expect(c.textContent).not.toBe("");
+  });
+
+  test("p2-assess-critic-improve#improve-8 (7): the launches' «Состояние» and the checks' «Строка лога» carry their glossaries, once, on the header", () => {
+    mount();
+    const head = (title: string, label: string) => within(section(title).querySelector("[data-slot=list-head]") as HTMLElement).getByRole("button", { name: label });
+    expect(head("Запуски агентов", "Состояние")).toHaveAttribute("data-slot", "glossary-term");
+    expect(head("Проверки юнита", "Строка лога")).toHaveAttribute("data-slot", "glossary-term");
+    // no glossary on an item
+    for (const l of document.querySelectorAll("[data-slot=unit-launch], [data-slot=unit-check]")) expect(l.querySelector("[data-slot=glossary-term]")).toBeNull();
+    expect(glossaryLines(LAUNCH_STATE_GLOSSARY)).toEqual(["работает · 12 мин — агент ещё не вернул отчёт; время — с его запуска", "завершён за 9 мин — агент вернул отчёт; время — сколько он работал", "нет отчёта — запуск записан, но файла его отчёта нет"]);
+    expect(glossaryLines(LOG_LINE_GLOSSARY)).toEqual(["Строка лога — что проверка вывела последней строкой, как записано в логе"]);
+    expect(glossaryLines(LAUNCH_STATE_GLOSSARY).map((l) => l.split(" ").length)).toEqual([15, 13, 10]);
+    expect(glossaryLines(LOG_LINE_GLOSSARY)[0].split(" ")).toHaveLength(12);
+  });
+
+  test("p3-decompose-design-check#design-19: «Ждёт юнитов» is a list that says so — `role=\"list\"` on its `list-none`", () => {
+    mount();
+    const ul = value("Ждёт юнитов").querySelector("ul") as HTMLElement;
+    expect(ul).toHaveClass("list-none");
+    expect(ul).toHaveAttribute("role", "list");
+  });
+
+  test("p2-assess-critic-improve#improve-1 (3): a row of «Закрывает» leaves out the unit the detail is about", () => {
+    const u22 = base.units.find((u) => u.id === "u22") as Unit;
+    const runFixed = { ...base, findings: base.findings.map((f) => (f.units.includes("u22") ? { ...f, effectiveStatus: "fixed" as const, unit: "u22" } : f)) };
+    mount(u22, null, runFixed);
+    const state = section("Закрывает 1 находку").querySelector("[data-slot=finding-row] > span:last-child") as HTMLElement;
+    expect(state.textContent).toBe("исправлена");
+    expect(state).toHaveAttribute("title", "исправлена");
+  });
+
   test("code-2: the checks are the model's own typed `Unit.checks`, absent while it carries none", () => {
     expect(checksOf({ checks })).toBe(checks);
     expect(checksOf({ checks: [] })).toEqual([]);
@@ -263,6 +316,57 @@ describe("a unit's detail at the production limits", () => {
     expect(checkOutcome(null)).toBe("не записано");
     expect(logName("verify.log.lines")).toBe("verify");
     expect(logName("debug.lines")).toBe("debug");
+  });
+});
+
+describe("p2-assess-critic-improve#improve-8 (6): a committed unit's provenance folds behind one «Подробнее» (ux 9 → Provenance)", () => {
+  const u22 = base.units.find((u) => u.id === "u22") as Unit;
+  const order = () => [...(document.querySelector("[data-slot=unit-detail]") as HTMLElement).children].map((c) => ((c as HTMLElement).dataset.slot === "fold" ? "fold" : ((c as HTMLElement).querySelector("h3")?.textContent ?? (c as HTMLElement).dataset.slot)));
+
+  test("committed: «Запуски агентов» and «Проверки юнита» behind one «Подробнее» after the facts; a click opens both under it and moves nothing above", async () => {
+    expect(u22.state).toBe("committed");
+    mount(u22, checks, base);
+    expect(order()).toEqual(["Закрывает 1 находку", "fact-list", "fold"]);
+    const triggers = screen.getAllByRole("button", { name: "Подробнее" });
+    expect(triggers).toHaveLength(1);
+    expect(screen.queryByRole("heading", { name: "Запуски агентов" })).toBeNull();
+    const fold = document.querySelector("[data-slot=fold]") as HTMLElement;
+    expect(fold).toHaveAttribute("aria-label", "Запуски агентов и проверки юнита");
+    const line = triggers[0].parentElement as HTMLElement;
+    await applyStylesheet();
+    expect(usedBlockSize(line)).toBe(28);
+    await userEvent.setup({ delay: null }).click(triggers[0]);
+    // the trigger keeps its line, first in the fold; what opened follows it
+    expect(fold.firstElementChild).toBe(line);
+    expect(order()).toEqual(["Закрывает 1 находку", "fact-list", "fold"]);
+    expect(fold).toContainElement(section("Запуски агентов"));
+    expect(fold).toContainElement(section("Проверки юнита"));
+    expect(triggers[0]).toHaveAttribute("aria-expanded", "true");
+  });
+
+  test("in work, not started or blocked: both stay open, no «Подробнее»", () => {
+    for (const state of ["implement", "ready", "blocked"] as const) {
+      const view = mount({ ...unit, state }, checks);
+      expect(order(), state).toEqual(["Закрывает 28 находок", "fact-list", "Запуски агентов", "Проверки юнита"]);
+      expect(screen.queryByRole("button", { name: "Подробнее" })).toBeNull();
+      view.unmount();
+    }
+  });
+
+  test("Strict 1: a unit committed while its detail is open keeps both open — the fold comes with the next open", () => {
+    const tree = (u: Unit) => (
+      <UiProvider>
+        <MemoryRouter>
+          <UnitDetail run={run} unit={u} checks={checks} now={NOW} />
+        </MemoryRouter>
+      </UiProvider>
+    );
+    const view = render(tree({ ...unit, state: "verify" }));
+    view.rerender(tree({ ...unit, state: "committed", sha: "c0ffee24", commits: ["c0ffee24"] }));
+    expect(order()).toEqual(["Закрывает 28 находок", "fact-list", "Запуски агентов", "Проверки юнита"]);
+    view.unmount();
+    render(tree({ ...unit, state: "committed", sha: "c0ffee24", commits: ["c0ffee24"] }));
+    expect(order()).toEqual(["Закрывает 28 находок", "fact-list", "fold"]);
   });
 });
 

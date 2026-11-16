@@ -89,6 +89,14 @@ describe("tokens of a launch", () => {
     expect(tokens({ input: 12_400, output: 0, cacheWrite: 0, cacheRead: 0 }).compact).toBe("12 тыс. токенов");
     expect(tokens({ input: 2, output: 1, cacheWrite: 0, cacheRead: 0 }).compact).toBe("3 токена");
   });
+
+  test("p2-assess-critic-improve#improve-8 (5): a column under «Токены» reads the compact number alone — the noun is the header's", () => {
+    const t = tokens({ input: 1200, output: 34_567, cacheWrite: 250_000, cacheRead: 1_000_000 });
+    expect(t.number).toBe("1,3 млн");
+    expect(words(t.number)).toBe(2);
+    expect(tokens({ input: 12_400, output: 0, cacheWrite: 0, cacheRead: 0 }).number).toBe("12 тыс.");
+    expect(tokens({ input: 2, output: 1, cacheWrite: 0, cacheRead: 0 }).number).toBe("3");
+  });
 });
 
 describe("tokens summed (u6-shape cand-1)", () => {

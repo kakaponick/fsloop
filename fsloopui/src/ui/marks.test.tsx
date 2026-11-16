@@ -3,7 +3,8 @@ import "./test-setup.ts";
 import { renderHook } from "@testing-library/react";
 import { describe, expect, test } from "vitest";
 import { THRESHOLDS } from "../../shared/liveness.ts";
-import { EDGE_MS, useEdgeMarks } from "./marks.tsx";
+import { applyStylesheet } from "../app/layout-testing.ts";
+import { EDGE_MS, OPEN_FRAME, useEdgeMarks } from "./marks.tsx";
 
 interface Row {
   key: string;
@@ -40,5 +41,28 @@ describe("the edge mark (rules/ui → Conventions 9): one hook for every live li
 
   test("«the last minutes» are the fresh write's span, owned once beside the mark", () => {
     expect(EDGE_MS).toBe(THRESHOLDS.quiet);
+  });
+});
+
+describe("p3-decompose-design-check#design-4: the open row's frame — one export for the table and ExpandingFindings", () => {
+  test("a 1 px inset frame in muted ink (ink on a link's target): the row draws its top and sides, the detail its sides and bottom", () => {
+    expect(OPEN_FRAME.muted).toBe("[--frame:var(--muted-foreground)]");
+    expect(OPEN_FRAME.target).toBe("[--frame:var(--foreground)]");
+    // theme shadows, as the edge and target marks are (src/ui/tokens.test.ts: no arbitrary size in a component)
+    expect(OPEN_FRAME.row).toBe("shadow-open-row");
+    expect(OPEN_FRAME.detail).toBe("shadow-open-detail");
+  });
+
+  test("drawn inside the box (an inset shadow), so opening a row moves nothing: the product's stylesheet builds both parts", async () => {
+    document.body.innerHTML = `<div id="row" class="${OPEN_FRAME.muted} ${OPEN_FRAME.row}"></div><div id="detail" class="${OPEN_FRAME.muted} ${OPEN_FRAME.detail}"></div>`;
+    await applyStylesheet();
+    const css = document.head.querySelector("style[data-product-stylesheet]")?.textContent ?? "";
+    expect(css).toContain("inset 0 1px 0 0 var(--tw-shadow-color, var(--frame))");
+    expect(css).toContain("inset 0 -1px 0 0 var(--tw-shadow-color, var(--frame))");
+    expect(css).toMatch(/--frame:\s*var\(--muted-foreground\)/);
+    for (const id of ["row", "detail"]) {
+      const s = getComputedStyle(document.getElementById(id) as HTMLElement);
+      for (const side of ["Top", "Right", "Bottom", "Left"] as const) expect(s[`border${side}Width`] === "" || s[`border${side}Width`] === "0px").toBe(true);
+    }
   });
 });
