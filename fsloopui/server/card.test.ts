@@ -113,6 +113,12 @@ describe("cardOf", () => {
     expect(cardOf({ key: "k", project: "app", run: readRun(dir), lastWriteAt: null }).spend).toEqual({ launches: { input: 111, output: 222, cacheWrite: 333, cacheRead: 444, boot: 11, continuations: 0 }, orchestrator: null });
   });
 
+  test("p2-verdict craft-7 · the finished passes as the record writes them, so the run page's «Проходы» never waits for the run", () => {
+    const dir = run({ passes: [{ pass: 1, taken: 60, outcome: "next", why: "60 critical and major above the bar" }] });
+    expect(cardOf({ key: "k", project: "app", run: readRun(dir), lastWriteAt: null }).passes).toEqual([{ pass: 1, taken: 60, outcome: "next", why: "60 critical and major above the bar" }]);
+    expect(card.passes).toEqual([]);
+  });
+
   test("a closed run carries its outcome and no stage", () => {
     const closed = run({
       gates: ["p1-map", "p1-spike", "p1-decompose", "p1-units", "p1-review", "p1-fix", "p1-verdict", "integrate", "finish"].map((stage) => ({ stage, green: true, at: "2026-11-16T08:00:00Z" })),

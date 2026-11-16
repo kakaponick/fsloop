@@ -44,6 +44,7 @@ export function cardOf({ key, project, run, lastWriteAt }: { key: string; projec
     running: run.running.length,
     launchCount: run.launchCount,
     spend: run.spend,
+    passes: run.passes,
     commits: run.commits,
     redGate: run.now?.redGate ?? null,
     startedAt: run.startedAt,

@@ -226,17 +226,32 @@ export function outcomeLine(outcome: Outcome | null): { tone: Tone; text: string
   return { tone: outcome.goalMet ? "success" : "neutral", text: parts.join(" · ") };
 }
 
+/** A closed run's commits left unpushed: what the operator may still have to do, said on the row's second line. */
+const NOT_PUSHED = "коммиты не отправлены";
+
+/** A closed run in a mini row's few words (p2-verdict craft-2): the goal's outcome alone, green only for a met goal;
+ * the push when no goal was judged; an unpushed run's push otherwise opens the row's second line (`closedLine`). */
+function outcomeShort(outcome: Outcome | null): { tone: Tone; text: string } {
+  if (!outcome) return { tone: "neutral", text: NOT_RECORDED };
+  if (outcome.goalMet === null) return outcomeLine(outcome);
+  return { tone: outcome.goalMet ? "success" : "neutral", text: outcome.goalMet ? "цель достигнута" : "цель не достигнута" };
+}
+
 type MiniFacts = Pick<RunCard, "recorded" | "closed" | "outcome" | "updatedAt" | "lastWriteAt" | "redGate" | "blocked">;
 
-/** A mini row's last column: what waits, the outcome or the liveness — no clock time: the liveness's age already says
- * when, and the row's title carries the time (craft-4; rules/ui → Conventions 10). */
-export function miniDetail(card: MiniFacts, now: number, { lost = false } = {}): { tone: Tone; text: string } {
-  if (!card.recorded) return { tone: "neutral", text: NO_RECORD_TEXT };
-  if (card.closed) return outcomeLine(card.outcome);
+/** A mini row's state: «state · age · cause» — the fact (`fact`, kept whole) first, what waits after it, so a narrow
+ * row cuts only the cause (rules/ui → Conventions 1; p2-verdict craft-2). No clock time: the liveness's age already
+ * says when, and the row's title carries the time (craft-4; Conventions 10). */
+export function miniDetail(card: MiniFacts, now: number, { lost = false } = {}): { tone: Tone; fact: string; text: string } {
+  if (!card.recorded) return { tone: "neutral", fact: NOT_RECORDED, text: NO_RECORD_TEXT };
+  if (card.closed) {
+    const short = outcomeShort(card.outcome);
+    return { tone: short.tone, fact: short.text, text: short.text };
+  }
   const live = livenessShown(card, now, lost);
   const waits = waitsShort(card);
-  if (waits) return { tone: "warning", text: `${waits} · ${live.label}` };
-  return { tone: live.tone, text: live.label };
+  if (waits) return { tone: "warning", fact: live.label, text: `${live.label} · ${waits}` };
+  return { tone: live.tone, fact: live.label, text: live.label };
 }
 
 /** The moment a mini row stands for, with what it is: «закрыт 15.11 23:40 МСК», «последняя запись 12:41 МСК». */
@@ -249,11 +264,15 @@ function miniMoment(card: MiniFacts, now: number): string | null {
 export const miniTitle = (card: MiniFacts & Pick<RunCard, "project" | "id">, detail: string, now: number, fresh: boolean): string =>
   [card.project, card.id, detail, miniMoment(card, now), fresh ? NEW_MARK : null].filter(Boolean).join(" · ");
 
-/** A closed run's second line: when it closed and its goal's first words — what tells one closed run from the next
- * (p1-review cand-3): «закрыт 15.11 23:40 МСК · Run 24: bring the …». */
-export const closedLine = (card: Pick<RunCard, "updatedAt" | "lastWriteAt" | "goal">, now: number): string => {
+/** A closed run's second line: commits left unpushed — the exception, what may still be the operator's to do; a pushed
+ * run says nothing of it here, its row's title and the run page's «Итог» do — when it closed, compact, the МСК time
+ * in the title (rules/ui → Conventions 10), and its goal's first words, what tells one closed run from the next
+ * (p1-review cand-3; p2-verdict craft-2): «коммиты не отправлены · закрыт 20 ч назад · Run 24: bring the …». A run
+ * with no judged goal has its push on the first line already. */
+export const closedLine = (card: Pick<RunCard, "updatedAt" | "lastWriteAt" | "goal" | "outcome">, now: number): string => {
   const at = card.updatedAt ?? card.lastWriteAt;
-  return [at ? `закрыт ${mskTime(at, now)}` : null, card.goal].filter(Boolean).join(" · ");
+  const unpushed = card.outcome && card.outcome.goalMet !== null && !card.outcome.pushed ? NOT_PUSHED : null;
+  return [unpushed, at ? `закрыт ${ago(at, now)}` : null, card.goal].filter(Boolean).join(" · ");
 };
 
 /** The sidebar's search: the fields it looks in, named in its placeholder (table #12). */

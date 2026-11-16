@@ -2,7 +2,7 @@
 import "../ui/test-setup.ts";
 import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import { glossaryLines, writePref } from "../ui/index.ts";
 import {
   activityLine,
@@ -27,6 +27,7 @@ import {
   waitsLine,
 } from "./words.ts";
 import { fixtureApp, json, keyOf, MIN, NOW, renderShell, type FixtureApp } from "./testing.tsx";
+import { applyStylesheet, contentWidth, flexRow, innerWidth, textWidth, usedBlockSize } from "./layout-testing.ts";
 
 const iso = (ms: number) => new Date(ms).toISOString();
 const words = (s: string) => s.split(" ").length;
@@ -119,23 +120,35 @@ describe("the card's words, built once", () => {
     const calm = { redGate: null, blocked: [] };
     expect(foldTitle("Закрытые", 53)).toBe("Закрытые · 53");
     const closed = { ...calm, project: "shop", id: "1a2b3c4d", goal: "Run 0: bring the «a» and «b» pages to the law. Keep every fact.", recorded: true, closed: true, outcome: { pushed: true, goalMet: true, held: [] }, updatedAt: "2026-11-15T20:40:00Z", lastWriteAt: null };
-    expect(miniDetail(closed, NOW)).toEqual({ tone: "success", text: "цель достигнута · коммиты отправлены" });
+    // p2-verdict craft-2 · a closed run's first line is its goal's outcome alone; the push moves to the second line.
+    expect(miniDetail(closed, NOW)).toEqual({ tone: "success", fact: "цель достигнута", text: "цель достигнута" });
+    expect(miniDetail({ ...closed, outcome: { pushed: false, goalMet: false, held: [] } }, NOW)).toEqual({ tone: "neutral", fact: "цель не достигнута", text: "цель не достигнута" });
+    expect(miniDetail({ ...closed, outcome: { pushed: false, goalMet: null, held: [] } }, NOW)).toEqual({ tone: "neutral", fact: "коммиты не отправлены", text: "коммиты не отправлены" });
+    expect(miniDetail({ ...closed, outcome: null }, NOW)).toEqual({ tone: "neutral", fact: "не записано", text: "не записано" });
     const silent = { ...calm, project: "shop", id: "37d5a31e", goal: null, recorded: true, closed: false, outcome: null, updatedAt: null, lastWriteAt: "2026-11-16T09:41:00Z" };
-    expect(miniDetail(silent, NOW)).toEqual({ tone: "warning", text: "молчит · 7 ч" });
-    expect(miniDetail(silent, NOW, { lost: true })).toEqual({ tone: "neutral", text: "нет связи" });
+    expect(miniDetail(silent, NOW)).toEqual({ tone: "warning", fact: "молчит · 7 ч", text: "молчит · 7 ч" });
+    expect(miniDetail(silent, NOW, { lost: true })).toEqual({ tone: "neutral", fact: "нет связи", text: "нет связи" });
+    // p2-verdict craft-2 · «state · age · cause», the cause last, so a narrow row cuts only it (rules/ui → Conventions 1).
     const waits = miniDetail({ ...silent, lastWriteAt: iso(NOW - MIN), redGate: { at: "2026-11-16T16:21:00Z", problems: ["x"] }, blocked: [{ id: "u23", why: "y" }] }, NOW);
-    expect(waits).toEqual({ tone: "warning", text: "красный гейт · заблокирован u23 · работает" });
+    expect(waits).toEqual({ tone: "warning", fact: "работает", text: "работает · красный гейт · заблокирован u23" });
     expect(words(waits.text)).toBe(7);
-    expect(miniDetail({ ...calm, recorded: false, closed: null, outcome: null, updatedAt: null, lastWriteAt: "2026-11-13T16:41:00Z" }, NOW)).toEqual({ tone: "neutral", text: "не записано: в папке нет run.json" });
+    expect(miniDetail({ ...calm, recorded: false, closed: null, outcome: null, updatedAt: null, lastWriteAt: "2026-11-13T16:41:00Z" }, NOW)).toEqual({ tone: "neutral", fact: "не записано", text: "не записано: в папке нет run.json" });
     // The title keeps the whole: the time the face drops, and «новое», which has no column of its own.
     const title = miniTitle(silent, "молчит · 7 ч", NOW, true);
     expect(title).toBe("shop · 37d5a31e · молчит · 7 ч · последняя запись 12:41 МСК · новое");
     expect(words(title)).toBe(15);
     expect(miniTitle(closed, "цель достигнута · коммиты отправлены", NOW, false)).toBe("shop · 1a2b3c4d · цель достигнута · коммиты отправлены · закрыт 15.11 23:40 МСК");
-    // p1-review cand-3 · a closed run's row tells itself apart by its date and its goal's first words, on its second line.
-    const line = closedLine(closed, NOW);
-    expect(line).toBe("закрыт 15.11 23:40 МСК · Run 0: bring the «a» and «b» pages to the law. Keep every fact.");
-    expect(closedLine({ ...closed, goal: null }, NOW)).toBe("закрыт 15.11 23:40 МСК");
+    // p1-review cand-3 · a closed run's row tells itself apart by its date and its goal's first words, on its second
+    // line; p2-verdict craft-2 · unpushed commits open it (a pushed run's push is in the title), the moment compact
+    // (rules/ui → Conventions 10), the goal last.
+    const line = closedLine({ ...closed, outcome: { pushed: false, goalMet: false, held: [] } }, NOW);
+    expect(line).toBe("коммиты не отправлены · закрыт 20 ч назад · Run 0: bring the «a» and «b» pages to the law. Keep every fact.");
+    expect(words(line)).toBe(23);
+    expect(closedLine(closed, NOW)).toBe("закрыт 20 ч назад · Run 0: bring the «a» and «b» pages to the law. Keep every fact.");
+    expect(closedLine({ ...closed, outcome: { pushed: false, goalMet: false, held: [] }, goal: null }, NOW)).toBe("коммиты не отправлены · закрыт 20 ч назад");
+    // A run whose goal was never judged reads its push on the first line: the second does not repeat it.
+    expect(closedLine({ ...closed, outcome: { pushed: true, goalMet: null, held: [] } }, NOW)).toBe("закрыт 20 ч назад · Run 0: bring the «a» and «b» pages to the law. Keep every fact.");
+    expect(closedLine({ ...closed, outcome: null, goal: null }, NOW)).toBe("закрыт 20 ч назад");
   });
 
   test("p1-review cand-3 · the sidebar's search: every word in the project, the id or the goal", () => {
@@ -157,6 +170,7 @@ describe("the sidebar over the fixture root of 63", () => {
     fx = fixtureApp();
   });
   afterAll(() => fx.close());
+  afterEach(() => fx.answer(null));
 
   const sidebar = () => screen.getByRole("complementary", { name: "Прогоны" });
   const cards = () => [...sidebar().querySelectorAll<HTMLAnchorElement>("[data-slot=run-card]")];
@@ -262,8 +276,6 @@ describe("the sidebar over the fixture root of 63", () => {
     renderShell(fx.transport, { path: `/r/${keyOf(0)}`, wide: false });
     await ready();
     expect(sidebar()).not.toHaveClass("max-h-60");
-    const list = sidebar().querySelector("[data-slot=sidebar-list]") as HTMLElement;
-    expect(list).toHaveClass("max-[979px]:h-32", "overflow-y-auto");
     expect(cards()).toHaveLength(0);
     const rows = [...sidebar().querySelectorAll<HTMLAnchorElement>("[data-slot=mini-row]")];
     expect(rows.slice(0, 3).map((r) => r.getAttribute("href"))).toEqual(["/r/fsloop/077e72d5", "/r/bots/42d34077", "/r/admin/a5b5ec85"]);
@@ -274,22 +286,114 @@ describe("the sidebar over the fixture root of 63", () => {
     }
   });
 
+  test("p2-verdict craft-1, p1-verdict cand-10 · below the breakpoint the band's list is 128 px — four whole 32 px rows — by its computed flex, from the first paint; every stop of its scroll shows whole rows, the closed runs' rows included", async () => {
+    const user = userEvent.setup();
+    let release!: () => void;
+    const held = new Promise<void>((done) => (release = done));
+    fx.answer((path) => (path === "/api/runs" ? held.then(() => fx.app.handle(new Request(`http://127.0.0.1${path}`))) : null));
+    renderShell(fx.transport, { path: `/r/${keyOf(0)}`, wide: false });
+    const list = () => sidebar().querySelector("[data-slot=sidebar-list]") as HTMLElement;
+    await applyStylesheet();
+    // The band is a column whose height its content decides (the shell's `auto` row): the list's own flex sizes it.
+    expect(getComputedStyle(sidebar()).height).toBe("auto");
+    // First paint, «Загрузка…» in the region: already the list's height, so the list lands without moving the page.
+    expect(within(list()).getByRole("status")).toHaveTextContent("Загрузка…");
+    expect(usedBlockSize(list())).toBe(128);
+    fx.answer(null);
+    await act(async () => release());
+    await ready();
+    await user.click(within(sidebar()).getByRole("button", { name: "Закрытые · 53" }));
+    await user.click(within(sidebar()).getByRole("button", { name: "Без записи о прогоне · 3" }));
+    await applyStylesheet();
+    expect(usedBlockSize(list())).toBe(128);
+    // Every row of the list — the running, the long-silent, the 53 closed, the unrecorded, and each fold's header.
+    const rows = [...list().querySelectorAll<HTMLElement>("[data-slot=mini-row], [data-slot=sidebar-fold] > button")];
+    expect(rows).toHaveLength(3 + 4 + 53 + 3 + 3);
+    expect(rows.some((r) => r.matches(`[href="/r/${keyOf(0)}"]`))).toBe(true);
+    const box = getComputedStyle(list());
+    expect(box.scrollSnapType).toBe("y mandatory");
+    expect(getComputedStyle(list().querySelector("[data-slot=flat-list], [role=group]") as HTMLElement).rowGap).toMatch(/^(0px|normal)$/);
+    for (const r of rows) expect(getComputedStyle(r).scrollSnapAlign).toBe("start");
+    // The rows' edges, top to bottom; the scroll stops on each row's top, the last stop where the scroll ends.
+    const heights = rows.map((r) => usedBlockSize(r));
+    const top = Number.parseFloat(box.paddingTop) || 0;
+    const edges = heights.reduce<number[]>((acc, h) => [...acc, acc[acc.length - 1] + (h as number)], [top]);
+    const end = edges[edges.length - 1] + (Number.parseFloat(box.paddingBottom) || 0);
+    const stops = new Set(edges.slice(0, -1).map((t) => Math.min(t, end - 128)));
+    for (const stop of stops) {
+      expect(edges, `a stop at ${stop} px cuts the row above it`).toContain(stop);
+      expect(stop + 128 === end || edges.includes(stop + 128), `a stop at ${stop} px cuts the row at the box's end`).toBe(true);
+    }
+  });
+
   test("craft-4 · a mini row: no «новое» column and no clock time after the age — both in its name and title; the project cuts first", async () => {
     // fsloop's run changed since the operator last had it open: it reads «новое».
     writePref("runs:seen", { [keyOf(24)]: "2000-01-01T00:00:00.000Z" });
     renderShell(fx.transport, { path: `/r/${keyOf(0)}`, wide: false });
     await ready();
     const rows = [...sidebar().querySelectorAll<HTMLAnchorElement>("[data-slot=mini-row]")];
-    expect(rows[2]).toHaveTextContent(/^admina5b5ec85красный гейт · заблокирован u23 · работает$/);
-    expect(rows[2]).toHaveAccessibleName("admin · a5b5ec85 · красный гейт · заблокирован u23 · работает");
-    expect(rows[2]).toHaveAttribute("title", "admin · a5b5ec85 · красный гейт · заблокирован u23 · работает · последняя запись 19:40 МСК");
+    // p2-verdict craft-2 · the liveness first, what waits after it: a narrow row cuts the cause, never the state.
+    expect(rows[2]).toHaveTextContent(/^admina5b5ec85работает · красный гейт · заблокирован u23$/);
+    expect(rows[2]).toHaveAccessibleName("admin · a5b5ec85 · работает · красный гейт · заблокирован u23");
+    expect(rows[2]).toHaveAttribute("title", "admin · a5b5ec85 · работает · красный гейт · заблокирован u23 · последняя запись 19:40 МСК");
     expect(sidebar().querySelector("[data-slot=mini-row] [data-slot=new-mark]")).toBeNull();
-    expect(rows[2].querySelector("[data-slot=mini-project]")).toHaveClass("min-w-0", "truncate");
+    expect(rows[2].querySelector("[data-slot=mini-project]")).toHaveClass("truncate");
     // «новое» is the inset edge mark, which moves nothing, and the row's name.
     expect(rows[0]).toHaveAttribute("data-new");
     expect(rows[0]).toHaveClass("shadow-edge");
     expect(rows[0]).toHaveAccessibleName(/^fsloop · 077e72d5 · .+ · новое$/);
     expect(rows[1]).not.toHaveAttribute("data-new");
+  });
+
+  test("p2-verdict craft-2 · at the 316 px sidebar a mini row keeps its project's whole word — the widest project of this machine's runs — beside the widest closed state and the widest waiting state; the state keeps its words, a narrow row cuts only the cause", async () => {
+    const user = userEvent.setup();
+    // The projects with fsloop runs on this machine (common.md → production shape): the widest name at the row's face.
+    const PROJECTS = ["db.ren.net", "fsloop", "max-auto", "tga", "tgtrigger"];
+    const widest = PROJECTS.reduce((a, b) => (textWidth(b, { weight: 600 }) > textWidth(a, { weight: 600 }) ? b : a));
+    expect(widest).toBe("db.ren.net");
+    // Every run under that name; every open run held by a red gate and two blocked units; every closed run at its
+    // widest outcome: goal not met, commits not pushed.
+    fx.answer((path) =>
+      path === "/api/runs"
+        ? fx.app.handle(new Request(`http://127.0.0.1${path}`)).then(async (res) => {
+            const body = (await res.json()) as { list: Record<string, unknown>[] };
+            body.list = body.list.map((c) => ({
+              ...c,
+              project: widest,
+              ...(c.closed === false ? { redGate: { at: "2026-11-16T16:21:00Z", problems: ["p2-assess-critic-code#code-2 has no decision row"] }, blocked: [{ id: "u23", why: null }, { id: "u7", why: null }] } : {}),
+              ...(c.closed === true ? { outcome: { pushed: false, goalMet: false, held: [] } } : {}),
+            }));
+            return json(200, body);
+          })
+        : null,
+    );
+    renderShell(fx.transport, { path: `/r/${keyOf(0)}` });
+    await within(sidebar()).findByText("3 прогона идут");
+    await user.click(within(sidebar()).getByRole("button", { name: "Закрытые · 53" }));
+    await user.click(within(sidebar()).getByRole("button", { name: "Без записи о прогоне · 3" }));
+    await applyStylesheet();
+    // The sidebar's width is the shell grid's first column, as the stylesheet computes it.
+    const shell = document.querySelector("[data-slot=shell]") as HTMLElement;
+    expect(getComputedStyle(shell).gridTemplateColumns).toMatch(/^316px /);
+    const rows = [...sidebar().querySelectorAll<HTMLElement>("[data-slot=mini-row]")];
+    expect(rows).toHaveLength(4 + 53 + 3);
+    const waiting = rows.filter((r) => /^молчит · \d+ [чд] · красный гейт · 2 юнита заблокированы$/.test(r.querySelector("[data-slot=mini-state]")?.textContent ?? ""));
+    expect(waiting.length).toBeGreaterThan(0);
+    const closed = rows.filter((r) => r.querySelector("[data-slot=mini-state]")?.textContent === "цель не достигнута");
+    expect(closed).toHaveLength(53);
+    for (const row of [...waiting, ...closed, ...rows]) {
+      const line = row.querySelector("[data-slot=mini-line]") as HTMLElement;
+      const sizes = flexRow(line, innerWidth(line, sidebar(), 316));
+      const project = line.querySelector("[data-slot=mini-project]") as HTMLElement;
+      expect(project).toHaveTextContent(widest);
+      expect(sizes.get(project), `${row.title}: the project is cut`).toBeGreaterThanOrEqual(contentWidth(project));
+      // The state keeps its words; what does not fit is the cause, cut at its end with the whole in the row's title.
+      const state = line.querySelector("[data-slot=mini-state]") as HTMLElement;
+      const text = state.querySelector("[data-slot=mini-text]") as HTMLElement;
+      const fact = text.querySelector("[data-slot=mini-fact]") as HTMLElement;
+      // The words' box clips what overflows it: the fact must fit in the box the state leaves it, not only keep its width.
+      expect(flexRow(state, sizes.get(state) as number).get(text), `${row.title}: the state is cut`).toBeGreaterThanOrEqual(contentWidth(fact));
+    }
   });
 
   test("p1-review cand-3 · the search narrows every group to the runs whose project, id or goal hold its words; none — the filtered empty state and its reset", async () => {
@@ -326,8 +430,10 @@ describe("the sidebar over the fixture root of 63", () => {
     // p1-review cand-3 · a closed run's row is two reserved lines: the state, then when it closed and its goal.
     const row = sidebar().querySelector(`[data-slot=mini-row][href="/r/${keyOf(0)}"]`) as HTMLElement;
     expect(row).toHaveClass("h-12");
-    expect(row.querySelector("[data-slot=status-dot]")).toHaveTextContent("цель не достигнута · коммиты не отправлены");
-    expect(row.querySelector("[data-slot=mini-goal]")?.textContent).toMatch(/^закрыт 10:41 МСК · Run 0: bring the /);
+    // p2-verdict craft-2 · the first line the goal's outcome alone, the push on the second, before when and the goal.
+    expect(row.querySelector("[data-slot=mini-state]")).toHaveTextContent(/^цель не достигнута$/);
+    expect(row).toHaveAccessibleName(`${keyOf(0).replace("/", " · ")} · цель не достигнута · коммиты не отправлены`);
+    expect(row.querySelector("[data-slot=mini-goal]")?.textContent).toMatch(/^коммиты не отправлены · закрыт 9 ч назад · Run 0: bring the /);
     expect(row.querySelector("[data-slot=mini-goal]")).toHaveClass("truncate");
     await user.click(unrecorded);
     const bare = sidebar().querySelector(`[data-slot=mini-row][href="/r/${keyOf(7)}"]`) as HTMLElement;

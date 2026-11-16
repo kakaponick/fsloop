@@ -1,7 +1,7 @@
 // The run page's fact list in `ux 9` order (rules/ui → Layout 3): outcome rows — the stage, the liveness, what
 // waits on the operator, the units — then the verdict of a closed run, then the settings in one muted row; the
 // counts and the facts decided by least fold behind «Подробнее». Every value is drawn from the card, so the rows stand
-// before the run is read — the finished passes alone wait for the run, in a row reserved for them. A value a live
+// before the run is read — the finished passes too (p2-verdict craft-7): no row of the header ever loads. A value a live
 // change rewrites is one line, the whole of it in its title, so the header keeps its height (rules/ui → Strict 1);
 // what waits on the operator is one row per cause, each in full with links to its finding or unit — the one fact that
 // asks for him is never cut (`ui` → Page chrome) — in a box held at the height it first took, at least two lines, so
@@ -13,7 +13,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { LIVENESS, type LivenessValue } from "../../shared/liveness.ts";
 import type { RunCard } from "../../shared/model.ts";
 import { count, duration, mskDateTime, mskTime, NOUNS } from "../../shared/text.ts";
-import { Dash, Dot, glossaryFrom, Loading, NotRecorded, RunningText, StatusDot, type Fact } from "../ui/index.ts";
+import { Dash, Dot, glossaryFrom, NotRecorded, RunningText, StatusDot, type Fact } from "../ui/index.ts";
 import type { LoadedRun } from "../views/index.ts";
 import { cn } from "@/lib/utils";
 import { resolverFor, routerLink } from "./links.tsx";
@@ -235,7 +235,8 @@ export function runFacts(card: RunCard, now: number, { run = null, lost = false 
   const verdict = outcomeLine(card.outcome);
   const end = card.closed ? card.updatedAt : null;
   const spend = spendLine(card.spend);
-  const passes = run ? passesLine(run.passes) : null;
+  // The card carries the finished passes, so the row never waits for the run (p2-verdict craft-7).
+  const passes = passesLine(card.passes);
   const facts: Fact[] = [
     { label: "Этап", outcome: true, value: text(stageLine(card, now)) },
     ...(card.closed ? [] : [activity, { label: "Ждёт вас", outcome: true, glossary: WAITS_GLOSSARY, value: <Waits causes={waitCauses(card)} run={run} /> }]),
@@ -270,9 +271,8 @@ export function runFacts(card: RunCard, now: number, { run = null, lost = false 
     { label: "Запуски агентов", value: text(launchesLine(run?.launchCount ?? card.launchCount, card.running)) },
     // p1-decompose-u3-shape cand-2 · what the run spent, agents and orchestrator together, the split in the title.
     { label: "Токены", value: spend ? text(spend.text, false, spend.title) : notRecorded },
-    // p1-decompose-design-check cand-1 · the finished passes, a row only where the run has passes (N); the run's own
-    // record, so the row holds «Загрузка…» in its one line until the run is read.
-    ...(card.N ? [{ label: "Проходы", glossary: PASSES_GLOSSARY, value: passes ? text(passes.text, false, passes.title) : <Loading className="h-lh w-auto justify-start" /> }] : []),
+    // p1-decompose-design-check cand-1 · the finished passes, a row only where the run has passes (N), from the card.
+    ...(card.N ? [{ label: "Проходы", glossary: PASSES_GLOSSARY, value: text(passes.text, false, passes.title) }] : []),
     { label: "Коммиты", value: card.commits === null ? notRecorded : text(count(card.commits, NOUNS.commit)) },
     { label: "Зеркало .spike", value: card.mirror === null ? notRecorded : text(card.mirror ? "да" : "нет") },
     { label: "Рабочая копия", value: card.worktree ? text(card.worktree, true) : dash },

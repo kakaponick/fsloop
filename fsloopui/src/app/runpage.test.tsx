@@ -7,6 +7,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import { glossaryLines } from "../ui/index.ts";
+import { PASS_OUTCOME } from "../../shared/states.ts";
 import { readPref } from "../ui/storage.ts";
 import { hiddenCauses } from "./facts.tsx";
 import { ObjectLink, objectHref, resolverFor } from "./links.tsx";
@@ -38,6 +39,18 @@ describe("the run page's words, built once", () => {
       "нечего исправлять — Проход не взял находок в исправление: проходов больше нет.",
       "предел проходов — Последний проход прогона: оставшиеся находки открыты.",
     ]);
+  });
+
+  test("p2-verdict craft-5 · PRODUCT.md → Glossary holds every pass outcome word, with its meaning, and «с возражением» under «оценка»", () => {
+    // vitest runs in fsloopui/; PRODUCT.md sits at the repo's root.
+    const product = readFileSync(join(process.cwd(), "..", "PRODUCT.md"), "utf8").replace(/\r\n/g, "\n");
+    const passLine = product.split("\n").find((l) => l.startsWith("- **Проход** — "));
+    expect(passLine).toBe(
+      "- **Проход** — следующий проход (the findings it took to fix go to the next pass) · нечего исправлять (it took no finding to fix: the run makes no more passes) · предел проходов (the run's last pass: the findings left stay open).",
+    );
+    for (const k of Object.keys(PASS_OUTCOME) as (keyof typeof PASS_OUTCOME)[]) expect(passLine).toContain(`${PASS_OUTCOME[k].compact} (`);
+    const verdictRow = product.split("\n").find((l) => l.startsWith("| оценка |"));
+    expect(verdictRow).toBe("| оценка | The operator's verdict on a finding: согласен, не согласен, не та серьёзность, ложная находка; «с возражением» — every verdict but «согласен», the operator disputes the finding |");
   });
 
   test("p1-decompose-u3-shape cand-2 · the run's tokens: agents and the orchestrator in one compact total, the split in the title", () => {
@@ -151,6 +164,24 @@ describe("the run page's frame", () => {
     // its own box, the settings wrap only between their parts.
     for (const [i, dd] of [...factList().querySelectorAll("dd")].entries())
       if (![2, 4].includes(i)) expect(dd.firstElementChild).toHaveClass("block", "truncate");
+  });
+
+  test("p2-verdict craft-7 · «Проходы» reads the finished passes from the card: before the run is read the row already holds them, never a loading state", async () => {
+    const user = userEvent.setup();
+    let release!: () => void;
+    const held = new Promise<void>((done) => (release = done));
+    fx.answer((path) => (path.startsWith("/api/run?") ? held.then(() => fx.app.handle(new Request(`http://127.0.0.1${path}`))) : null));
+    renderShell(fx.transport, { path: `/r/${keyOf(40)}` });
+    await waitFor(() => expect(header()).not.toBeNull());
+    // The run is not read yet: the body loads, the header stands from the card.
+    expect(within(screen.getByRole("region", { name: "Раздел прогона" })).getByRole("status")).toHaveTextContent("Загрузка…");
+    await user.click(within(header()).getByRole("button", { name: "Подробнее" }));
+    expect(facts().find(([label]) => label === "Проходы")).toEqual(["Проходы", "проход 1 — следующий проход"]);
+    expect(within(factList()).getByText("проход 1 — следующий проход")).toHaveAttribute("title", "Проход 1 — следующий проход: 60 находок в исправление. 60 critical and major above the bar");
+    expect(within(header()).queryByRole("status")).toBeNull();
+    await act(async () => release());
+    await loaded();
+    expect(facts().find(([label]) => label === "Проходы")).toEqual(["Проходы", "проход 1 — следующий проход"]);
   });
 
   test("craft-3 · «Ждёт вас»: one row per cause, each in full, its finding and unit linked; craft-21 · the labels «Активность» and «Ждёт вас» carry the glossaries, the values read plain; cand-8 · «Настройки» explains its words", async () => {

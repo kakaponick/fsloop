@@ -352,6 +352,8 @@ export interface RunCard {
   launchCount: number;
   /** The run's tokens, for «Подробнее» before the run is read. */
   spend: RunSpend | null;
+  /** The finished passes, the run model's own (`Run.passes`): «Подробнее» → «Проходы» stands before the run is read. */
+  passes: Pass[];
   commits: number | null;
   redGate: Gate | null;
   startedAt: string | null;

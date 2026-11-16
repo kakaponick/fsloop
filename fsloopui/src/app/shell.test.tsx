@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { rmSync } from "node:fs";
 import { afterEach, describe, expect, test } from "vitest";
 import { emptyRootText, runNotFoundText } from "./words.ts";
+import { applyStylesheet, usedBlockSize } from "./layout-testing.ts";
 import { fixtureApp, json, keyOf, MIN, NOW, renderShell, type FixtureApp } from "./testing.tsx";
 
 let fx: FixtureApp | null = null;
@@ -163,7 +164,9 @@ describe("the shell's walk", () => {
     const shell = container.querySelector("[data-slot=shell]") as HTMLElement;
     // One column, the band first, below 980 px; the 316 px column beside the page above it.
     expect(shell).toHaveClass("grid", "grid-rows-[auto_minmax(0,1fr)]", "min-[980px]:grid-cols-[calc(var(--spacing)*79)_minmax(0,1fr)]", "min-[980px]:grid-rows-1");
-    expect(sidebar().querySelector("[data-slot=sidebar-list]")).toHaveClass("max-[979px]:h-32");
+    // p2-verdict craft-1 · the band's list is capped by its computed flex: 128 px, four whole rows (sidebar.test.tsx).
+    await applyStylesheet();
+    expect(usedBlockSize(sidebar().querySelector("[data-slot=sidebar-list]") as HTMLElement)).toBe(128);
     expect(sidebar().querySelectorAll("[data-slot=run-card]")).toHaveLength(0);
     expect(sidebar().querySelectorAll("[data-slot=mini-row]").length).toBeGreaterThan(0);
     expect(sidebar().compareDocumentPosition(screen.getByRole("main")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import type { RunCard } from "../../shared/model.ts";
 import { NOUNS } from "../../shared/text.ts";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { cn } from "@/lib/utils";
 import { pushHistory, SearchBox } from "@/table";
 import { livenessOf } from "../../shared/liveness.ts";
 import { EmptyState, FlatList, GlossaryTooltip, HeldStrip, Loading, PartFailed, readPref, usePref, writePref } from "../ui/index.ts";
@@ -29,10 +30,14 @@ const FOLDS: { group: Exclude<Group, "running">; label: string; open: boolean }[
   { group: "unrecorded", label: "Без записи о прогоне", open: false },
 ];
 
-/** The list's region. In the narrow band it is four whole 32 px rows high — a mini row and a fold's header are both
- * one — so the band never slices a row in two (cand-10), and it has that height from the first paint, so the list
- * lands in it without moving the page (Strict 1); above the breakpoint it takes what the column leaves. */
-const LIST = "min-h-0 flex-1 overflow-y-auto px-2 pb-2 [scrollbar-gutter:stable] max-[979px]:h-32";
+/** The list's region. Above the breakpoint it takes what the column leaves. In the narrow band the column's height
+ * comes from its content, so the list's own size must win: `flex-none` makes its flex basis its 128 px height (a
+ * `flex-1` basis of 0% falls back to the content there, and the band grew to the whole list — p2-verdict craft-1),
+ * from the first paint, so the list lands in it without moving the page (Strict 1). That is four whole 32 px rows —
+ * every row of the band is one, a fold's header too, with no padding under the last — and its scroll stops on a row's
+ * top, so no stop slices a row in two (cand-10). */
+const listClass = (band: boolean) =>
+  cn("overflow-y-auto px-2 [scrollbar-gutter:stable]", band ? "h-32 flex-none snap-y snap-mandatory" : "min-h-0 flex-1 pb-2");
 
 /** How many of the running group go and how many are silent: «молчит» is not «идёт» (rules/ui → Conventions 4). */
 function runningCounts(cards: readonly RunCard[], now: number): { going: number; silent: number } {
@@ -80,7 +85,7 @@ export function Sidebar({ openKey, band = false }: { openKey: string | null; ban
         <RunList cards={list.cards} now={now} lost={lost} openKey={openKey} band={band} query={query} onReset={() => setQuery("")} />
       ) : (
         <>
-          <div data-slot="sidebar-list" className={LIST}>
+          <div data-slot="sidebar-list" className={listClass(band)}>
             {list.status === "loading" ? <Loading /> : <PartFailed className="mx-2" what="Список прогонов" cause={list.cause} onRetry={store.retryList} />}
           </div>
           <HeldStrip counts={{ fresh: 0, moved: 0, left: 0 }} noun={RUN_NOUN} leftKind="gone" onApply={() => {}} />
@@ -130,17 +135,20 @@ function RunList({ cards, now, lost, openKey, band, query, onReset }: RunListPro
 
   return (
     <>
-      <div data-slot="sidebar-list" className={LIST}>
+      <div data-slot="sidebar-list" className={listClass(band)}>
         {none ? (
           <EmptyState form="filtered" noun={NOUNS.run} filters={[`поиск «${query.trim()}»`]} onReset={onReset} className="py-6" />
         ) : (
           <FlatList label="Прогоны" className={band ? "gap-0" : "gap-2"}>
             {groups.running.length
-              ? groups.running.map((p) => (band ? <MiniRow key={p.key} {...propsOf(p)} /> : <RunCardItem key={p.key} {...propsOf(p)} />))
-              : // Searching, an empty running group says nothing: «ни один не идёт» would be false.
-                !searching && <p className="px-2 py-3 text-muted-foreground">{NOTHING_RUNS}</p>}
+              ? groups.running.map((p) => (band ? <MiniRow key={p.key} {...propsOf(p)} oneLine /> : <RunCardItem key={p.key} {...propsOf(p)} />))
+              : // Searching, an empty running group says nothing: «ни один не идёт» would be false. In the band the line
+                // is one of its 32 px rows.
+                !searching && <p className={cn("px-2 text-muted-foreground", band ? "h-8 snap-start truncate leading-8" : "py-3")}>{NOTHING_RUNS}</p>}
             {FOLDS.map((fold) =>
-              groups[fold.group].length ? <Fold key={fold.group} group={fold.group} label={fold.label} open={fold.open} items={groups[fold.group]} propsOf={propsOf} /> : null,
+              groups[fold.group].length ? (
+                <Fold key={fold.group} group={fold.group} label={fold.label} open={fold.open} items={groups[fold.group]} propsOf={propsOf} oneLine={band} />
+              ) : null,
             )}
           </FlatList>
         )}
@@ -151,18 +159,33 @@ function RunList({ cards, now, lost, openKey, band, query, onReset }: RunListPro
   );
 }
 
-/** A fold: its header one 32 px row, the hairline above it inside that row, so the band's rows stay whole. */
-function Fold({ group, label, open: initial, items, propsOf }: { group: Group; label: string; open: boolean; items: PlacedCard[]; propsOf: (p: PlacedCard) => RunItemProps }) {
+/** A fold: its header one 32 px row, the hairline above it inside that row, so the band's rows stay whole; `oneLine`
+ * — in the band, every row of it one line too. */
+function Fold({
+  group,
+  label,
+  open: initial,
+  items,
+  propsOf,
+  oneLine,
+}: {
+  group: Group;
+  label: string;
+  open: boolean;
+  items: PlacedCard[];
+  propsOf: (p: PlacedCard) => RunItemProps;
+  oneLine: boolean;
+}) {
   const [open, setOpen] = usePref(`fold:sidebar-${group}`, initial);
   return (
     <Collapsible open={open} onOpenChange={setOpen} data-slot="sidebar-fold">
-      <CollapsibleTrigger className="group/fold flex h-8 w-full items-center gap-1.5 border-t px-2 text-left text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset">
+      <CollapsibleTrigger className="group/fold flex h-8 w-full snap-start items-center gap-1.5 border-t px-2 text-left text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset">
         <ChevronRightIcon aria-hidden="true" className="size-3.5 shrink-0 transition-transform group-data-[state=open]/fold:rotate-90 motion-reduce:transition-none" />
         <span className="tabular-nums">{foldTitle(label, items.length)}</span>
       </CollapsibleTrigger>
       <CollapsibleContent className="flex flex-col">
         {items.map((p) => (
-          <MiniRow key={p.key} {...propsOf(p)} />
+          <MiniRow key={p.key} {...propsOf(p)} oneLine={oneLine} />
         ))}
       </CollapsibleContent>
     </Collapsible>

@@ -51,7 +51,7 @@ One word per concept on every surface (`rules/ui` → Copy 2). State words come 
 | кадр | A screenshot of a surface the run took for its critics (`shots/*.png`) |
 | соглашение прогона | A design decision the run's design check fixed once for every unit |
 | журнал решений | The run's own decisions taken without the operator, with why (`journal.md`); each entry is one «решение», by its number («решение #12») |
-| оценка | The operator's verdict on a finding: согласен, не согласен, не та серьёзность, ложная находка |
+| оценка | The operator's verdict on a finding: согласен, не согласен, не та серьёзность, ложная находка; «с возражением» — every verdict but «согласен», the operator disputes the finding |
 | решение прогона | What the run decided about a finding: в исправление, кандидат, открыта, дубликат, отклонена, отброшена, без решения |
 | critical | A finding that breaks work or data: read first |
 | major | A finding that breaks a rule so that the user will notice |
@@ -62,6 +62,7 @@ State words:
 - **Юнит** — черновик · готов к работе · пишется · проверяется · отладка · вливается · закоммичен · заблокирован · не записано.
 - **Находка** — без решения · кандидат · ждёт юнита · исправляется · заблокирована · исправлена · закрыта · не исправлена · повторилась · открыта · дубликат · отклонена · отброшена.
 - **Запуск агента** — работает · завершён · нет отчёта.
+- **Проход** — следующий проход (the findings it took to fix go to the next pass) · нечего исправлять (it took no finding to fix: the run makes no more passes) · предел проходов (the run's last pass: the findings left stay open).
 - **Активность прогона** — работает (a write in the last 5 minutes) · тихо (5–30 minutes) · молчит (over 30 minutes) · закрыт · не записано.
 - **Absent values** — «—» (no value exists), «не найден» (an id the folder does not hold), «не записано» (a field the folder lacks).
 

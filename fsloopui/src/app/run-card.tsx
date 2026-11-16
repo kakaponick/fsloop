@@ -23,6 +23,7 @@ import {
   miniTitle,
   NEW_MARK,
   NEW_MARK_TITLE,
+  outcomeLine,
   settingsLine,
   stageCompact,
   stageLine,
@@ -163,38 +164,61 @@ export function RunCardItem({ card, now, lost, current, fresh, gone }: RunItemPr
   );
 }
 
-/** A run in a fold or in the narrow band: one line — project · id · its state, the state's words whole and the
- * project cut first; no clock time beside an age and no «новое» column, both in its name and title, «новое» also the
- * inset edge mark, which moves nothing (craft-4). A closed run takes a second reserved line: when it closed and its
- * goal's first words, what tells one closed run from the next (p1-review cand-3). Its height comes from whether the
- * run is closed, never from a live change of its words (Strict 1). */
-export function MiniRow({ card, now, lost, current, fresh, gone }: RunItemProps) {
-  const detail = gone ? { tone: "neutral" as const, text: VANISHED } : miniDetail(card, now, { lost });
+/** A run in a fold or in the narrow band: one line — project · id · its state. The project and the id keep their
+ * words: the project gives way only past a third of the line, an outlier name; the state keeps its fact — the
+ * liveness, the outcome — and what waits after it is the cause, cut at its end (rules/ui → Conventions 1, Tables 5;
+ * p2-verdict craft-2). No clock time beside an age and no «новое» column, both in its name and title, «новое» also the
+ * inset edge mark, which moves nothing (craft-4). A closed run takes a second reserved line: the push, when it closed
+ * and its goal's first words, what tells one closed run from the next (p1-review cand-3) — in the narrow band
+ * (`oneLine`), where every row is one 32 px line so the band's scroll never slices one (cand-10), that line follows
+ * its state as its cause. Its height comes from whether the run is closed, never from a live change of its words
+ * (Strict 1). */
+export function MiniRow({ card, now, lost, current, fresh, gone, oneLine = false }: RunItemProps & { oneLine?: boolean }) {
+  const detail = gone ? { tone: "neutral" as const, fact: VANISHED, text: VANISHED } : miniDetail(card, now, { lost });
   const mark = fresh && !gone;
-  const second = card.closed === true;
+  const closed = card.closed === true;
+  const second = closed && !oneLine;
+  const cause = closed && oneLine ? ` · ${closedLine(card, now)}` : detail.text.slice(detail.fact.length);
+  // The name and the title say the whole state: a closed run's outcome with its push.
+  const whole = closed && !gone ? outcomeLine(card.outcome).text : detail.text;
   return (
     <Item
       asChild
       size="xs"
-      className={cn("flex-col flex-nowrap items-stretch justify-center gap-0 px-2 py-0 aria-[current=page]:bg-muted", second ? "h-12" : "h-8", mark && EDGE_MARK)}
+      className={cn("snap-start flex-col flex-nowrap items-stretch justify-center gap-0 px-2 py-0 aria-[current=page]:bg-muted", second ? "h-12" : "h-8", mark && EDGE_MARK)}
     >
       <Link
         to={runPath(card.key)}
         aria-current={current ? "page" : undefined}
-        aria-label={cardLabel(card, detail.text, mark)}
-        title={miniTitle(card, detail.text, now, mark)}
+        aria-label={cardLabel(card, whole, mark)}
+        title={miniTitle(card, whole, now, mark)}
         data-slot="mini-row"
         data-new={mark ? "" : undefined}
         {...flatItem(card.key)}
       >
-        <span className="flex min-w-0 items-baseline gap-2">
-          {/* Both shrink from their own width, the project a hundred times faster: an outlier name cuts first. */}
-          <span data-slot="mini-project" className="min-w-0 shrink-[100] truncate font-semibold">
+        {/* 4 px between the parts: at the 316 px sidebar the widest project of this machine's runs, the id and «цель не
+            достигнута» fit one line whole (p2-verdict craft-2); the state sits at the line's end, past any room left. */}
+        <span data-slot="mini-line" className="flex min-w-0 items-baseline gap-1">
+          <span data-slot="mini-project" className="max-w-[35%] shrink-0 truncate font-semibold">
             {card.project}
           </span>
           <span className="shrink-0 font-mono text-xs text-muted-foreground">{card.id}</span>
-          <span className="flex min-w-0 grow items-baseline justify-end text-xs">
-            <StatusDot state={{ tone: detail.tone, label: detail.text }} truncate className={cn(detail.tone === "neutral" && "text-muted-foreground")} />
+          <span
+            data-slot="mini-state"
+            data-tone={detail.tone}
+            className={cn("flex min-w-0 grow items-baseline justify-end gap-1.5 overflow-hidden text-xs", detail.tone === "neutral" && "text-muted-foreground")}
+          >
+            <Dot tone={detail.tone} className="self-center" />
+            <span data-slot="mini-text" className="flex min-w-0 items-baseline">
+              <span data-slot="mini-fact" className="shrink-0 whitespace-pre">
+                {detail.fact}
+              </span>
+              {cause && (
+                <span data-slot="mini-cause" className={cn("min-w-0 overflow-hidden text-ellipsis whitespace-pre", closed && "text-muted-foreground")}>
+                  {cause}
+                </span>
+              )}
+            </span>
           </span>
         </span>
         {second && (
