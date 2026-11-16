@@ -10,6 +10,10 @@ export const SECTION = {
   checks: "Проверки юнита",
 } as const;
 
+/** The header row of each list in the detail (ux 1: a column says what its values are; a time says start or end). */
+export const LAUNCH_HEAD = ["Агент и задача", "Модель", "Начало", "Состояние", "Токены"] as const;
+export const CHECK_HEAD = ["Проверка", "Итог", "Попытки", "Конец", "Строка лога"] as const;
+
 /** The fact list's labels (cold-read: each names its object). */
 export const FACT = {
   title: "Что делает",
@@ -61,12 +65,8 @@ export const UNDECIDED_WIDEST = undecidedText(888);
 export const CANDIDATES_TITLE = "Находки-кандидаты: прогон их не исправляет — открыть в «Находках»";
 export const UNDECIDED_TITLE = "Находки без решения прогона — открыть в «Находках»";
 
-/** The row menu's items beyond «Открыть» and the copies; a copy's blocked reasons. */
+/** The row menu's item beyond «Открыть» and the copies; it is listed only for a unit that closes findings. */
 export const OPEN_FINDINGS = "Открыть находки юнита";
-export const NO_FINDINGS = "Юнит не закрывает ни одной находки: в «Находках» открывать нечего";
-export const NO_COMMIT = "У юнита ещё нет коммита: он появится, когда прогон закоммитит юнит";
-export const NO_BRIEF = "Бриф юнита не записан: прогон пишет брифы на этапе «декомпозиция»";
-export const NO_TREE = "У юнита нет своей рабочей копии: он работает в общей копии прогона";
 
 /** The age's entry in the state column's glossary: what «· 12 мин» counts (ui → Glossary: a cell's second part). */
 export const AGE_ENTRY: GlossaryEntry = { value: "· 12 мин", meaning: "сколько прошло с запуска исполнителя или с последней проверки" };

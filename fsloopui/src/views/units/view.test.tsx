@@ -7,11 +7,12 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, describe, expect, test, vi } from "vitest";
 import { emptyStateText, glossaryLines, readPref } from "@/ui";
-import { assertLayout, fitsRegion, headerWidth, isSelectFilter, mergeWidths, runQuery, type FilterDef } from "@/table";
+import { assertLayout, fitsRegion, FRAME, headerWidth, isSelectFilter, mergeWidths, runQuery, tableMinWidth, type FilterDef } from "@/table";
 import { runKey as viewKey, type RunPrefs } from "../../table/view-state.ts";
 import { runPath } from "../../app/routes.ts";
 import { COLUMNS, STATE_GLOSSARY } from "./columns.tsx";
-import { DEFAULT_SORT, emptyFor, filtersFor, SEARCH, stateDetail, unitRows, type UnitRow } from "./query.ts";
+import { BAR_ORDER } from "./index.tsx";
+import { DEFAULT_SORT, emptyFor, filtersFor, SEARCH, stateDetail, statesOf, stripStates, unitRows, type UnitRow } from "./query.ts";
 import { fixtureApp, keyOf, loadedRun, NOW, renderRun, renderUnits } from "./testing.tsx";
 import { CANDIDATES_WIDEST, candidatesText, UNDECIDED_WIDEST, undecidedText, unitNotFound } from "./words.ts";
 
@@ -24,7 +25,18 @@ const fx = fixtureApp({ only: [N, INIT, ONE] });
 afterAll(() => fx.close());
 const run = loadedRun(fx, N);
 const rows = unitRows(run);
-const REGION = 964; // 1280 px beside the 316 px sidebar
+const REGION = 1280 - 316 - 40; // the view's box at 1280 px: beside the 316 px sidebar, inside its 20 px gutters
+
+/** A header's width at the platform face (Segoe UI, 12 px), by glyph class and rounded up: a wide letter 10.5 px, a
+ * narrow one 4, another capital 8.5, the rest 7; then its sort control — a gap of 4 and the 14 px icon, or with a
+ * glossary its 16 px button — and the cell's 16 px padding (table #10). The shared estimate (`headerWidth`, 6.6 px a
+ * letter) passed «Юнит» at 64 px and «Проход» at 76 px, which p1-final-units.png shows clipped; this one fails both. */
+function headerFits(label: string, { sortable, glossary }: { sortable: boolean; glossary: boolean }): number {
+  let text = 0;
+  for (const ch of label) text += /[ЮШЩЖМДФЫmwшщжмюы]/.test(ch) ? 10.5 : /[ijlrtfI.,:;!|]/.test(ch) ? 4 : /[A-ZА-ЯЁ]/.test(ch) ? 8.5 : 7;
+  return Math.ceil(text + (sortable ? (glossary ? 20 : 18) : 0) + 16);
+}
+const fits = (c: (typeof COLUMNS)[number]) => headerFits(c.label, { sortable: Boolean(c.rank), glossary: Boolean(c.glossary) });
 
 const bodyRows = () => [...document.querySelectorAll<HTMLTableRowElement>("tr[data-row-id]")];
 const ids = () => bodyRows().map((r) => r.dataset.rowId as string);
@@ -35,12 +47,34 @@ const loaded = () => waitFor(() => expect(bodyRows()).toHaveLength(42), { timeou
 const sortColumns = COLUMNS.flatMap((c) => (c.rank ? [{ id: c.id, rank: c.rank }] : []));
 
 describe("the view's configuration at the production shape", () => {
-  test("the columns of BLOCKS fit the 964 px region; every header clears its width; glossaries are bounded", () => {
+  test("craft-5: every header clears its width at the platform face — «Юнит» and «Проход» no longer clipped", () => {
+    expect(headerFits("Юнит", { sortable: true, glossary: false })).toBe(66);
+    expect(headerFits("Проход", { sortable: true, glossary: true })).toBe(80);
+    // the widths of p1-final-units.png, where both read «Юн…» and «Прох…», fail the measure
+    expect(headerFits("Юнит", { sortable: true, glossary: false })).toBeGreaterThan(64);
+    expect(headerFits("Проход", { sortable: true, glossary: true })).toBeGreaterThan(76);
+    expect(COLUMNS.map((c) => [c.id, c.width ?? null, c.width === undefined ? null : fits(c)])).toEqual([
+      ["id", 72, 66],
+      ["pass", 88, 80],
+      ["state", 192, 101],
+      ["title", null, null],
+      ["sha", 96, 85],
+      ["major", 80, 76],
+      ["minor", 72, 69],
+      ["launches", 88, 87],
+    ]);
+    for (const c of COLUMNS) if (c.width !== undefined) expect(fits(c), c.id).toBeLessThanOrEqual(c.width);
+    // the 1440 px frame and the 1280 px view hold every column without a sideways scroll
+    expect(tableMinWidth(COLUMNS, mergeWidths(COLUMNS, null)) + FRAME).toBe(922);
+    expect(fitsRegion(COLUMNS, mergeWidths(COLUMNS, null), REGION)).toBe(true);
+    expect(fitsRegion(COLUMNS, mergeWidths(COLUMNS, null), 1440 - 316 - 40)).toBe(true);
+  });
+
+  test("the columns of BLOCKS; glossaries are bounded", () => {
     expect(() => assertLayout(COLUMNS)).not.toThrow();
     expect(COLUMNS.map((c) => c.label)).toEqual(["Юнит", "Проход", "Состояние", "Что делает", "Коммит", "major+", "minor", "Запуски"]);
     expect(COLUMNS.filter((c) => c.width === undefined).map((c) => c.id)).toEqual(["title"]);
     expect(COLUMNS.filter((c) => c.numeric).map((c) => c.id)).toEqual(["pass", "major", "minor", "launches"]);
-    expect(fitsRegion(COLUMNS, mergeWidths(COLUMNS, null), REGION)).toBe(true);
     for (const c of COLUMNS) if (c.width !== undefined) expect(headerWidth(c.label, { sortable: Boolean(c.rank) }), c.id).toBeLessThanOrEqual(c.width);
     for (const c of COLUMNS) if (c.glossary) expect(() => glossaryLines(c.glossary ?? []), c.id).not.toThrow();
     expect(glossaryLines(STATE_GLOSSARY)).toEqual([
@@ -78,7 +112,13 @@ describe("the view's configuration at the production shape", () => {
     const closed = run.units.find((u) => u.id === "u1")?.closes[0] as string;
     expect(q(closed)).toContain("u1");
     expect(q("fixes")).toEqual(Array.from({ length: 10 }, (_, k) => `f${k + 1}`));
-    expect(SEARCH.placeholder).toBe("Юнит, коммит, находка или текст задачи");
+  });
+
+  test("craft-6: the placeholder names the four fields searched in the brief's words, within the field's cap", () => {
+    expect(SEARCH.placeholder).toBe("Юнит, коммит, находка, название");
+    expect(SEARCH.placeholder?.split(" ")).toHaveLength(4);
+    // p1-final-units.png: the field at its 20 rem cap showed 33 characters («Юнит, коммит, находка или текст з»)
+    expect(SEARCH.placeholder?.length).toBeLessThanOrEqual(31);
   });
 
   test("the state cell: «state · age · cause», the cause last; no age without the model's `since`", () => {
@@ -127,7 +167,7 @@ describe("the task walk over u1's handler (surfaces/units.md → WALK)", () => {
     expect(strip.querySelector("[data-slot=state-count] [data-tone]")).toHaveAttribute("data-tone", "warning");
     for (const n of strip.querySelectorAll("[data-slot=state-count] > span:last-child")) expect(n).toHaveClass("min-w-count", "tabular-nums");
     expect([...container.querySelectorAll<HTMLElement>("[data-toolbar-item]")].map((el) => el.dataset.toolbarItem)).toEqual(["search", "filter-state", "filter-pass", "facts", "columns"]);
-    expect(screen.getByRole("searchbox")).toHaveAttribute("placeholder", "Юнит, коммит, находка или текст задачи");
+    expect(screen.getByRole("searchbox")).toHaveAttribute("placeholder", "Юнит, коммит, находка, название");
 
     // a row: id · pass · state · title · commit · counts
     expect(cell("u23", "state")).toHaveTextContent("заблокирован · waits for the user — the empty state's wording (j140)");
@@ -208,27 +248,30 @@ describe("the task walk over u1's handler (surfaces/units.md → WALK)", () => {
     if (first) expect(within(detail("u23")).getAllByRole("link", { name: first.local })[0]).toHaveAttribute("href", runPath(KEY, { view: "findings", finding: first.id }));
   });
 
-  test("4: the row menu of ACTIONS; a selection copies its ids joined by newlines", async () => {
+  test("4: the row menu of ACTIONS — an item whose object the row lacks is not listed, none disabled; a selection copies its ids joined by newlines", async () => {
     const user = userEvent.setup({ delay: null });
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     renderUnits(fx, KEY, runPath(KEY, { view: "units" }));
     await loaded();
+    const u1 = rows.find((u) => u.id === "u1") as UnitRow;
+    expect([u1.sha !== null, u1.brief !== null, u1.tree]).toEqual([true, true, null]);
     fireEvent.contextMenu(row("u1"));
     let menu = await screen.findByRole("menu");
     expect(within(menu).getByText("u1 — part 1")).toBeInTheDocument();
-    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual([
-      "ОткрытьEnter",
-      "Открыть находки юнита",
-      "Скопировать id",
-      "Скопировать коммит",
-      "Скопировать путь брифа",
-      "Скопировать рабочую копию",
-      "Действие по клику",
-    ]);
-    const tree = within(menu).getByRole("menuitem", { name: "Скопировать рабочую копию" });
-    expect(tree).toHaveAttribute("data-disabled");
-    expect(tree).toHaveAttribute("title", "У юнита нет своей рабочей копии: он работает в общей копии прогона");
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["ОткрытьEnter", "Открыть находки юнита", "Скопировать id", "Скопировать коммит", "Скопировать путь брифа", "Действие по клику"]);
+    expect(menu.querySelector("[data-disabled]")).toBeNull();
+    await user.keyboard("{Escape}");
+
+    // a unit with no commit and no findings: neither «Скопировать коммит» nor «Открыть находки юнита»
+    const bare = rows.find((u) => !u.sha && !run.findings.some((f) => f.units.includes(u.id))) as UnitRow;
+    expect(bare).toBeTruthy();
+    fireEvent.contextMenu(row(bare.id));
+    menu = await screen.findByRole("menu");
+    const items = within(menu).getAllByRole("menuitem").map((i) => i.textContent);
+    expect(items).not.toContain("Скопировать коммит");
+    expect(items).not.toContain("Открыть находки юнита");
+    expect(menu.querySelector("[data-disabled]")).toBeNull();
     await user.keyboard("{Escape}");
 
     await user.click(within(row("u17")).getByRole("checkbox"));
@@ -236,7 +279,7 @@ describe("the task walk over u1's handler (surfaces/units.md → WALK)", () => {
     fireEvent.contextMenu(row("u18"));
     menu = await screen.findByRole("menu");
     expect(within(menu).getByText("2 юнита")).toBeInTheDocument();
-    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Скопировать id", "Скопировать коммит", "Скопировать путь брифа", "Скопировать рабочую копию", "Действие по клику"]);
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Скопировать id", "Скопировать коммит", "Скопировать путь брифа", "Действие по клику"]);
     await user.click(within(menu).getByRole("menuitem", { name: "Скопировать id" }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("u17\nu18"));
   });
@@ -282,6 +325,43 @@ describe("the empty states and the production shape (done-criteria 4, 6)", () =>
     renderRun(fx, { ...run, errors: [...run.errors, { file: "units.md", cause: "нет доступа" }] }, runPath(KEY, { view: "units" }));
     expect(screen.getByText("Список юнитов не прочитан: нет доступа")).toBeInTheDocument();
     expect(bodyRows()).toHaveLength(0);
+  });
+
+  test("craft-11: «N юнитов» leads the status bar and the strip follows it; a state a live change brings appends at the end, one it empties keeps its slot", () => {
+    const view = renderRun(fx, run, runPath(KEY, { view: "units" }));
+    const bar = () => document.querySelector("[data-slot=status-bar]") as HTMLElement;
+    const strip = () => [...bar().querySelectorAll("[data-slot=state-count]")].map((s) => s.textContent);
+    // the order is the view's, over the status bar's own slots: the total, the strip, then the selection and the age
+    // packed at the right end, so the strip's width moves neither
+    const root = document.querySelector("[data-slot=units-view]") as HTMLElement;
+    expect(root.className).toContain(BAR_ORDER);
+    expect(BAR_ORDER.split(" ")).toEqual([
+      "[&_[data-slot=status-bar]>[data-slot=counts-strip]]:order-1",
+      "[&_[data-slot=status-bar]>[data-slot=selected]]:order-2",
+      "[&_[data-slot=status-bar]>[data-slot=selected]]:ml-auto",
+      "[&_[data-slot=status-bar]>[data-slot=age]]:order-3",
+      "[&_[data-slot=status-bar]>[data-slot=age]]:ml-0",
+    ]);
+    expect([...bar().children].map((c) => (c as HTMLElement).dataset.slot)).toEqual(["counts-strip", "shown", "selected"]);
+    expect(within(bar()).getByText("42 юнита")).toHaveAttribute("data-slot", "shown");
+    expect(strip()).toEqual(["заблокирован1", "проверяется1", "пишется1", "готов к работе5", "черновик4", "закоммичен30"]);
+
+    // a live read: the blocked unit is committed, a ready one goes to «отладка» — a state the strip has not shown
+    const next = { ...run, version: 2, units: run.units.map((u) => (u.id === "u23" ? { ...u, state: "committed" as const } : u.id === "u24" ? { ...u, state: "debug" as const } : u)) };
+    view.rerun(next);
+    expect(strip()).toEqual(["заблокирован0", "проверяется1", "пишется1", "готов к работе4", "черновик4", "закоммичен31", "отладка1"]);
+    // an emptied state keeps its slot with a muted 0 and a neutral dot
+    const blocked = bar().querySelector("[data-slot=state-count]") as HTMLElement;
+    expect(blocked.querySelector("[data-tone]")).toHaveAttribute("data-tone", "neutral");
+    for (const n of bar().querySelectorAll("[data-slot=state-count] > span:last-child")) expect(n).toHaveClass("min-w-count", "tabular-nums");
+  });
+
+  test("craft-11: the strip's entries, pure — the first read's states by rank, then each new one appended", () => {
+    const seen = statesOf(run.units);
+    expect(seen).toEqual(["blocked", "verify", "implement", "ready", "drafted", "committed"]);
+    expect(stripStates(seen, run.units)).toBe(seen);
+    expect(stripStates(seen, [{ state: "land" }, { state: "debug" }])).toEqual([...seen, "land", "debug"]);
+    expect(stripStates(["committed"], [{ state: "blocked" }])).toEqual(["committed", "blocked"]);
   });
 
   test("the held strip's line is reserved before anything waits in it (Strict 1)", () => {

@@ -2,7 +2,7 @@
 // unit reads as, the cell's «state · age · cause», the filters, the search's fields, the default sort, the empty
 // state, a unit's launches and its checks grouped by log. The query itself — sort, filters, counts, search — is the
 // table kit's (src/table/query.ts); nothing here filters a row.
-import type { Launch, Run, RunningLaunch, Unit } from "../../../shared/model.ts";
+import type { Launch, Run, RunningLaunch, Unit, UnitCheck } from "../../../shared/model.ts";
 import { UNIT_STATE, type UnitState } from "../../../shared/states.ts";
 import { duration } from "../../../shared/text.ts";
 import { emptyWhen, type EmptyWhen } from "@/ui";
@@ -72,7 +72,8 @@ export const DEFAULT_SORT = { id: "pass", desc: true } as const;
 export const SEARCH: SearchDef<UnitRow> = {
   identifiers: (u) => [u.id, u.sha, ...u.commits, ...u.closes],
   text: (u) => [u.title],
-  placeholder: "Юнит, коммит, находка или текст задачи",
+  // the fields searched, by the words of the columns and the detail (table #12), within the field's cap
+  placeholder: "Юнит, коммит, находка, название",
 };
 
 // ── filters (table #11): «Состояние» always, «Проход» only when the run has more than one ───────
@@ -93,6 +94,13 @@ export function filtersFor(run: Pick<Run, "units">): FilterDef<UnitRow>[] {
 
 /** The states the run's units are in, by the map's rank — the counts strip's entries (table #8). */
 export const statesOf = (units: readonly Pick<Unit, "state">[]): UnitState[] => STATES.filter((s) => units.some((u) => u.state === s)).sort((a, b) => UNIT_STATE[a].rank - UNIT_STATE[b].rank);
+
+/** The strip's entries over a live run (rules/ui → Strict 1): every state once seen keeps its slot — a muted 0 when
+ * no unit is in it any more — and a state a live change brings is appended at the end, so no entry moves. */
+export function stripStates(seen: readonly UnitState[], units: readonly Pick<Unit, "state">[]): readonly UnitState[] {
+  const fresh = statesOf(units).filter((s) => !seen.includes(s));
+  return fresh.length ? [...seen, ...fresh] : seen;
+}
 
 // ── empty (rules/ui → Conventions 15) ───────────────────────────────────────────────────────────
 
@@ -132,23 +140,8 @@ export function launchRows(run: Pick<Run, "launches" | "running">, unit: Pick<Un
 
 // ── checks ──────────────────────────────────────────────────────────────────────────────────────
 
-/** A check as fsl.mjs records it in run.json (`units[].checks`, one line of `units/<id>/*.lines`). */
-export interface UnitCheck {
-  file: string;
-  n: number | null;
-  label: string | null;
-  exit: number | null;
-  line: string | null;
-  seconds?: number | null;
-  startedAt?: string | null;
-  endedAt?: string | null;
-}
-
 /** The unit's checks when the model carries them; null while it does not (Conventions 4: «не записано»). */
-export function checksOf(unit: Unit): readonly UnitCheck[] | null {
-  const raw = (unit as Unit & { checks?: unknown }).checks;
-  return Array.isArray(raw) ? (raw as UnitCheck[]) : null;
-}
+export const checksOf = (unit: Pick<Unit, "checks">): readonly UnitCheck[] | null => unit.checks ?? null;
 
 export interface CheckLine {
   label: string;

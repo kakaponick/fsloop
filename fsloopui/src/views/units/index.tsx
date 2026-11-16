@@ -11,6 +11,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { UNIT_STATE, type UnitState } from "../../../shared/states.ts";
 import { NOUNS } from "../../../shared/text.ts";
+import { cn } from "@/lib/utils";
 import { CountLink, Dot, NotFound, type HeldNoun } from "@/ui";
 import { copyAction, DataTable, type RowAction } from "@/table";
 // From the files, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
@@ -23,15 +24,11 @@ import type { LoadedRun, ViewProps } from "../index.ts";
 import { COLUMNS } from "./columns.tsx";
 import { UnitDetail } from "./detail.tsx";
 import { useUnitMarks } from "./marks.ts";
-import { checksOf, DEFAULT_SORT, emptyFor, filtersFor, SEARCH, statesOf, unitRows, unitsFailure, UNITS_TABLE, type UnitRow } from "./query.ts";
+import { checksOf, DEFAULT_SORT, emptyFor, filtersFor, SEARCH, statesOf, stripStates, unitRows, unitsFailure, UNITS_TABLE, type UnitRow } from "./query.ts";
 import {
   CANDIDATES,
   CANDIDATES_TITLE,
   CANDIDATES_WIDEST,
-  NO_BRIEF,
-  NO_COMMIT,
-  NO_FINDINGS,
-  NO_TREE,
   NOT_FOUND_NEXT,
   OPEN_FINDINGS,
   tableLabel,
@@ -85,8 +82,15 @@ function ToolbarFacts({ run }: { run: LoadedRun }) {
   );
 }
 
-/** The counts strip (table #8): a dot, the state and its count for every state the run's units are in, each count in
- * a three-digit box; a state the filters leave empty reads a muted 0, so the strip keeps its entries. */
+/** The status bar's order on this view (rules/ui → Strict 1): «N юнитов» first and the counts strip after it, so a
+ * state a live change brings appends at the strip's end and moves nothing; the selection's reserved place and the
+ * data's age stay packed at the right end, apart from the strip's width. The slots are the status bar's own. */
+export const BAR_ORDER =
+  "[&_[data-slot=status-bar]>[data-slot=counts-strip]]:order-1 [&_[data-slot=status-bar]>[data-slot=selected]]:order-2 [&_[data-slot=status-bar]>[data-slot=selected]]:ml-auto [&_[data-slot=status-bar]>[data-slot=age]]:order-3 [&_[data-slot=status-bar]>[data-slot=age]]:ml-0";
+
+/** The counts strip (table #8): a dot, the state and its count for every state the run's units have been in since
+ * the view opened, each count in a three-digit box; a state the filters or a live change leave empty reads a muted
+ * 0, so the strip keeps its entries in their places. */
 function UnitCounts({ rows, states }: { rows: readonly UnitRow[]; states: readonly UnitState[] }) {
   const by = new Map<UnitState, number>();
   for (const r of rows) by.set(r.state, (by.get(r.state) ?? 0) + 1);
@@ -112,7 +116,10 @@ function Units({ run }: { run: LoadedRun }) {
   const rows = useMemo(() => unitRows(run), [run]);
   const filters = useMemo(() => filtersFor(run), [run]);
   const empty = useMemo(() => emptyFor(run), [run]);
-  const states = useMemo(() => statesOf(run.units), [run.units]);
+  // the strip's entries: the states of the first read in the map's order, then each new one at the end (Strict 1)
+  const [seen, setSeen] = useState(() => statesOf(run.units));
+  const states = stripStates(seen, run.units);
+  if (states !== seen) setSeen([...states]);
   const failure = unitsFailure(run);
 
   // ── the URL: the open unit ─────────────────────────────────────────────────────────────────────
@@ -151,15 +158,16 @@ function Units({ run }: { run: LoadedRun }) {
         label: OPEN_FINDINGS,
         scope: "single",
         group: 1,
-        blocked: (rs) => (rs[0] && countFindings(run.findings, { unit: [rs[0].id] }) > 0 ? undefined : NO_FINDINGS),
+        // an item whose object the row lacks is not listed (table #4; the product has no disabled action)
+        hidden: (rs) => !rs[0] || countFindings(run.findings, { unit: [rs[0].id] }) === 0,
         run: (rs) => {
           if (rs[0]) openFindings(run.key, { unit: [rs[0].id] }, navigate);
         },
       },
       copyAction<UnitRow>("copy-id", "id", (u) => u.id, "both", 2),
-      { ...copyAction<UnitRow>("copy-sha", "коммит", (u) => u.sha, "both", 2), blocked: (rs) => (rs.every((u) => !u.sha) ? NO_COMMIT : undefined) },
-      { ...copyAction<UnitRow>("copy-brief", "путь брифа", (u) => u.brief, "both", 2), blocked: (rs) => (rs.every((u) => !u.brief) ? NO_BRIEF : undefined) },
-      { ...copyAction<UnitRow>("copy-tree", "рабочую копию", (u) => u.tree, "both", 2), blocked: (rs) => (rs.every((u) => !u.tree) ? NO_TREE : undefined) },
+      { ...copyAction<UnitRow>("copy-sha", "коммит", (u) => u.sha, "both", 2), hidden: (rs) => rs.every((u) => !u.sha) },
+      { ...copyAction<UnitRow>("copy-brief", "путь брифа", (u) => u.brief, "both", 2), hidden: (rs) => rs.every((u) => !u.brief) },
+      { ...copyAction<UnitRow>("copy-tree", "рабочую копию", (u) => u.tree, "both", 2), hidden: (rs) => rs.every((u) => !u.tree) },
     ],
     [run, navigate],
   );
@@ -167,7 +175,7 @@ function Units({ run }: { run: LoadedRun }) {
   const missing = param !== null && !holds(param) ? param : null;
 
   return (
-    <div data-slot="units-view" className="absolute inset-0 flex flex-col gap-2 px-5 pt-3 pb-1">
+    <div data-slot="units-view" className={cn("absolute inset-0 flex flex-col gap-2 px-5 pt-3 pb-1", BAR_ORDER)}>
       {missing && (
         <p role="status" data-slot="unit-missing" className="m-0 shrink-0">
           <NotFound kind="unit" id={missing} start />

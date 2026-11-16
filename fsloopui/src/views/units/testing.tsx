@@ -59,25 +59,27 @@ export function renderUnits(fx: FixtureApp, runKey: string, path: string) {
   return { ...view, store, probe };
 }
 
-/** The units view over a run object as given, the clock at NOW. */
+/** The units view over a run object as given, the clock at NOW; `rerun` hands it the run's next read, as a live
+ * update does, keeping the mounted view and its state. */
 export function renderRun(fx: FixtureApp, run: LoadedRun, path: string) {
   const store = createLiveStore(fx.transport, { now: () => NOW });
   const { probe, Probe } = probeOf();
-  const view = render(
+  const tree = (r: LoadedRun) => (
     <UiProvider>
       <ClockProvider now={NOW}>
         <LiveProvider store={store}>
           <MemoryRouter initialEntries={[path]}>
             <section data-slot="view-body" className="relative h-[40rem]">
-              <UnitsView run={run} />
+              <UnitsView run={r} />
             </section>
             <Probe />
           </MemoryRouter>
         </LiveProvider>
       </ClockProvider>
-    </UiProvider>,
+    </UiProvider>
   );
-  return { ...view, probe };
+  const view = render(tree(run));
+  return { ...view, probe, rerun: (next: LoadedRun) => view.rerender(tree(next)) };
 }
 
 export { fixtureApp };

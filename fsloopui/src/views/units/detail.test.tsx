@@ -6,13 +6,13 @@ import "../../ui/test-setup.ts";
 import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterAll, describe, expect, test } from "vitest";
-import type { Unit } from "../../../shared/model.ts";
+import type { Unit, UnitCheck } from "../../../shared/model.ts";
 import { UiProvider } from "@/ui";
 import { runPath } from "../../app/routes.ts";
-import { UnitDetail } from "./detail.tsx";
-import { checkGroups, launchRows, type UnitCheck } from "./query.ts";
+import { ROW_TITLE_CHARS, UnitDetail, unitFacts } from "./detail.tsx";
+import { checkGroups, checksOf, launchRows } from "./query.ts";
 import { fixtureApp, keyOf, loadedRun, MIN, NOW } from "./testing.tsx";
-import { attemptsText, checkOutcome, closesTitle, logName } from "./words.ts";
+import { attemptsText, CHECK_HEAD, checkOutcome, closesTitle, LAUNCH_HEAD, logName } from "./words.ts";
 
 const N = 40;
 const fx = fixtureApp({ only: [N] });
@@ -33,6 +33,9 @@ const unit: Unit = {
   closes,
   launches: recorded.map((l) => l.id),
   brief: "units/u3/brief.md",
+  tree: null,
+  sha: null,
+  commits: [],
 };
 const runningStart = new Date(NOW - 12 * MIN).toISOString();
 const run = {
@@ -64,20 +67,60 @@ const mount = (u: Unit = unit, c: readonly UnitCheck[] | null = checks, r = run)
 const section = (title: string | RegExp) => screen.getByRole("heading", { name: title }).closest("section") as HTMLElement;
 
 describe("a unit's detail at the production limits", () => {
-  test("the fact list: the whole 287-character title, the kind not recorded, each unit it waits for with its state, the failed brief", () => {
+  const dts = () => [...(document.querySelector("[data-slot=fact-list]") as HTMLElement).querySelectorAll("dt")];
+  const value = (label: string) => dts().find((d) => d.textContent === label)?.nextElementSibling as HTMLElement;
+
+  test("the fact list: the whole 287-character title the row cuts, the kind not recorded, each unit it waits for with its state, the failed brief — no «—» fact", () => {
     expect(TITLE).toHaveLength(287);
     mount();
-    const facts = document.querySelector("[data-slot=fact-list]") as HTMLElement;
-    expect([...facts.querySelectorAll("dt")].map((d) => d.textContent)).toEqual(["Что делает", "Вид работы", "Ждёт юнитов", "Причина блокировки", "Рабочая копия", "Коммиты", "Бриф юнита"]);
-    const value = (label: string) => [...facts.querySelectorAll("dt")].find((d) => d.textContent === label)?.nextElementSibling as HTMLElement;
+    expect(dts().map((d) => d.textContent)).toEqual(["Что делает", "Вид работы", "Ждёт юнитов", "Бриф юнита"]);
     expect(value("Что делает").textContent).toBe(TITLE);
     expect(value("Вид работы")).toHaveTextContent("не записано");
     expect(within(value("Ждёт юнитов")).getByRole("link", { name: "u23" })).toHaveAttribute("href", runPath(KEY, { view: "units", unit: "u23" }));
     expect(value("Ждёт юнитов")).toHaveTextContent("u23заблокирован");
     expect(value("Ждёт юнитов")).toHaveTextContent("юнит u77 не найден");
-    expect(value("Причина блокировки")).toHaveTextContent("—");
-    expect(value("Рабочая копия")).toHaveTextContent("—");
     expect(value("Бриф юнита")).toHaveTextContent("Бриф units/u3/brief.md не прочитан: файла нет");
+    expect(document.querySelector("[data-slot=fact-list]")).not.toHaveTextContent("—");
+  });
+
+  test("craft-12: only facts the row does not show and that hold for the unit's state", () => {
+    expect(ROW_TITLE_CHARS).toBe(24);
+    // committed, a short title, one commit, no tree: the row says it all but the kind and the brief
+    const done: Unit = { ...unit, state: "committed", title: "part 22", kind: "backend", sha: "c0ffee16", commits: ["c0ffee16"], tree: null, blockedBy: ["u23"], blockedWhy: "stale" };
+    expect(unitFacts(run, done).map((f) => f.label)).toEqual(["Вид работы", "Бриф юнита"]);
+    // blocked, with its cause, its own working copy and commits past the row's one: each is a fact
+    const stuck: Unit = { ...unit, state: "blocked", title: "part 7", blockedBy: [], blockedWhy: "tests stay red", tree: "C:/dev/wt/u24", sha: "c0ffee01", commits: ["c0ffee01", "c0ffee02"] };
+    expect(unitFacts(run, stuck).map((f) => f.label)).toEqual(["Вид работы", "Причина блокировки", "Рабочая копия", "Коммиты", "Бриф юнита"]);
+    // waiting on committed units only: it waits for no one
+    const free: Unit = { ...unit, state: "ready", title: "part 3", blockedBy: run.units.filter((u) => u.state === "committed").slice(0, 2).map((u) => u.id) };
+    expect(unitFacts(run, free).map((f) => f.label)).toEqual(["Вид работы", "Бриф юнита"]);
+    // a title a 24-character floor can cut is given whole; one it cannot is not repeated
+    expect(unitFacts(run, { ...free, title: "x".repeat(25) }).map((f) => f.label)[0]).toBe("Что делает");
+    expect(unitFacts(run, { ...free, title: "x".repeat(24) }).map((f) => f.label)[0]).toBe("Вид работы");
+  });
+
+  test("craft-12: the findings it closes come first, then the facts, the launches, the checks; no scroll of its own", () => {
+    mount();
+    const article = document.querySelector("[data-slot=unit-detail]") as HTMLElement;
+    expect([...article.children].map((c) => (c as HTMLElement).querySelector("h3")?.textContent ?? (c as HTMLElement).dataset.slot)).toEqual(["Закрывает 28 находок", "fact-list", "Запуски агентов", "Проверки юнита"]);
+    expect(article.className).not.toMatch(/max-h|overflow/);
+  });
+
+  test("craft-33: each list opens on one muted header row — the launch's start and the check's end are named", () => {
+    mount();
+    const head = (title: string) => section(title).querySelector("[data-slot=list-head]") as HTMLElement;
+    expect(within(section("Запуски агентов")).getByRole("table", { name: "Запуски агентов" })).toBeInTheDocument();
+    expect(within(head("Запуски агентов")).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Агент и задача", "Модель", "Начало", "Состояние", "Токены"]);
+    expect(within(head("Проверки юнита")).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Проверка", "Итог", "Попытки", "Конец", "Строка лога"]);
+    expect(LAUNCH_HEAD.join(" ").split(" ")).toHaveLength(7);
+    expect(CHECK_HEAD.join(" ").split(" ")).toHaveLength(6);
+    for (const t of ["Запуски агентов", "Проверки юнита"]) {
+      expect(head(t)).toHaveClass("h-7", "text-xs", "text-muted-foreground");
+      // the header and the lines share one grid, so each label stands over its values
+      const line = section(t).querySelector("[data-slot=unit-launch], [data-slot=unit-check]") as HTMLElement;
+      expect([...head(t).classList].filter((c) => c.startsWith("grid-cols-"))).toEqual([...line.classList].filter((c) => c.startsWith("grid-cols-")));
+    }
+    expect(within(section("Проверки юнита")).getAllByRole("rowheader").map((h) => h.textContent)).toEqual(["verify", "land"]);
   });
 
   test("«Закрывает 28 находок»: u4's read-only rows, each linking to its address; the unknown id «не найдена»; no verdict", () => {
@@ -149,10 +192,10 @@ describe("a unit's detail at the production limits", () => {
     expect(facts).toHaveTextContent("units/u3/brief.md");
   });
 
-  test("the detail is a height-capped region that scrolls inside (Layout 6; Strict 1)", () => {
-    mount();
-    const article = document.querySelector("[data-slot=unit-detail]") as HTMLElement;
-    expect(article).toHaveClass("max-h-112", "overflow-y-auto", "[scrollbar-gutter:stable]");
+  test("code-2: the checks are the model's own typed `Unit.checks`, absent while it carries none", () => {
+    expect(checksOf({ checks })).toBe(checks);
+    expect(checksOf({ checks: [] })).toEqual([]);
+    expect(checksOf({})).toBeNull();
   });
 
   test("the words the detail builds, against literals", () => {
