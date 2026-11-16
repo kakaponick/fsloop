@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "../ui/test-setup.ts";
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import { glossaryLines, writePref } from "../ui/index.ts";
@@ -128,10 +128,12 @@ describe("the card's words, built once", () => {
     const silent = { ...calm, project: "shop", id: "37d5a31e", goal: null, recorded: true, closed: false, outcome: null, updatedAt: null, lastWriteAt: "2026-11-16T09:41:00Z" };
     expect(miniDetail(silent, NOW)).toEqual({ tone: "warning", fact: "молчит · 7 ч", text: "молчит · 7 ч" });
     expect(miniDetail(silent, NOW, { lost: true })).toEqual({ tone: "neutral", fact: "нет связи", text: "нет связи" });
-    // p2-verdict craft-2 · «state · age · cause», the cause last, so a narrow row cuts only it (rules/ui → Conventions 1).
+    // p2-verdict craft-2 · «state · age · cause», the cause last, so a narrow row cuts only it (rules/ui → Conventions 1);
+    // p2-verdict-critic-craft-verdict-4#craft-1 · the liveness keeps its own tone, the wait carries the amber of its own.
     const waits = miniDetail({ ...silent, lastWriteAt: iso(NOW - MIN), redGate: { at: "2026-11-16T16:21:00Z", problems: ["x"] }, blocked: [{ id: "u23", why: "y" }] }, NOW);
-    expect(waits).toEqual({ tone: "warning", fact: "работает", text: "работает · красный гейт · заблокирован u23" });
+    expect(waits).toEqual({ tone: "neutral", fact: "работает", waits: "красный гейт · заблокирован u23", text: "работает · красный гейт · заблокирован u23" });
     expect(words(waits.text)).toBe(7);
+    expect(miniDetail({ ...silent, redGate: { at: "2026-11-16T16:21:00Z", problems: ["x"] } }, NOW)).toEqual({ tone: "warning", fact: "молчит · 7 ч", waits: "красный гейт", text: "молчит · 7 ч · красный гейт" });
     expect(miniDetail({ ...calm, recorded: false, closed: null, outcome: null, updatedAt: null, lastWriteAt: "2026-11-13T16:41:00Z" }, NOW)).toEqual({ tone: "neutral", fact: "не записано", text: "не записано: в папке нет run.json" });
     // The title keeps the whole: the time the face drops, and «новое», which has no column of its own.
     const title = miniTitle(silent, "молчит · 7 ч", NOW, true);
@@ -140,15 +142,16 @@ describe("the card's words, built once", () => {
     expect(miniTitle(closed, "цель достигнута · коммиты отправлены", NOW, false)).toBe("shop · 1a2b3c4d · цель достигнута · коммиты отправлены · закрыт 15.11 23:40 МСК");
     // p1-review cand-3 · a closed run's row tells itself apart by its date and its goal's first words, on its second
     // line; p2-verdict craft-2 · unpushed commits open it (a pushed run's push is in the title), the moment compact
-    // (rules/ui → Conventions 10), the goal last.
+    // (rules/ui → Conventions 10), the goal last; p2-verdict-critic-craft-verdict-4#craft-2 · no «закрыт», which the
+    // fold «Закрытые» already says.
     const line = closedLine({ ...closed, outcome: { pushed: false, goalMet: false, held: [] } }, NOW);
-    expect(line).toBe("коммиты не отправлены · закрыт 20 ч назад · Run 0: bring the «a» and «b» pages to the law. Keep every fact.");
-    expect(words(line)).toBe(23);
-    expect(closedLine(closed, NOW)).toBe("закрыт 20 ч назад · Run 0: bring the «a» and «b» pages to the law. Keep every fact.");
-    expect(closedLine({ ...closed, outcome: { pushed: false, goalMet: false, held: [] }, goal: null }, NOW)).toBe("коммиты не отправлены · закрыт 20 ч назад");
+    expect(line).toBe("коммиты не отправлены · 20 ч назад · Run 0: bring the «a» and «b» pages to the law. Keep every fact.");
+    expect(words(line)).toBe(22);
+    expect(closedLine(closed, NOW)).toBe("20 ч назад · Run 0: bring the «a» and «b» pages to the law. Keep every fact.");
+    expect(closedLine({ ...closed, outcome: { pushed: false, goalMet: false, held: [] }, goal: null }, NOW)).toBe("коммиты не отправлены · 20 ч назад");
     // A run whose goal was never judged reads its push on the first line: the second does not repeat it.
-    expect(closedLine({ ...closed, outcome: { pushed: true, goalMet: null, held: [] } }, NOW)).toBe("закрыт 20 ч назад · Run 0: bring the «a» and «b» pages to the law. Keep every fact.");
-    expect(closedLine({ ...closed, outcome: null, goal: null }, NOW)).toBe("закрыт 20 ч назад");
+    expect(closedLine({ ...closed, outcome: { pushed: true, goalMet: null, held: [] } }, NOW)).toBe("20 ч назад · Run 0: bring the «a» and «b» pages to the law. Keep every fact.");
+    expect(closedLine({ ...closed, outcome: null, goal: null }, NOW)).toBe("20 ч назад");
   });
 
   test("p1-review cand-3 · the sidebar's search: every word in the project, the id or the goal", () => {
@@ -175,6 +178,26 @@ describe("the sidebar over the fixture root of 63", () => {
   const sidebar = () => screen.getByRole("complementary", { name: "Прогоны" });
   const cards = () => [...sidebar().querySelectorAll<HTMLAnchorElement>("[data-slot=run-card]")];
   const ready = async () => within(sidebar()).findByText("3 прогона идут");
+  /** Every run under `project`; every open run held by a red gate and two blocked units; every closed run at its widest
+   * outcome: goal not met, commits not pushed. `goals` gets each run's goal by its row's address. */
+  const answerWidest = (project: string, goals = new Map<string, string | null>()) =>
+    fx.answer((path) =>
+      path === "/api/runs"
+        ? fx.app.handle(new Request(`http://127.0.0.1${path}`)).then(async (res) => {
+            const body = (await res.json()) as { list: Record<string, unknown>[] };
+            body.list = body.list.map((c) => {
+              goals.set(`/r/${String(c.key)}`, (c.goal as string | null) ?? null);
+              return {
+                ...c,
+                project,
+                ...(c.closed === false ? { redGate: { at: "2026-11-16T16:21:00Z", problems: ["p2-assess-critic-code#code-2 has no decision row"] }, blocked: [{ id: "u23", why: null }, { id: "u7", why: null }] } : {}),
+                ...(c.closed === true ? { outcome: { pushed: false, goalMet: false, held: [] } } : {}),
+              };
+            });
+            return json(200, body);
+          })
+        : null,
+    );
 
   test("first load: «Загрузка…» with a spinner in the list's region, already at its size", async () => {
     let release!: () => void;
@@ -351,22 +374,7 @@ describe("the sidebar over the fixture root of 63", () => {
     const PROJECTS = ["db.ren.net", "fsloop", "max-auto", "tga", "tgtrigger"];
     const widest = PROJECTS.reduce((a, b) => (textWidth(b, { weight: 600 }) > textWidth(a, { weight: 600 }) ? b : a));
     expect(widest).toBe("db.ren.net");
-    // Every run under that name; every open run held by a red gate and two blocked units; every closed run at its
-    // widest outcome: goal not met, commits not pushed.
-    fx.answer((path) =>
-      path === "/api/runs"
-        ? fx.app.handle(new Request(`http://127.0.0.1${path}`)).then(async (res) => {
-            const body = (await res.json()) as { list: Record<string, unknown>[] };
-            body.list = body.list.map((c) => ({
-              ...c,
-              project: widest,
-              ...(c.closed === false ? { redGate: { at: "2026-11-16T16:21:00Z", problems: ["p2-assess-critic-code#code-2 has no decision row"] }, blocked: [{ id: "u23", why: null }, { id: "u7", why: null }] } : {}),
-              ...(c.closed === true ? { outcome: { pushed: false, goalMet: false, held: [] } } : {}),
-            }));
-            return json(200, body);
-          })
-        : null,
-    );
+    answerWidest(widest);
     renderShell(fx.transport, { path: `/r/${keyOf(0)}` });
     await within(sidebar()).findByText("3 прогона идут");
     await user.click(within(sidebar()).getByRole("button", { name: "Закрытые · 53" }));
@@ -393,6 +401,75 @@ describe("the sidebar over the fixture root of 63", () => {
       const fact = text.querySelector("[data-slot=mini-fact]") as HTMLElement;
       // The words' box clips what overflows it: the fact must fit in the box the state leaves it, not only keep its width.
       expect(flexRow(state, sizes.get(state) as number).get(text), `${row.title}: the state is cut`).toBeGreaterThanOrEqual(contentWidth(fact));
+    }
+  });
+
+  test("p2-verdict-critic-craft-verdict-4#craft-1 · a waiting mini row: the liveness on its own dot, as the run header's «Активность» reads it, the wait on its amber dot where it begins; the row stays one 32 px line", async () => {
+    renderShell(fx.transport, { path: "/r/admin/a5b5ec85", wide: false });
+    await ready();
+    const row = sidebar().querySelector('[data-slot=mini-row][href="/r/admin/a5b5ec85"]') as HTMLElement;
+    const state = row.querySelector("[data-slot=mini-state]") as HTMLElement;
+    expect(state).toHaveTextContent(/^работает · красный гейт · заблокирован u23$/);
+    // Each dot is the tone of the word beside it: the liveness's, then the wait's.
+    const dots = [...state.querySelectorAll("[data-slot=dot]")];
+    expect(dots.map((d) => d.getAttribute("data-tone"))).toEqual(["neutral", "warning"]);
+    expect(dots[0].nextElementSibling?.firstElementChild).toHaveTextContent(/^работает$/);
+    expect(dots[1].nextElementSibling).toHaveTextContent(/^красный гейт · заблокирован u23$/);
+    // The run header on the same page reads the same liveness on the same tone.
+    const activity = () => [...document.querySelectorAll("dt")].find((dt) => dt.textContent === "Активность");
+    await waitFor(() => expect(activity()).toBeDefined());
+    const value = activity()?.nextElementSibling as HTMLElement;
+    expect(value.querySelector("[data-slot=status-dot]")?.textContent).toMatch(/^работает · /);
+    expect(value.querySelector("[data-slot=dot]")).toHaveAttribute("data-tone", dots[0].getAttribute("data-tone"));
+    // The second dot takes its place in the row's one line: the band's row is still 32 px, its line never wraps.
+    await applyStylesheet();
+    expect(usedBlockSize(row)).toBe(32);
+    expect(getComputedStyle(row.querySelector("[data-slot=mini-line]") as HTMLElement).flexWrap).toBe("nowrap");
+  });
+
+  test("p2-verdict-critic-craft-verdict-4#craft-1, #craft-2 · at the 316 px sidebar a waiting mini row keeps the wait's « ·» and amber dot whole after its liveness, the cut only on the cause's tail; an unpushed closed row keeps at least its goal's first word whole on its second line", async () => {
+    const user = userEvent.setup();
+    const goals = new Map<string, string | null>();
+    answerWidest("db.ren.net", goals);
+    renderShell(fx.transport, { path: `/r/${keyOf(0)}` });
+    await ready();
+    await user.click(within(sidebar()).getByRole("button", { name: "Закрытые · 53" }));
+    await applyStylesheet();
+    const rows = [...sidebar().querySelectorAll<HTMLElement>("[data-slot=mini-row]")];
+    const waiting = rows.filter((r) => r.querySelector("[data-slot=mini-waits]"));
+    expect(waiting).toHaveLength(4);
+    for (const row of waiting) {
+      const line = row.querySelector("[data-slot=mini-line]") as HTMLElement;
+      const state = line.querySelector("[data-slot=mini-state]") as HTMLElement;
+      const text = state.querySelector("[data-slot=mini-text]") as HTMLElement;
+      const wait = text.querySelector("[data-slot=mini-waits]") as HTMLElement;
+      const [sep, dot, cause] = [...wait.children];
+      expect(dot).toHaveAttribute("data-tone", "warning");
+      expect(getComputedStyle(dot).width).toBe("7px");
+      const stateSize = flexRow(line, innerWidth(line, sidebar(), 316)).get(state) as number;
+      const textSize = flexRow(state, stateSize).get(text) as number;
+      const parts = flexRow(wait, flexRow(text, textSize).get(wait) as number);
+      expect(parts.get(sep), `${row.title}: the « ·» before the wait is cut`).toBeGreaterThanOrEqual(contentWidth(sep));
+      expect(parts.get(dot), `${row.title}: the wait's dot is cut`).toBe(7);
+      // Only the cause's words give way, at their end.
+      expect(cause).toHaveAttribute("data-slot", "mini-cause");
+      expect(getComputedStyle(cause).textOverflow).toBe("ellipsis");
+      expect(getComputedStyle(sep).flexShrink).toBe("0");
+    }
+    const closed = rows.filter((r) => r.querySelector("[data-slot=mini-goal]"));
+    expect(closed).toHaveLength(53);
+    for (const row of closed) {
+      const second = row.querySelector("[data-slot=mini-goal]") as HTMLElement;
+      const goal = goals.get(row.getAttribute("href") ?? "");
+      expect(goal, `${row.title}: no goal`).toBeTruthy();
+      const face = second.textContent ?? "";
+      expect(face).toMatch(/^коммиты не отправлены · /);
+      const at = face.indexOf(goal as string);
+      expect(at, `${row.title}: the goal is not on the line`).toBeGreaterThan(0);
+      const first = (goal as string).trim().split(/\s+/)[0];
+      const size = Number.parseFloat(getComputedStyle(second).fontSize);
+      expect(size).toBe(12);
+      expect(textWidth(face.slice(0, at) + first, { size }), `${row.title}: the goal's first word «${first}» is cut`).toBeLessThanOrEqual(innerWidth(second, sidebar(), 316));
     }
   });
 
@@ -433,7 +510,7 @@ describe("the sidebar over the fixture root of 63", () => {
     // p2-verdict craft-2 · the first line the goal's outcome alone, the push on the second, before when and the goal.
     expect(row.querySelector("[data-slot=mini-state]")).toHaveTextContent(/^цель не достигнута$/);
     expect(row).toHaveAccessibleName(`${keyOf(0).replace("/", " · ")} · цель не достигнута · коммиты не отправлены`);
-    expect(row.querySelector("[data-slot=mini-goal]")?.textContent).toMatch(/^коммиты не отправлены · закрыт 9 ч назад · Run 0: bring the /);
+    expect(row.querySelector("[data-slot=mini-goal]")?.textContent).toMatch(/^коммиты не отправлены · 9 ч назад · Run 0: bring the /);
     expect(row.querySelector("[data-slot=mini-goal]")).toHaveClass("truncate");
     await user.click(unrecorded);
     const bare = sidebar().querySelector(`[data-slot=mini-row][href="/r/${keyOf(7)}"]`) as HTMLElement;

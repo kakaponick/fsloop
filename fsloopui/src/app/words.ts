@@ -240,9 +240,12 @@ function outcomeShort(outcome: Outcome | null): { tone: Tone; text: string } {
 type MiniFacts = Pick<RunCard, "recorded" | "closed" | "outcome" | "updatedAt" | "lastWriteAt" | "redGate" | "blocked">;
 
 /** A mini row's state: «state · age · cause» — the fact (`fact`, kept whole) first, what waits after it, so a narrow
- * row cuts only the cause (rules/ui → Conventions 1; p2-verdict craft-2). No clock time: the liveness's age already
- * says when, and the row's title carries the time (craft-4; Conventions 10). */
-export function miniDetail(card: MiniFacts, now: number, { lost = false } = {}): { tone: Tone; fact: string; text: string } {
+ * row cuts only the cause (rules/ui → Conventions 1; p2-verdict craft-2). `tone` is the fact's own: what waits
+ * (`waits`) carries the amber of its own dot where it begins, as the full card's two lines do — «работает» stays as
+ * neutral as the run header's «Активность» (p2-verdict-critic-craft-verdict-4#craft-1). `text` is the whole, for the
+ * row's name and title. No clock time: the liveness's age already says when, and the row's title carries the time
+ * (craft-4; Conventions 10). */
+export function miniDetail(card: MiniFacts, now: number, { lost = false } = {}): { tone: Tone; fact: string; waits?: string; text: string } {
   if (!card.recorded) return { tone: "neutral", fact: NOT_RECORDED, text: NO_RECORD_TEXT };
   if (card.closed) {
     const short = outcomeShort(card.outcome);
@@ -250,7 +253,7 @@ export function miniDetail(card: MiniFacts, now: number, { lost = false } = {}):
   }
   const live = livenessShown(card, now, lost);
   const waits = waitsShort(card);
-  if (waits) return { tone: "warning", fact: live.label, text: `${live.label} · ${waits}` };
+  if (waits) return { tone: live.tone, fact: live.label, waits, text: `${live.label} · ${waits}` };
   return { tone: live.tone, fact: live.label, text: live.label };
 }
 
@@ -267,12 +270,13 @@ export const miniTitle = (card: MiniFacts & Pick<RunCard, "project" | "id">, det
 /** A closed run's second line: commits left unpushed — the exception, what may still be the operator's to do; a pushed
  * run says nothing of it here, its row's title and the run page's «Итог» do — when it closed, compact, the МСК time
  * in the title (rules/ui → Conventions 10), and its goal's first words, what tells one closed run from the next
- * (p1-review cand-3; p2-verdict craft-2): «коммиты не отправлены · закрыт 20 ч назад · Run 24: bring the …». A run
- * with no judged goal has its push on the first line already. */
+ * (p1-review cand-3; p2-verdict craft-2): «коммиты не отправлены · 20 ч назад · Run 24: bring the …». No «закрыт»:
+ * the fold's header «Закрытые» says it, and the room goes to the goal (p2-verdict-critic-craft-verdict-4#craft-2). A
+ * run with no judged goal has its push on the first line already. */
 export const closedLine = (card: Pick<RunCard, "updatedAt" | "lastWriteAt" | "goal" | "outcome">, now: number): string => {
   const at = card.updatedAt ?? card.lastWriteAt;
   const unpushed = card.outcome && card.outcome.goalMet !== null && !card.outcome.pushed ? NOT_PUSHED : null;
-  return [unpushed, at ? `закрыт ${ago(at, now)}` : null, card.goal].filter(Boolean).join(" · ");
+  return [unpushed, at ? ago(at, now) : null, card.goal].filter(Boolean).join(" · ");
 };
 
 /** The sidebar's search: the fields it looks in, named in its placeholder (table #12). */

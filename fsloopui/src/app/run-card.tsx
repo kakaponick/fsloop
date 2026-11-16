@@ -166,19 +166,20 @@ export function RunCardItem({ card, now, lost, current, fresh, gone }: RunItemPr
 
 /** A run in a fold or in the narrow band: one line — project · id · its state. The project and the id keep their
  * words: the project gives way only past a third of the line, an outlier name; the state keeps its fact — the
- * liveness, the outcome — and what waits after it is the cause, cut at its end (rules/ui → Conventions 1, Tables 5;
- * p2-verdict craft-2). No clock time beside an age and no «новое» column, both in its name and title, «новое» also the
+ * liveness, the outcome — on the dot of its own tone, and what waits after it is the cause, on its own amber dot, cut
+ * at its end (rules/ui → Conventions 1, Tables 5; p2-verdict craft-2; p2-verdict-critic-craft-verdict-4#craft-1). No clock time beside an age and no «новое» column, both in its name and title, «новое» also the
  * inset edge mark, which moves nothing (craft-4). A closed run takes a second reserved line: the push, when it closed
  * and its goal's first words, what tells one closed run from the next (p1-review cand-3) — in the narrow band
  * (`oneLine`), where every row is one 32 px line so the band's scroll never slices one (cand-10), that line follows
  * its state as its cause. Its height comes from whether the run is closed, never from a live change of its words
  * (Strict 1). */
 export function MiniRow({ card, now, lost, current, fresh, gone, oneLine = false }: RunItemProps & { oneLine?: boolean }) {
-  const detail = gone ? { tone: "neutral" as const, fact: VANISHED, text: VANISHED } : miniDetail(card, now, { lost });
+  const detail: ReturnType<typeof miniDetail> = gone ? { tone: "neutral", fact: VANISHED, text: VANISHED } : miniDetail(card, now, { lost });
   const mark = fresh && !gone;
   const closed = card.closed === true;
   const second = closed && !oneLine;
-  const cause = closed && oneLine ? ` · ${closedLine(card, now)}` : detail.text.slice(detail.fact.length);
+  const waits = detail.waits;
+  const cause = closed && oneLine ? ` · ${closedLine(card, now)}` : waits ? "" : detail.text.slice(detail.fact.length);
   // The name and the title say the whole state: a closed run's outcome with its push.
   const whole = closed && !gone ? outcomeLine(card.outcome).text : detail.text;
   return (
@@ -213,6 +214,18 @@ export function MiniRow({ card, now, lost, current, fresh, gone, oneLine = false
               <span data-slot="mini-fact" className="shrink-0 whitespace-pre">
                 {detail.fact}
               </span>
+              {/* What waits on its own amber dot where it begins, as the full card's «Ждёт вас» line: the liveness keeps
+                  its own tone (p2-verdict-critic-craft-verdict-4#craft-1). The « ·» and the dot keep their place; only
+                  the cause's words give way, at their end. */}
+              {waits && (
+                <span data-slot="mini-waits" className="flex min-w-0 items-baseline">
+                  <span className="shrink-0 whitespace-pre">{" · "}</span>
+                  <Dot tone="warning" className="mr-1.5 self-center" />
+                  <span data-slot="mini-cause" className="min-w-0 overflow-hidden text-ellipsis whitespace-pre text-foreground">
+                    {waits}
+                  </span>
+                </span>
+              )}
               {cause && (
                 <span data-slot="mini-cause" className={cn("min-w-0 overflow-hidden text-ellipsis whitespace-pre", closed && "text-muted-foreground")}>
                   {cause}
