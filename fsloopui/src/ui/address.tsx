@@ -5,6 +5,7 @@
 import type { MouseEvent, ReactElement, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { NUMBERED, numberText, OBJECT_WORDS, type NumberedKind } from "./absent.tsx";
+import { LINK_LOOK } from "./link-button.tsx";
 import { copyItem, Menu, type MenuHeader } from "./menu.tsx";
 
 /** What the copy names: «адрес решения», «адрес соглашения» — the menu's item and its toast alike. */
@@ -41,7 +42,7 @@ export function AddressLink({ kind, id, href, onOpen, children, className }: Add
     onOpen();
   };
   return (
-    <a data-slot="address-link" href={href} aria-label={addressLabel(kind, id)} onClick={click} className={cn("tabular-nums underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground", className)}>
+    <a data-slot="address-link" href={href} aria-label={addressLabel(kind, id)} onClick={click} className={cn("tabular-nums", LINK_LOOK, className)}>
       {children ?? numberText(kind, id)}
     </a>
   );

@@ -11,6 +11,14 @@ export const SECTION = {
   checks: "Проверки юнита",
 } as const;
 
+/** A section with nothing to list says so on its one muted line, never a heading over a lone «—» — as a unit that
+ * closes nothing reads «Не закрывает ни одной находки» (DESIGN.md → Fact List; p3-verdict-critic-craft-verdict-2#craft-3).
+ * True in every state: a launch or a check that arrives later waits in the line's strip. */
+export const SECTION_NONE = {
+  launches: "Запусков агентов не было",
+  checks: "Проверок юнита не было",
+} as const;
+
 /** A committed unit's launches and checks behind one «Подробнее» (ux 9 → Provenance): the fold's name for assistive
  * technology, and its storage key. */
 export const PROVENANCE_LABEL = "Запуски агентов и проверки юнита";

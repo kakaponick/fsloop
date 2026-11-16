@@ -234,14 +234,24 @@ describe("the task walk (surfaces/reading.md → WALK «Отчёты»)", () => 
     expect(pickerLabel(railItems(over).find((i) => i.id === own[0].id) as RailItem, itemState(railItems(over).find((i) => i.id === own[0].id) as RailItem, over.findings, NOW))).toMatch(/· итог: done/);
   });
 
-  test("improve-10 (4), design-6: the rail's scroller pads its top by the sticky heading's height; a report revealed above it lands under the heading, 8 px clear", async () => {
+  test("improve-10 (4), design-6, p3-verdict-critic-craft-verdict-2#craft-2: the rail rests only on a report's top at its group head's foot; a report revealed above it lands there whole", async () => {
     renderOver(fx, run, reportsPath(), ReportsView);
     const scroller = document.querySelector("[data-slot=rail-scroll]") as HTMLElement;
-    const heading = document.querySelector("[data-slot=rail-heading]") as HTMLElement;
+    // taken before the stylesheet, which hides the rail in jsdom's container of no width
+    const groups = new Map(["карта, проход 1", "юниты в работе, проход 1"].map((name) => [name, screen.getByRole("region", { name }) as HTMLElement]));
+    const head = (name: string) => groups.get(name)?.querySelector("[data-slot=rail-head]") as HTMLElement;
+    const first = (name: string) => groups.get(name)?.querySelector("[data-flat-item]") as HTMLElement;
     await applyStylesheet();
-    // ↑/↓ move focus through the browser, which keeps a focused item below the scroll padding
-    expect(getComputedStyle(heading).height).toBe("28px");
-    expect(getComputedStyle(scroller).scrollPaddingTop).toBe(getComputedStyle(heading).height);
+    // craft-2: every resting stop of the rail is a report's top — the scroll snaps, each report its own stop
+    expect(getComputedStyle(scroller).getPropertyValue("scroll-snap-type")).toBe("y mandatory");
+    for (const a of railLinks()) expect(getComputedStyle(a).getPropertyValue("scroll-snap-align")).toBe("start");
+    // the stop sits at the group head's foot: the scroller pads its top by the 28 px heading (↑/↓ keep a focused item
+    // below it too), and a report under a result line adds the line's 20 px as its own margin — 48, the head's height
+    expect(usedBlockSize(head("карта, проход 1"))).toBe(28);
+    expect(getComputedStyle(scroller).scrollPaddingTop).toBe("28px");
+    expect(getComputedStyle(first("карта, проход 1")).getPropertyValue("scroll-margin-top") || "0px").toBe("0px");
+    expect(usedBlockSize(head("юниты в работе, проход 1"))).toBe(48);
+    expect(getComputedStyle(first("юниты в работе, проход 1")).getPropertyValue("scroll-margin-top")).toBe("20px");
     cleanup();
     // jsdom lays nothing out: the rail's box 100 px down, 400 px high, each item 44 px under the one before it
     const target = "p1-units-u10-implement";
@@ -263,8 +273,9 @@ describe("the task walk (surfaces/reading.md → WALK «Отчёты»)", () => 
         act(() => void (box.scrollTop = past));
         act(() => void view.probe.navigate?.(reportsPath({ report: target })));
         const top = (railLinks().find((a) => a.dataset.flatItem === target) as HTMLElement).getBoundingClientRect().top;
-        // its top 8 px below the 28 px heading's bottom
-        expect(top - 100).toBe(28 + 8);
+        // craft-2: whole, right at the foot of its group's 48 px head (heading 28 + result line 20) — no strip of the
+        // report above it shows under the head
+        expect(top - 100).toBe(28 + 20);
         act(() => void view.probe.navigate?.(reportsPath()));
       }
     } finally {
@@ -411,15 +422,38 @@ describe("the task walk (surfaces/reading.md → WALK «Отчёты»)", () => 
     expect(document.querySelector("[data-slot=report-rail] [data-slot=rail-overview]")).toHaveFocus();
   });
 
-  test("p3-review-critic-craft-2#craft-9: the sticky stage heading pins at the rail scroller's very top — no padding above it, so no row shows over it", async () => {
+  test("p3-review-critic-craft-2#craft-9: the sticky stage head pins at the rail scroller's very top — no padding above it, so no row shows over it", async () => {
     renderOver(fx, run, reportsPath(), ReportsView);
     const scroller = document.querySelector("[data-slot=rail-scroll]") as HTMLElement;
-    const heading = document.querySelector("[data-slot=rail-heading]") as HTMLElement;
+    const head = document.querySelector("[data-slot=rail-head]") as HTMLElement;
     await applyStylesheet();
     // a sticky box sticks to the scrollport less the scroller's padding: 4 px of padding showed 4 px of a row above it
     expect(getComputedStyle(scroller).paddingTop).toBe("0px");
-    expect(getComputedStyle(heading).position).toBe("sticky");
-    expect(getComputedStyle(heading).top).toBe("0px");
+    expect(head.querySelector("[data-slot=rail-heading]")).not.toBeNull();
+    expect(getComputedStyle(head).position).toBe("sticky");
+    expect(getComputedStyle(head).top).toBe("0px");
+  });
+
+  test("p3-verdict-critic-craft-verdict-2#craft-1: the result a group's implementers share stays in view with its rows — the line is part of the sticky head, one fixed 48 px box", async () => {
+    renderOver(fx, run, reportsPath(), ReportsView);
+    const group = (name: string) => screen.getByRole("region", { name }) as HTMLElement;
+    const units = group("юниты в работе, проход 1");
+    const line = units.querySelector("[data-slot=rail-result]") as HTMLElement;
+    const head = units.querySelector("[data-slot=rail-head]") as HTMLElement;
+    // heading, then the line, both inside the one box that sticks — mid-group, rows u9–u16 keep «итог» in view
+    expect(line.parentElement).toBe(head);
+    expect(head.firstElementChild).toHaveAttribute("data-slot", "rail-heading");
+    expect(head.firstElementChild?.nextElementSibling).toBe(line);
+    const review = group("ревью, проход 1").querySelector("[data-slot=rail-head]") as HTMLElement;
+    await applyStylesheet();
+    expect(getComputedStyle(head).position).toBe("sticky");
+    expect(getComputedStyle(head).top).toBe("0px");
+    // Strict 1: the head's box is fixed — heading 28 + line 20 — whatever the line says
+    expect(usedBlockSize(head)).toBe(48);
+    expect(usedBlockSize(head.firstElementChild as HTMLElement)).toBe(28);
+    expect(usedBlockSize(line)).toBe(20);
+    // a group with no result to share keeps its 28 px head
+    expect(usedBlockSize(review)).toBe(28);
   });
 
   test("p3-review-critic-craft-2#craft-10: the result a group's implementers share is named once, on a reserved line under its heading", async () => {
@@ -635,8 +669,14 @@ describe("u6-shape cand-1: tokens by stage and by agent kind in the overview", (
       renderOver(fx, run, reportsPath({ report: last }), ReportsView);
       const at = [...document.querySelectorAll<HTMLElement>("[data-slot=report-rail] [data-flat-item]")].findIndex((el) => el.dataset.flatItem === last);
       expect(at).toBeGreaterThan(20);
-      // its bottom 8 px above the rail's bottom: (100 + at × 32 + 32) − 500 + 8
-      expect(box().scrollTop).toBe(at * 32 - 360);
+      // in view whole, below its group's head and above the rail's bottom — and the rail rests on a stop: a report's
+      // top right at its group head's foot, 28 px, 48 under a result line (p3-verdict-critic-craft-verdict-2#craft-2)
+      const headOf = (a: HTMLElement) => (a.closest("section")?.querySelector("[data-slot=rail-result]") ? 48 : 28);
+      const own = railLinks().find((a) => a.dataset.flatItem === last) as HTMLElement;
+      expect(own.getBoundingClientRect().bottom).toBeLessThanOrEqual(500);
+      expect(own.getBoundingClientRect().top - 100).toBeGreaterThanOrEqual(headOf(own));
+      expect(box().scrollTop).toBeGreaterThan(0);
+      expect(railLinks().filter((a) => a.getBoundingClientRect().top - 100 === headOf(a))).toHaveLength(1);
       expect((document.querySelector("[data-slot=view-body]") as HTMLElement).scrollTop).toBe(0);
       expect(into).not.toHaveBeenCalled();
       // the cause of the journal's 48 px: a scroller that is not the containing block of an sr-only deep in it

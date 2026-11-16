@@ -7,13 +7,12 @@
 // «Ещё N». Bodies are running text at the reading measure, each critic's part led by what it holds; ids in them are
 // links; the findings are compact rows that expand in place (craft-13: the product first, in the first viewport).
 import { ChevronDownIcon, ChevronUpIcon, CopyIcon } from "lucide-react";
-import { useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { Finding, Launch } from "../../../shared/model.ts";
 import { launchState, NOT_RECORDED, reportWord, SEVERITY, stageOf } from "../../../shared/states.ts";
 import { ago, count, duration, mskDateTime, mskTime, NOUNS, num, tokens } from "../../../shared/text.ts";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { frameSrc } from "@/api";
 import { shownText } from "@/table";
 import {
@@ -27,6 +26,7 @@ import {
   FactList,
   FrameStrip,
   Hint,
+  LinkButton,
   Loading,
   NotRecorded,
   parseBlocks,
@@ -96,18 +96,10 @@ export const SEVERITY_LABEL = "Серьёзность находок";
 export const SHOW_ALL = "показать все";
 const SHOWN_SEP = " · ";
 /** What a chosen severity hides, beside the filter (improve-2 (3), design-9): the status bar's one form, then the
- * verb of the click — «5 из 30 находок · показать все»; the line renders its parts, the count and the verb's button
- * (code-9). */
-export function severityShown(shown: number, total: number): { count: string; verb: string; text: string } {
-  const count = shownText(shown, total, NOUNS.finding);
-  return { count, verb: SHOW_ALL, text: `${count}${SHOWN_SEP}${SHOW_ALL}` };
-}
-
-/** A button that reads as a link — the reader's jumps (the outline, «Расход токенов») and «показать все»: underlined
- * like every link (`LINK_CLASS`, DESIGN.md → Object Address), not on hover alone (craft-13); the size is the text's
- * around it. */
-export function LinkButton({ className, ...props }: ComponentProps<typeof Button>) {
-  return <Button variant="link" size="xs" className={cn("h-auto px-0 font-normal", LINK_CLASS, className)} {...props} />;
+ * verb of the click — «5 из 30 находок · показать все». The parts alone: the line joins them, the count, the
+ * separator and the verb's button (code-9; p3-verdict-critic-code-verdict-2#code-1). */
+export function severityShown(shown: number, total: number): { count: string; verb: string } {
+  return { count: shownText(shown, total, NOUNS.finding), verb: SHOW_ALL };
 }
 
 /** The report file's full path: the run folder joined with the launch's relative report path. */
@@ -509,7 +501,7 @@ function Body({ run, launch: l, tab, findings, earlier, frames, framesTitle, now
               const c = conventions.find((own) => own.text === x);
               return (
                 <li key={i} className="flex min-w-0 items-baseline gap-2">
-                  <span className="w-[3ch] shrink-0 text-right text-muted-foreground tabular-nums">
+                  <span className="min-w-count shrink-0 text-right text-muted-foreground tabular-nums">
                     {c ? (
                       <Link to={runPath(run.key, { view: "conventions", convention: String(c.n) })} aria-label={conventionLinkLabel(c.n)} className={LINK_CLASS}>
                         {c.n}

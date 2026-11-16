@@ -16,8 +16,7 @@ import { LIVENESS, type LivenessValue } from "../../shared/liveness.ts";
 import type { RunCard } from "../../shared/model.ts";
 import { NOT_RECORDED } from "../../shared/states.ts";
 import { duration, mskDateTime, mskTime } from "../../shared/text.ts";
-import { Button } from "@/components/ui/button";
-import { COLLAPSE, Dash, Dot, glossaryFrom, NotRecorded, RunningText, StatusDot, type Fact } from "../ui/index.ts";
+import { COLLAPSE, Dash, Dot, glossaryFrom, LinkButton, NotRecorded, RunningText, StatusDot, type Fact } from "../ui/index.ts";
 import type { LoadedRun } from "../views/index.ts";
 import { cn } from "@/lib/utils";
 import { resolverFor, routerLink } from "./links.tsx";
@@ -211,9 +210,9 @@ function HeldBox({ slot, what, children }: { slot: string; what: string; childre
         )}
       </div>
       {open && (
-        <Button variant="link" size="xs" className="h-lh px-0 text-muted-foreground" aria-expanded="true" aria-label={`Свернуть ${what}`} onClick={foldBack}>
+        <LinkButton className="h-lh text-muted-foreground" aria-expanded="true" aria-label={`Свернуть ${what}`} onClick={foldBack}>
           {COLLAPSE}
-        </Button>
+        </LinkButton>
       )}
     </>
   );

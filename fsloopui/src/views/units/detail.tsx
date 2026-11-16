@@ -20,7 +20,7 @@ import { ObjectLink } from "../../app/links.tsx";
 import { TITLE_MIN } from "./columns.tsx";
 import { useHeld } from "./held.ts";
 import { briefFailure, checkGroups, closingIds, launchRows, type CheckLine } from "./query.ts";
-import { attemptsText, briefPart, CHECK_HEAD, closesTitle, FACT, HELD_NOUN, LAUNCH_HEAD, LAUNCH_STATE_GLOSSARY, LOG_LINE_GLOSSARY, LOG_WORD, PROVENANCE_FOLD, PROVENANCE_LABEL, SECTION } from "./words.ts";
+import { attemptsText, briefPart, CHECK_HEAD, closesTitle, FACT, HELD_NOUN, LAUNCH_HEAD, LAUNCH_STATE_GLOSSARY, LOG_LINE_GLOSSARY, LOG_WORD, PROVENANCE_FOLD, PROVENANCE_LABEL, SECTION, SECTION_NONE } from "./words.ts";
 
 type DetailRun = Pick<Run, "id" | "units" | "findings" | "launches" | "running" | "journal" | "errors"> & { key: string };
 
@@ -196,19 +196,20 @@ function LaunchLine({ run, row, now }: { run: DetailRun; row: ReturnType<typeof 
   );
 }
 
+/** «Запуски агентов»: one header row, then a line per launch; none reads «Запусков агентов не было» on the section's
+ * one muted line (craft-3). */
 function Launches({ run, unit, now, id }: { run: DetailRun; unit: Unit; now: number; id: string }) {
   const held = useHeld(launchRows(run, unit), (r) => r.key);
+  const none = held.shown.length === 0;
   return (
-    <Section title={SECTION.launches} id={id} strip={<SectionStrip fresh={held.fresh} noun={HELD_NOUN.launch} onApply={held.apply} />}>
-      {held.shown.length ? (
+    <Section title={none ? SECTION_NONE.launches : SECTION.launches} id={id} quiet={none} strip={<SectionStrip fresh={held.fresh} noun={HELD_NOUN.launch} onApply={held.apply} />}>
+      {!none && (
         <div role="table" aria-labelledby={id} data-slot="unit-launches" className="flex flex-col">
           <HeadRow grid={LAUNCH_GRID} labels={LAUNCH_HEAD} end={LAUNCH_HEAD.length - 1} glossary={LAUNCH_GLOSSARY} />
           {held.shown.map((row) => (
             <LaunchLine key={row.key} run={run} row={row} now={now} />
           ))}
         </div>
-      ) : (
-        <Dash />
       )}
     </Section>
   );
@@ -222,7 +223,8 @@ interface LoggedCheck {
 
 /** «Проверки»: one header row, then each log as «лог verify» with its labels, each once with its last outcome and «N
  * попыток»; the log line as fsloop wrote it, in mono — never rewritten into a duration; an empty cell is the shared
- * «—». A failed exit is neutral unless the unit is blocked (Conventions 2). */
+ * «—». A failed exit is neutral unless the unit is blocked (Conventions 2). No check reads «Проверок юнита не было» on
+ * the section's one muted line (craft-3); checks the model does not carry keep the heading over «не записано». */
 function Checks({ unit, checks, now, id }: { unit: Unit; checks: readonly UnitCheck[] | null; now: number; id: string }) {
   const lines: LoggedCheck[] = checks ? checkGroups(checks).flatMap((g) => g.lines.map((line) => ({ log: g.log, line }))) : [];
   const held = useHeld(lines, (c) => `${c.log}\u0000${c.line.label}`);
@@ -233,11 +235,12 @@ function Checks({ unit, checks, now, id }: { unit: Unit; checks: readonly UnitCh
     if (group) group.lines.push(c.line);
     else groups.push({ log: c.log, lines: [c.line] });
   }
+  const none = checks !== null && groups.length === 0;
   return (
-    <Section title={SECTION.checks} id={id} strip={<SectionStrip fresh={held.fresh} noun={HELD_NOUN.check} onApply={held.apply} />}>
+    <Section title={none ? SECTION_NONE.checks : SECTION.checks} id={id} quiet={none} strip={<SectionStrip fresh={held.fresh} noun={HELD_NOUN.check} onApply={held.apply} />}>
       {!checks ? (
         <NotRecorded />
-      ) : groups.length ? (
+      ) : none ? null : (
         <div role="table" aria-labelledby={id} data-slot="unit-checks" className="flex flex-col">
           <HeadRow grid={CHECK_GRID} labels={CHECK_HEAD} glossary={CHECK_GLOSSARY} />
           {groups.map((g) => (
@@ -273,8 +276,6 @@ function Checks({ unit, checks, now, id }: { unit: Unit; checks: readonly UnitCh
             </div>
           ))}
         </div>
-      ) : (
-        <Dash />
       )}
     </Section>
   );

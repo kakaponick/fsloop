@@ -34,6 +34,7 @@ import {
   Hint,
   InView,
   Keys,
+  LinkButton,
   Loading,
   markProps,
   Menu,
@@ -251,6 +252,20 @@ function TextSection() {
           </Clamp>
         </Case>
       </div>
+      <Case label="Кнопка-ссылка (LinkButton): действие, которое не уводит со страницы, где она стоит, — подчёркнута всегда, а не только под курсором, как любая ссылка; размер и цвет — от текста вокруг">
+        <p className="m-0 text-sm">
+          <LinkButton className="text-sm" onClick={() => notify.success("Переход к «Расходу токенов»")}>
+            Расход токенов
+          </LinkButton>
+          <span className="text-xs text-muted-foreground">
+            {" "}
+            · 5 из 30 находок ·{" "}
+            <LinkButton className="text-xs" onClick={() => notify.success("Показаны все находки")}>
+              показать все
+            </LinkButton>
+          </span>
+        </p>
+      </Case>
       <Case label="Находка, 1 920 символов, со ссылками на id">
         <RunningText text={FINDING_TEXT} resolve={resolve} />
       </Case>

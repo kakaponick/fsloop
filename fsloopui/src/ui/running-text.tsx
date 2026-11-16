@@ -8,6 +8,7 @@
 // `renderCode`, the renderer's seam for code; the link seam stays for links.
 import { Fragment, useRef, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { LINK_LOOK } from "./link-button.tsx";
 import { OverflowCue, useOverflowCue } from "./overflow-cue.tsx";
 
 /** The address of an id the text names, or null when the token is not an id of this run. */
@@ -124,7 +125,7 @@ const CLOSING = /^[.,;:!?)\]»…]+/;
 type InlineOpts = { resolve?: Resolve; renderLink: NonNullable<RunningTextProps["renderLink"]>; paint: Paint; renderCode?: RenderCode };
 
 const defaultLink = (href: string, children: ReactNode) => (
-  <a href={href} className="underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
+  <a href={href} className={LINK_LOOK}>
     {children}
   </a>
 );

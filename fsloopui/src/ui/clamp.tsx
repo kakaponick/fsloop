@@ -4,8 +4,8 @@
 // is cut at its lines' height before the trigger arrives, so its arrival never changes the box (Strict 1). Expanded,
 // the text lives in a region with a height cap that scrolls inside.
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { LinkButton } from "./link-button.tsx";
 
 /** A card's clamp: the library's ellipsis, there is no trigger to make room for. */
 const LINES = { 1: "line-clamp-1", 2: "line-clamp-2", 3: "line-clamp-3", 4: "line-clamp-4" } as const;
@@ -60,9 +60,9 @@ export function Clamp({ children, lines = 2, expandable = true, what, className 
         <div role="region" aria-label={what} tabIndex={0} className="max-h-text-cap w-full overflow-y-auto [scrollbar-gutter:stable]">
           {children}
         </div>
-        <Button ref={collapseButton} variant="link" size="xs" className="h-auto px-0 text-muted-foreground" aria-expanded="true" aria-label={`Свернуть ${what}`} onClick={() => toggle(false)}>
+        <LinkButton ref={collapseButton} className="text-muted-foreground" aria-expanded="true" aria-label={`Свернуть ${what}`} onClick={() => toggle(false)}>
           {COLLAPSE}
-        </Button>
+        </LinkButton>
       </div>
     );
 
@@ -83,9 +83,9 @@ export function Clamp({ children, lines = 2, expandable = true, what, className 
             <span aria-hidden="true" data-slot="clamp-spacer" className={cn("float-right", SPACERS[lines])} />
             <span data-slot="clamp-end" className="float-right clear-both flex items-baseline pl-1">
               <span aria-hidden="true">…&nbsp;</span>
-              <Button ref={expandButton} variant="link" size="xs" className="h-auto px-0 text-muted-foreground" aria-expanded="false" aria-label={`Развернуть ${what}`} onClick={() => toggle(true)}>
+              <LinkButton ref={expandButton} className="text-muted-foreground" aria-expanded="false" aria-label={`Развернуть ${what}`} onClick={() => toggle(true)}>
                 {EXPAND}
-              </Button>
+              </LinkButton>
             </span>
           </>
         )}

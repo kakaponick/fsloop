@@ -336,7 +336,7 @@ function ConventionItem({ convention: c, runKey, resolve, toks, target, outside,
         )}
       >
         <div className={cn("flex min-w-0 items-baseline gap-2", !parts && "@min-[56rem]/view:col-span-2")}>
-          <span className="w-[3ch] shrink-0 text-right text-muted-foreground tabular-nums">
+          <span className="min-w-count shrink-0 text-right text-muted-foreground tabular-nums">
             <AddressLink kind="convention" id={id} href={href} onOpen={onOwn} />
           </span>
           {parts ? (

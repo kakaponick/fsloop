@@ -19,6 +19,7 @@ export { InView, inViewText, itemsInView, useInView, type InViewOptions, type In
 export { FrameStrip, FrameThumb, FrameViewer, THUMB, WHEEL_GESTURE_GAP, type Frame } from "./frames.tsx";
 export { HeldStrip, heldStripText, heldVerb, type HeldCounts, type HeldLeftKind, type HeldNoun, type HeldVerb } from "./held-strip.tsx";
 export { keyLabel, Keys } from "./kbd.tsx";
+export { LINK_LOOK, LinkButton } from "./link-button.tsx";
 export { Loading, LOADING_WORD } from "./loading.tsx";
 export { EDGE_MARK, EDGE_MS, markProps, OUT_OF_FILTER, OutOfFilter, TARGET_MARK, useEdgeMarks, type MarkState } from "./marks.tsx";
 export { OPEN_FRAME } from "./marks.tsx";

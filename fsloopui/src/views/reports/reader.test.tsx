@@ -321,12 +321,11 @@ describe("a critic's report", () => {
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
-  test("improve-2 (3), design-9, p3-review-critic-code#code-9: a severity that hides rows says so beside the group, the line rendered from `severityShown`'s parts — «5 из 30 находок · показать все» — on a line reserved before it", async () => {
+  test("improve-2 (3), design-9, p3-review-critic-code#code-9, p3-verdict-critic-code-verdict-2#code-1: a severity that hides rows says so beside the group, the line rendered from `severityShown`'s parts — «5 из 30 находок · показать все» — on a line reserved before it", async () => {
     // Copy 3, 4: the status bar's one form, the noun genitive after «из», then the verb of the click
-    // p3-review-critic-code#code-9: the parts the line renders, and the line they read as one
-    expect(severityShown(5, 30)).toEqual({ count: "5 из 30 находок", verb: "показать все", text: "5 из 30 находок · показать все" });
-    expect(severityShown(5, 30).text.split(/\s+/)).toHaveLength(7);
-    expect(severityShown(1, 21).text).toBe("1 из 21 находки · показать все");
+    // code-1: the builder gives the parts the line renders and no joined copy of them; the words are the rendered line's
+    expect(severityShown(5, 30)).toEqual({ count: "5 из 30 находок", verb: "показать все" });
+    expect(severityShown(1, 21).count).toBe("1 из 21 находки");
     const user = userEvent.setup({ delay: null });
     open("p1-review-critic-craft");
     const line = reader().querySelector("[data-slot=severity-bar]") as HTMLElement;
@@ -342,6 +341,7 @@ describe("a critic's report", () => {
     expect(usedBlockSize(line)).toBe(28);
     expect(line.firstElementChild).toBe(group);
     expect(shown).toHaveTextContent(/^5 из 30 находок · показать все$/);
+    expect((shown.textContent ?? "").trim().split(/\s+/)).toHaveLength(7);
     expect(reader().querySelectorAll("[data-slot=report-findings] [data-slot=finding-row]")).toHaveLength(5);
     // the verb is the click: every row back, the choice «все» kept for the view
     await user.click(within(shown).getByRole("button", { name: "показать все" }));
@@ -482,7 +482,7 @@ describe("a critic's report", () => {
     expect(readPref(SEVERITY_PREF, "all")).toBe("critical");
   });
 
-  test("a design check: its conventions as a tab, with a link to «Соглашения»", async () => {
+  test("a design check: its conventions as a tab, with a link to «Соглашения»; p3-verdict-critic-craft-verdict-2#cand-14: the ordinal's box is the theme's count width", async () => {
     open("p1-decompose-design-check", { tab: "conventions" });
     expect(tabNames()).toEqual(["Находки10", "Не проверено0", "Идеи0", "План правок0", "Допущения0", "Соглашения26", "Файл отчёта"]);
     const panel = within(reader()).getByRole("tabpanel");
@@ -496,9 +496,17 @@ describe("a critic's report", () => {
       const link = within(li).getByRole("link", { name: `Соглашение ${own[i].n} в «Соглашениях»` });
       expect(link).toHaveAttribute("href", runPath(KEY, { view: "conventions", convention: String(own[i].n) }));
       expect(link).toHaveTextContent(new RegExp(`^${own[i].n}$`));
-      // Strict 1: the ordinal's box is fixed, as in «Соглашения», so a two-digit number moves no line's text
-      expect(link.parentElement).toHaveClass("w-[3ch]", "shrink-0", "text-right", "tabular-nums");
     });
+    // Strict 1: the ordinal's box holds three digits, so a two-digit number moves no line's text — cand-14: the box is
+    // the theme's one count width (`--spacing-count`), never a width written at the call site
+    await applyStylesheet();
+    for (const li of lines) {
+      const box = getComputedStyle(li.firstElementChild as HTMLElement);
+      // `--spacing-count`, 3ch, at the 13 px body type the panel sets
+      expect(box.minWidth).toBe("19.5px");
+      expect(box.flexShrink).toBe("0");
+      expect(box.textAlign).toBe("right");
+    }
   });
 
   test("a verdict critic: resolved / partial / unresolved as its outcome; ids in its text are links", () => {

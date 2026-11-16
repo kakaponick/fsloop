@@ -4,7 +4,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { Run } from "../../shared/model.ts";
-import { NotFound, type Resolve } from "../ui/index.ts";
+import { LINK_LOOK, NotFound, type Resolve } from "../ui/index.ts";
 import { cn } from "@/lib/utils";
 import { runPath } from "./routes.ts";
 
@@ -33,7 +33,7 @@ export function objectHref(run: RunLike, { kind, id, tab }: ObjectRef): string |
   }
 }
 
-export const LINK_CLASS = "underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground";
+export const LINK_CLASS = LINK_LOOK;
 
 /** A link to an object of the run; its id in mono unless children say otherwise; «<объект> <id> не найден» when the run lacks it. */
 export function ObjectLink({ run, kind, id, tab, children, className }: { run: RunLike; children?: ReactNode; className?: string } & ObjectRef) {

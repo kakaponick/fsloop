@@ -10,10 +10,9 @@ import type { MouseEvent } from "react";
 import type { Finding, RunTokens, Surface } from "../../../shared/model.ts";
 import { SEVERITY, stageOf } from "../../../shared/states.ts";
 import { count, NOUNS, num, tokens as tokensOf, type SpendRow } from "../../../shared/text.ts";
-import { Dot, FactList, GlossaryTooltip, NotRecorded, revealIn } from "@/ui";
+import { Dot, FactList, GlossaryTooltip, LinkButton, NotRecorded, revealIn } from "@/ui";
 import { rankSurfaces } from "./model.ts";
 import { OVERVIEW_ITEM } from "./rail.tsx";
-import { LinkButton } from "./reader.tsx";
 import { SCORES_GLOSSARY, SurfaceScores } from "./scores.tsx";
 
 export const SPEND_TITLE = "Расход токенов";

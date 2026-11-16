@@ -5,6 +5,7 @@ import type { MouseEvent } from "react";
 import type { Tone } from "../../shared/states.ts";
 import { count as countText, num, type Forms } from "../../shared/text.ts";
 import { cn } from "@/lib/utils";
+import { LINK_LOOK } from "./link-button.tsx";
 import { Dot } from "./status-dot.tsx";
 
 export interface CountLinkProps {
@@ -42,7 +43,7 @@ export function CountLink({ count, noun, tone, suffix, href, onOpen, linkable = 
     onOpen();
   };
   return (
-    <a data-slot="count-link" href={href ?? "#"} onClick={click} className={cn(wrap, "underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground")}>
+    <a data-slot="count-link" href={href ?? "#"} onClick={click} className={cn(wrap, LINK_LOOK)}>
       {dot}
       {words}
     </a>

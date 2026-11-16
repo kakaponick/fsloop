@@ -5,9 +5,11 @@
 // 4 мин» — with a dot
 // only where the state asks for the operator («нет отчёта»): severity's tones live in the reader and the overview,
 // where they rank something (DESIGN.md → The Signal-Only Rule). A group of implementers names the result they share
-// once, on a line under its heading. The rail is height-bounded and scrolls inside, its stage heading pinned at the
-// very top of the scroller (craft-9: no padding above it); the held-order strip under it keeps its line whether
-// anything waits or not (Strict 1).
+// once, on a line under its heading. The rail is height-bounded and scrolls inside; a group's head — its heading, and
+// the result line under it — is one sticky box pinned at the very top of the scroller (craft-9: no padding above it;
+// p3-verdict craft-1: the result stays in view with the rows that leave it out), and the scroll rests only on a
+// report's top at its head's foot, so no stop slices a report under a head (p3-verdict craft-2). The held-order strip
+// under it keeps its line whether anything waits or not (Strict 1).
 import { Fragment, useLayoutEffect, useRef, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { Finding } from "../../../shared/model.ts";
@@ -36,31 +38,52 @@ export interface RailProps {
 }
 
 export const RAIL_LABEL = "Отчёты прогона";
-/** A stage heading's fixed height, sticky at the rail's top: the rail's scroller pads its top by it (`scroll-pt-7`),
- * and a reveal passes it in its gap. */
+/** A stage heading's fixed height (`h-7`): the rail's scroller pads its top by it (`scroll-pt-7`), the stop of a
+ * report in a group with no result line. */
 export const RAIL_HEADING = 28;
+/** The result line's fixed height under the heading (`h-5`): a group that draws it has a 48 px head (`h-12`), and its
+ * reports add the line as their own scroll margin (`scroll-mt-5`), so their stop is that head's foot. */
+export const RAIL_RESULT = 20;
 export const COPY_PATH = "путь к отчёту";
 /** The rail's first item: the overview holds the surfaces' scores and the run's tokens (u6-shape cand-1); the narrow
  * view's «Отчёт» picker names the same place in lower case. */
 export const OVERVIEW_ITEM = "Обзор: оценки и токены";
 
 /** cand-8: the focus is a 2 px ring in full muted ink — the open item's mark is 1 px of ink on the muted ground, so a
- * focused open item wears both and the two never read as one. */
-const ITEM_CLASS = "rounded-md px-2 outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
+ * focused open item wears both and the two never read as one. Each item is a stop of the rail's snap (craft-2). */
+const ITEM_CLASS = "snap-start rounded-md px-2 outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
+
+/** The height of the sticky head over a report: its section's, 28 or 48. */
+const headOf = (item: HTMLElement): number => Number(item.closest<HTMLElement>("[data-head]")?.dataset.head ?? RAIL_HEADING);
+
+/** The open report brought into the rail's view (craft-2): `revealIn`'s one rule under a sticky head brings it in by as
+ * little as shows it — under its head or above the view, to the head's foot — then the scroll goes on to the first
+ * stop at or past where that left it, the stop the browser's snap would take: the report stays whole in view and no
+ * report shows sliced under a head. A report already in view moves nothing. */
+function revealReport(scroller: HTMLElement, el: HTMLElement): void {
+  const before = scroller.scrollTop;
+  revealIn(scroller, el, { head: headOf(el), focus: false });
+  if (scroller.scrollTop === before) return;
+  const origin = scroller.getBoundingClientRect().top - scroller.scrollTop;
+  const stops = [...scroller.querySelectorAll<HTMLElement>("[data-head] [data-flat-item]")].map((item) => item.getBoundingClientRect().top - origin - headOf(item));
+  // a pixel's slack: the browser's rects are fractional, its scroll offsets whole
+  const next = Math.min(...stops.filter((s) => s >= scroller.scrollTop - 1));
+  if (Number.isFinite(next)) scroller.scrollTop = next;
+}
 
 export function Rail({ items, findings, current, outside, arrived, hrefOf, overviewHref, pathOf, empty, now }: RailProps) {
   const root = useRef<HTMLDivElement>(null);
   // The open report is in view when the rail opens on it, or a link elsewhere changes it — the rail's own scroller
   // moves, and nothing above it (`@/ui` → revealIn; Strict 1, craft-1).
-  // A report above the rail's view, or one under its sticky stage heading, comes to the heading's foot, 8 px clear;
-  // one past the view's end by as little as shows it — `revealIn`'s one rule under a sticky heading, `head` (design-6,
-  // code-4: it sets `scrollTop` and reads no scroll padding, so the heading's height is passed).
+  // A report above the rail's view, or one under its group's sticky head, comes to the head's foot; one past the
+  // view's end by as little as shows it — and the scroll rests on a report's top (`revealReport`; design-6, code-4:
+  // `revealIn` sets `scrollTop` and reads no scroll padding, so the head's height is passed).
   useLayoutEffect(() => {
     if (!current) return;
     const el = [...(root.current?.querySelectorAll<HTMLElement>("[data-flat-item]") ?? [])].find((e) => e.dataset.flatItem === current);
     const scroller = root.current?.closest<HTMLElement>("[data-slot=rail-scroll]");
     if (!el || !scroller) return;
-    revealIn(scroller, el, { head: RAIL_HEADING, focus: false });
+    revealReport(scroller, el);
   }, [current]);
   const groups = groupsOf(items.map((h) => h.item));
   const ended = new Set(items.filter((h) => h.ended).map((h) => h.item.id));
@@ -89,23 +112,28 @@ export function Rail({ items, findings, current, outside, arrived, hrefOf, overv
           const result = shared?.result ?? null;
           // counted against the heading's own number, so «у 15 из 16» reads beside «16»
           const resultLine = sharedResultText(shared, group.items.length);
+          const withResult = of >= 2;
           return (
-            <section key={`${group.stage}-${g}`} aria-label={[title.word, title.pass].filter(Boolean).join(", ")} className="flex flex-col">
-              <h3 data-slot="rail-heading" className="sticky top-0 z-10 m-0 flex h-7 items-center gap-1.5 bg-background px-2 text-xs font-normal text-muted-foreground">
-                <span className="truncate text-foreground">{title.word}</span>
-                {title.pass && <span className="shrink-0">· {title.pass}</span>}
-                {/* the bare number keeps the heading short; its noun is in its title (improve-10 (3)) */}
-                <span data-slot="rail-count" title={count(group.items.length, NOUNS.report)} className="ml-auto min-w-count shrink-0 text-right tabular-nums">
-                  {num(group.items.length)}
-                </span>
-              </h3>
-              {/* a group of two implementers or more: the line stands whatever their results, so a result recorded
-                  late rewrites it in place and moves no row (Strict 1); one 20 px line, truncated, whole in its title */}
-              {of >= 2 && (
-                <p data-slot="rail-result" title={resultLine} className="m-0 h-5 truncate px-2 text-xs/5 text-muted-foreground">
-                  {resultLine}
-                </p>
-              )}
+            <section key={`${group.stage}-${g}`} aria-label={[title.word, title.pass].filter(Boolean).join(", ")} data-head={withResult ? RAIL_HEADING + RAIL_RESULT : RAIL_HEADING} className="flex flex-col">
+              {/* the head sticks whole: the heading, and under it the result its rows leave out, in view while any of
+                  them is (craft-1) — one fixed box, 28 px or 48 */}
+              <div data-slot="rail-head" className={cn("sticky top-0 z-10 shrink-0 bg-background", withResult ? "h-12" : "h-7")}>
+                <h3 data-slot="rail-heading" className="m-0 flex h-7 items-center gap-1.5 px-2 text-xs font-normal text-muted-foreground">
+                  <span className="truncate text-foreground">{title.word}</span>
+                  {title.pass && <span className="shrink-0">· {title.pass}</span>}
+                  {/* the bare number keeps the heading short; its noun is in its title (improve-10 (3)) */}
+                  <span data-slot="rail-count" title={count(group.items.length, NOUNS.report)} className="ml-auto min-w-count shrink-0 text-right tabular-nums">
+                    {num(group.items.length)}
+                  </span>
+                </h3>
+                {/* a group of two implementers or more: the line stands whatever their results, so a result recorded
+                    late rewrites it in place and moves no row (Strict 1); one 20 px line, truncated, whole in its title */}
+                {withResult && (
+                  <p data-slot="rail-result" title={resultLine} className="m-0 h-5 truncate px-2 text-xs/5 text-muted-foreground">
+                    {resultLine}
+                  </p>
+                )}
+              </div>
               {group.items.map((item) => {
                 const state = itemState(item, findings, now, { ended: ended.has(item.id), usual: result });
                 const path = pathOf(item.id);
@@ -118,7 +146,8 @@ export function Rail({ items, findings, current, outside, arrived, hrefOf, overv
                     aria-current={open ? "page" : undefined}
                     data-edge={marks["data-edge"]}
                     title={`${item.description} — ${item.kind}`}
-                    className={cn("flex h-11 min-w-0 flex-col justify-center gap-0.5", ITEM_CLASS, open && "bg-muted shadow-target", marks.className)}
+                    /* under a result line the stop is the 48 px head's foot: the scroller's 28 px padding and this 20 px margin */
+                    className={cn("flex h-11 min-w-0 flex-col justify-center gap-0.5", ITEM_CLASS, withResult && "scroll-mt-5", open && "bg-muted shadow-target", marks.className)}
                   >
                     <span className="flex min-w-0 items-baseline gap-2">
                       <span className="min-w-0 truncate">{item.description}</span>

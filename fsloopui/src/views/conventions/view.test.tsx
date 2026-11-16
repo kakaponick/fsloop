@@ -186,7 +186,7 @@ describe("f15: the list's shape, the address and search", () => {
     expect(intro).not.toHaveClass("max-w-measure");
   });
 
-  test("cand-11: the pattern hangs in a left column from 56 rem of the view, after an ordinal in a fixed box; each item has an id", () => {
+  test("cand-11: the pattern hangs in a left column from 56 rem of the view, after an ordinal in a fixed box; each item has an id", async () => {
     renderOver(fx, run, PATH, ConventionsView);
     const third = article(3);
     expect(third).toHaveClass("grid", "@min-[56rem]/view:grid-cols-[17rem_minmax(0,1fr)]");
@@ -195,10 +195,18 @@ describe("f15: the list's shape, the address and search", () => {
     expect(item(3)).toHaveAttribute("id", "convention-3");
     const ordinal = within(third).getByRole("link", { name: "Ссылка на соглашение 3" });
     expect(ordinal).toHaveTextContent(/^3$/);
-    // Strict 1: the ordinal's box is three digits wide, its numerals tabular, so «9» and «26» align
-    expect(ordinal.parentElement).toHaveClass("w-[3ch]", "shrink-0", "tabular-nums");
     expect(new URLSearchParams(ordinal.getAttribute("href")?.split("?")[1]).get("convention")).toBe("3");
     expect(new URLSearchParams(ordinal.getAttribute("href")?.split("?")[1]).get("view")).toBe("conventions");
+    // Strict 1: the ordinal's box is three digits wide, its numerals tabular, so «9» and «26» align —
+    // p3-verdict-critic-craft-verdict-2#cand-14: the theme's one count width (`--spacing-count`, 3ch), 19.5 px at 13 px;
+    // the run's widest ordinal is narrower, so every box rests at that width and no text beside it moves
+    await applyStylesheet();
+    const box = getComputedStyle(ordinal.parentElement as HTMLElement);
+    expect(box.minWidth).toBe("19.5px");
+    expect(box.flexShrink).toBe("0");
+    expect(box.fontVariantNumeric).toBe("tabular-nums");
+    const widest = String(Math.max(...run.conventions.map((c) => c.n)));
+    expect(textWidth(widest)).toBeLessThanOrEqual(19.5);
   });
 
   test("cand-16: the list keeps its list role under `list-none`", () => {

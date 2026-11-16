@@ -23,6 +23,10 @@ import { Rail, RAIL_LABEL } from "./rail.tsx";
 import { Reader, reportPath } from "./reader.tsx";
 
 const NOUN: HeldNoun = { forms: NOUNS.report, gender: "m" };
+/** The one width for the rail beside the reading column (ui → Layout Paradigm 2, a container query on the view): from
+ * 52 rem the rail stands at the reader's left, under it the rail folds into the «Отчёт» picker. Each class is written
+ * whole, so Tailwind finds it; the 24 px between the rail and the text is the rail's own margin, gone with it. */
+const WIDE = { rail: "@min-[52rem]/reports:flex", picker: "@min-[52rem]/reports:hidden" } as const;
 export const REPORT_PICKER = "Отчёт";
 /** The picker's no-choice word, the overview the reader then shows: «Отчёт: обзор» — one colon, read once (craft-5). */
 export const PICKER_OVERVIEW = "обзор";
@@ -171,7 +175,7 @@ function Reports({ run }: { run: LoadedRun }) {
           options={groupsOf(railShown.map((s) => s.item)).flatMap((g) => g.items.map((i) => ({ value: i.id, label: pickerLabel(i, itemState(i, run.findings, now, { ended: ended.has(i.id) })), short: i.description })))}
           placeholder="Найти отчёт"
           anyLabel={PICKER_OVERVIEW}
-          className="@min-[52rem]/reports:hidden"
+          className={WIDE.picker}
         />
       ),
     },
@@ -185,12 +189,14 @@ function Reports({ run }: { run: LoadedRun }) {
     <div data-slot="reports-view" className="@container/reports absolute inset-0 flex flex-col gap-2 px-5 pt-3 pb-1">
       <AdaptiveToolbar items={toolbar} label="Фильтры отчётов" />
       <div className="flex min-h-0 flex-1 border-t">
-        <nav ref={rail} aria-label={RAIL_LABEL} data-slot="report-rail" className="hidden w-60 shrink-0 flex-col border-r @min-[52rem]/reports:flex">
+        <nav ref={rail} aria-label={RAIL_LABEL} data-slot="report-rail" className={cn("mr-6 hidden w-60 shrink-0 flex-col border-r", WIDE.rail)}>
           {/* each scroller is the containing block of everything in it (`SCROLLER`): a finding row's sr-only never
               hangs below the view to give the page's body an overflow (craft-1) */}
           {/* scroll padding: the sticky stage heading's 28 px, so a focus ↑/↓ moves to is never under it; no top padding,
-              which would hold the sticky heading that far down with a row showing over it (craft-9) */}
-          <div data-slot="rail-scroll" className={cn(SCROLLER, "flex-1 scroll-pt-7 pr-1 pb-1")}>
+              which would hold the sticky heading that far down with a row showing over it (craft-9). The scroll
+              snaps to a report's top, at its head's foot — 28 px, 48 under a result line, the report's own 20 px
+              margin added — so no resting stop slices a report under a head (p3-verdict craft-2) */}
+          <div data-slot="rail-scroll" className={cn(SCROLLER, "flex-1 snap-y snap-mandatory scroll-pt-7 pr-1 pb-1")}>
             <Rail
               items={railShown}
               outside={q.outside}
@@ -211,7 +217,7 @@ function Reports({ run }: { run: LoadedRun }) {
             ref={reader}
             data-slot="report-reader-scroll"
             onScroll={(e) => scrolls.set(place, e.currentTarget.scrollTop)}
-            className={cn(SCROLLER, "flex-1 py-4 pl-6 @max-[52rem]/reports:pl-0")}
+            className={cn(SCROLLER, "flex-1 py-4")}
           >
             {empty ? (
               emptyFor(run) === "never" ? (

@@ -198,7 +198,10 @@ describe("a unit's detail at the production limits", () => {
     mount({ ...unit, closes: [], launches: [], blockedBy: [] }, null, { ...run, findings: base.findings.map((f) => ({ ...f, units: f.units.filter((id) => id !== "u24") })), running: [], errors: base.errors });
     expect(screen.queryByRole("heading", { name: "Не закрывает ни одной находки" })).toBeNull();
     expect(screen.getByText("Не закрывает ни одной находки")).toBeInTheDocument();
-    expect(section("Запуски агентов")).toHaveTextContent("—");
+    // p3-verdict-critic-craft-verdict-2#craft-3: no launches is one muted line too; checks the model does not carry
+    // keep their heading over «не записано» — a value, not nothing
+    expect(screen.queryByRole("heading", { name: "Запуски агентов" })).toBeNull();
+    expect(screen.getByText("Запусков агентов не было")).toBeInTheDocument();
     expect(section("Проверки юнита")).toHaveTextContent("не записано");
     const facts = document.querySelector("[data-slot=fact-list]") as HTMLElement;
     expect(facts).toHaveTextContent("units/u3/brief.md");
@@ -322,6 +325,33 @@ describe("a unit's detail at the production limits", () => {
     expect(usedBlockSize(zero.parentElement as HTMLElement)).toBe(28);
     // the sections that hold something keep their headings
     expect(screen.getByRole("heading", { name: "Запуски агентов" })).toBeInTheDocument();
+  });
+
+  test("p3-verdict-critic-craft-verdict-2#craft-3: a provenance section with nothing to list reads one muted line in its 28 px line, as a zero «closes» does — never a bold heading over a lone «—»", async () => {
+    // u23 of p3-verdict-units-u23.png: blocked, closing nothing, no check recorded; here with no launch either
+    const u23 = base.units.find((u) => u.id === "u23") as Unit;
+    mount({ ...u23, launches: [] }, [], { ...base, running: [] });
+    const quiet = [
+      { heading: "Запуски агентов", line: "Запусков агентов не было", words: 4 },
+      { heading: "Проверки юнита", line: "Проверок юнита не было", words: 4 },
+    ];
+    for (const { heading, line, words } of quiet) {
+      expect(screen.queryByRole("heading", { name: heading })).toBeNull();
+      const el = screen.getByText(line);
+      // Copy 4: the literal, with its word count
+      expect(el.textContent?.split(" ")).toHaveLength(words);
+      // the line is all the section says: no «—» under it
+      expect(el.closest("section")?.querySelector("[data-slot=dash]")).toBeNull();
+      expect(el.closest("section")).toHaveAccessibleName(line);
+    }
+    await applyStylesheet();
+    for (const { line } of quiet) {
+      const el = screen.getByText(line);
+      // the zero «closes» line's own form: muted, regular weight, on the section's reserved 28 px line
+      expect(getComputedStyle(el).color).toBe("rgb(109, 109, 105)");
+      expect(getComputedStyle(el).fontWeight).not.toBe("600");
+      expect(usedBlockSize(el.parentElement as HTMLElement)).toBe(28);
+    }
   });
 
   test("p3-review-critic-craft-2#craft-8: a check that ran once reads «1 попытка» under «Попытки», never the «—» of none", () => {
