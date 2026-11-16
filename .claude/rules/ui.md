@@ -13,7 +13,7 @@ Governs everything under `fsloopui/`: the React client, the server's routes as f
 
 fsloopUI is local, single-user and read-mostly: no sign-in, no roles, no money, no destructive action. Its one write is the user's verdict on a finding (Conventions 6).
 
-Law rules with no object here, so a critic raises no finding from them: `code` → i18n (one language, no message catalogs); the «…ing» pending label of `ui` → Every async action surfaces its full lifecycle (the one write is optimistic); in `ux 1`, a setting's name and a disabled action's reason (the product has no settings and no disabled action).
+Law rules with no object here, so a critic raises no finding from them: `code` → i18n (one language, no message catalogs); the «…ing» pending label of `ui` → Every async action surfaces its full lifecycle (the one write is optimistic); in `ux 1`, a setting's name (the product has no settings). A disabled action's reason of `ux 1` has one object: «Свернуть все находки» in «Находки», blocked with its reason while no row is open.
 
 ## Strict
 
