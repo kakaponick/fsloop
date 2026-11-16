@@ -12,6 +12,8 @@ export const FINDINGS_TABLE = "findings";
 export const NONE = "none";
 /** The severity filter's «major и выше»: critical and major together. */
 export const MAJOR_UP = "major+";
+/** The verdict filter's «с возражением»: every verdict but «согласен» — the user disputes the finding (cand-7). */
+export const OBJECTED = "objected";
 
 /** «В исправление»: taken to fix and not yet done — waiting for a unit, in its unit, blocked, or back again. */
 export const FIX_STATES: readonly FindingStatus[] = ["queued", "in-progress", "blocked", "unresolved", "repeated"];
@@ -29,7 +31,7 @@ export const FACETS = {
   state: (f: FindingLike): string[] => [f.effectiveStatus],
   report: (f: FindingLike): string[] => [f.launch ?? (f.source === "own" ? OWN : NONE)],
   unit: (f: FindingLike): string[] => (f.units.length ? f.units : [NONE]),
-  verdict: (f: FindingLike): string[] => [f.verdict?.verdict ?? NONE],
+  verdict: (f: FindingLike): string[] => (f.verdict ? (f.verdict.verdict === "agree" ? [f.verdict.verdict] : [f.verdict.verdict, OBJECTED]) : [NONE]),
   cause: (f: FindingLike): string[] => [f.cause ?? NONE],
   command: (f: FindingLike): string[] => [f.fixCommand ?? NONE],
 } as const;

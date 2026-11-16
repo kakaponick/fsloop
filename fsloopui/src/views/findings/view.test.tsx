@@ -7,16 +7,19 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterAll, describe, expect, test } from "vitest";
 import type { Finding } from "../../../shared/model.ts";
-import { FINDING_STATUS, SEVERITY } from "../../../shared/states.ts";
+import { FINDING_STATUS, SEVERITY, type Verdict } from "../../../shared/states.ts";
 import { readRun } from "../../../server/run.ts";
 import { emptyStateText, glossaryLines, UiProvider } from "@/ui";
-import { assertLayout, fitsRegion, headerWidth, isSelectFilter, mergeWidths, runQuery, type FilterDef } from "@/table";
-import { CAUSE, CONFIDENCE, countFindings, enumFact, FACT, FindingArticle, findingNotFound, openFindings, SECTION, textSections } from "@/finding";
+import { ANY_LABEL, assertLayout, CUSTOM_LABEL, fitsRegion, headerWidth, isSelectFilter, mergeWidths, pack, PRESET_LABEL, runQuery, type FilterDef, type PackItem } from "@/table";
+import { FLEX_FLOOR, GAP, OVERFLOW_WIDTH } from "@/table/toolbar.tsx";
+import { CAUSE, CONFIDENCE, countFindings, enumFact, FACT, FindingArticle, findingNotFound, openFindings, reportWord, SECTION, stateText, textSections } from "@/finding";
+import { OBJECTED } from "@/finding/facets.ts";
 import { renderShell } from "../../app/testing.tsx";
 import { runPath } from "../../app/routes.ts";
 import { COLUMNS } from "./columns.tsx";
 import { emptyFor, nextCriticStep } from "./index.tsx";
-import { DEFAULT_SORT, filtersFor, PRESETS, SEARCH, severityRank } from "./query.ts";
+import * as marks from "./marks.ts";
+import { DEFAULT_SORT, filtersFor, PRESETS, reportOptions, SEARCH, severityRank } from "./query.ts";
 import { findingsApp, keyOf, NOW, renderFindings } from "./testing.tsx";
 
 const N = 40; // the production maximum: 723 findings
@@ -30,10 +33,131 @@ const bodyRows = () => [...document.querySelectorAll<HTMLTableRowElement>("tr[da
 const row = (id: string) => bodyRows().find((r) => r.dataset.rowId === id) as HTMLTableRowElement;
 const detail = (id: string) => [...document.querySelectorAll<HTMLElement>("tr[data-detail-for]")].find((r) => r.dataset.detailFor === id) as HTMLElement;
 const loaded = () => waitFor(() => expect(bodyRows()).toHaveLength(50), { timeout: 4000 });
-const REGION = 964; // 1280 px beside the 316 px sidebar
+/** The view's box: beside the 316 px sidebar, inside the view's 20 px gutters — at 1280 px and at the frames' 1440. */
+const REGION = 1280 - 316 - 40;
+const REGION_1440 = 1440 - 316 - 40;
+
+/** A value's width at the body face (Segoe UI, 13 px), by glyph class and rounded up: a wide letter 11 px, a narrow
+ * one or a space 4.3, a digit 7.5, another capital 9, the rest 7.4. p1-verdict-findings.png calibrates it: its
+ * 160 px «Отчёт» cut «code · проход 1 · приёмка» to «code · проход 1 · прие…», which this measure puts past the
+ * cell's 144 px of text — it errs wide, never narrow. */
+function textWidth(text: string): number {
+  let w = 0;
+  for (const ch of text) w += /[мшщжюыМШЩЖЮЫmwMW…]/.test(ch) ? 11 : /[ijlrtfI.,:;!| ·]/.test(ch) ? 4.3 : /[0-9]/.test(ch) ? 7.5 : /[A-ZА-ЯЁ]/.test(ch) ? 9 : 7.4;
+  return Math.ceil(w);
+}
+/** A cell's 8 px on each side; a state's 7 px dot and the 6 px before its word. */
+const CELL_PAD = 16;
+const DOT = 7 + 6;
+const widthOf = (id: string) => COLUMNS.find((c) => c.id === id)?.width ?? 0;
+const widest = (values: Iterable<string>) => Math.max(...[...values].map(textWidth));
 
 describe("the view's configuration at the production shape", () => {
-  test("the columns fit the 964 px region; every header clears its width; four start hidden", () => {
+  test("craft-2, cand-2 (verdict), craft-10: «Отчёт» and «Состояние» clear the widest value of the maximum run, whole at 1280 and 1440", () => {
+    expect(textWidth("code · проход 1 · прие…")).toBeGreaterThan(160 - CELL_PAD);
+    // the values the frames show cut no longer meet their old widths
+    expect(textWidth("code · проход 1 · приёмка") + CELL_PAD).toBeGreaterThan(160);
+    expect(textWidth("исправляется · f10") + DOT + CELL_PAD).toBeGreaterThan(136);
+    // «Отчёт»: the widest launch name of the 723-finding run, and the verdict's own example
+    const names = new Set(run.findings.map(reportWord));
+    expect(names).toContain("runtime · проход 1 · приёмка");
+    expect(widest(names)).toBe(textWidth("runtime · проход 1 · приёмка"));
+    expect(widest(names)).toBe(184);
+    expect(widest(names) + CELL_PAD).toBeLessThanOrEqual(widthOf("report"));
+    expect(textWidth("craft · проход 2 · приёмка") + CELL_PAD).toBeLessThanOrEqual(widthOf("report"));
+    // «Состояние»: the widest state with its unit, after its dot
+    const states = new Set(run.findings.map(stateText));
+    expect(widest(states)).toBe(textWidth("исправляется · f10"));
+    expect(widest(states) + DOT + CELL_PAD).toBeLessThanOrEqual(widthOf("state"));
+    expect([widthOf("report"), widthOf("state")]).toEqual([200, 156]);
+    // craft-10: the cell names a launch as the «Отчёт» filter does, the pass and stage that tell launches apart kept
+    const labels = new Map(reportOptions(run).map((o) => [o.value, o.label]));
+    for (const f of run.findings) if (f.launch) expect(reportWord(f), f.id).toBe(labels.get(f.launch));
+    const visible = COLUMNS.filter((c) => !c.hidden);
+    expect(fitsRegion(visible, mergeWidths(COLUMNS, null), REGION)).toBe(true);
+    expect(fitsRegion(visible, mergeWidths(COLUMNS, null), REGION_1440)).toBe(true);
+  });
+
+  test("craft-26: at 1440 px «Оценка», the view's own write, stays in the toolbar; «Юнит», «Охват» and «Правка» fold", () => {
+    // a filter's trigger hugs «Поле: все» in the select's chrome: its border, 10 px before, 8 after, 6 between, the chevron
+    const trigger = (field: string, value: string) => 2 + 10 + 8 + 6 + 6 + 16 + textWidth(`${field}:`) + textWidth(value);
+    const items: PackItem[] = [
+      { id: "preset", kind: "sticky", width: Math.max(...[...PRESETS.map((p) => p.label), CUSTOM_LABEL].map((v) => trigger(PRESET_LABEL, v))) },
+      { id: "search", kind: "pinned", width: FLEX_FLOOR },
+      ...filtersFor(run).map((f): PackItem => ({ id: `filter-${f.id}`, kind: "ordinary", width: trigger(f.label, ANY_LABEL) })),
+      { id: "facts", kind: "pinned", width: 28 },
+      { id: "columns", kind: "pinned", width: 28 },
+    ];
+    expect(pack(items, REGION_1440, { gap: GAP, overflow: OVERFLOW_WIDTH })).toEqual(["filter-unit", "filter-cause", "filter-command"]);
+  });
+
+  test("cand-7: «С возражением» — the three verdicts that dispute a finding, one «Вид» and one «Оценка» option", () => {
+    expect(PRESETS.map((p) => p.label)).toEqual(["Все", "Без оценки", "С возражением", "В исправление", "Кандидаты", "Закоммичены"]);
+    // «Вид» stays a select: six presets and «Свой набор»
+    expect(PRESETS.length + 1).toBeLessThanOrEqual(7);
+    const verdict = filtersFor(run).find((f) => f.id === "verdict") as FilterDef<Finding>;
+    expect(verdict.options.map((o) => o.label)).toEqual(["с возражением", "согласен", "не согласен", "не та серьёзность", "ложная находка", "без оценки"]);
+    expect(isSelectFilter(verdict as FilterDef<unknown>)).toBe(true);
+    // which verdicts it takes, in the «Оценка» header's glossary, last
+    const lines = glossaryLines(COLUMNS.find((c) => c.id === "verdict")?.glossary ?? []);
+    expect(lines.at(-1)).toBe("с возражением — оценка «не согласен», «не та серьёзность» или «ложная находка»");
+    expect(lines.at(-1)?.split(" ")).toHaveLength(12);
+    const rated = (id: string, v: Verdict | null): Finding => ({ ...run.findings[0], id, verdict: v ? { verdict: v, note: null, at: null } : null });
+    const rows = [rated("a", "agree"), rated("b", "disagree"), rated("c", "wrong-severity"), rated("d", "false-positive"), rated("e", null)];
+    const q = runQuery({ rows, rowId: (f) => f.id, columns: [], filters: filtersFor(run), search: SEARCH, state: { sort: null, filters: {}, search: "" }, presets: PRESETS });
+    const objected = PRESETS.find((p) => p.label === "С возражением");
+    expect(objected?.filters).toEqual({ verdict: [OBJECTED] });
+    expect(q.presetCounts[objected?.id ?? ""]).toBe(3);
+    expect(q.counts.verdict[OBJECTED]).toBe(3);
+    expect(countFindings(rows, { verdict: [OBJECTED] })).toBe(3);
+    const shown = runQuery({ rows, rowId: (f) => f.id, columns: [], filters: filtersFor(run), search: SEARCH, state: { sort: null, filters: { verdict: [OBJECTED] }, search: "" } });
+    expect(shown.rows.map((f) => f.id)).toEqual(["b", "c", "d"]);
+  });
+
+  test("cand-2 (shape): a sort by «Отчёт» reads the run's reports in their order, each report's findings together, as the report lists them", () => {
+    const columns = COLUMNS.flatMap((c) => (c.rank ? [{ id: c.id, rank: c.rank }] : []));
+    const sorted = runQuery({ rows: run.findings, rowId: (f) => f.id, columns, filters: [], search: null, state: { sort: { id: "report", desc: false }, filters: {}, search: "" } }).rows;
+    const index = new Map(run.findings.map((f, i) => [f.id, i]));
+    const launchAt = new Map(run.launches.map((l, i) => [l.id, i]));
+    const groups: { key: string; at: number[] }[] = [];
+    for (const f of sorted) {
+      const key = f.launch ?? f.source;
+      if (groups.at(-1)?.key !== key) groups.push({ key, at: [] });
+      groups.at(-1)?.at.push(index.get(f.id) ?? -1);
+    }
+    // each report once, together
+    expect(new Set(groups.map((g) => g.key)).size).toBe(groups.length);
+    // the critics' reports in the run's order of launches
+    const launches = groups.map((g) => launchAt.get(g.key)).filter((i): i is number => i !== undefined);
+    expect(launches.length).toBeGreaterThan(20);
+    expect(launches).toEqual([...launches].sort((a, b) => a - b));
+    // a report's findings in its own order
+    for (const g of groups) expect(g.at, g.key).toEqual([...g.at].sort((a, b) => a - b));
+  });
+
+  test("cand-4 (shape): a row with frames counts them in its «Находка» cell, so they show before the row expands", () => {
+    const summary = COLUMNS.find((c) => c.id === "summary");
+    const ctx = { tokens: [], hl: (t: string | null | undefined) => t };
+    const framed = run.findings.find((f) => f.frames.length === 2) as Finding;
+    const bare = run.findings.find((f) => f.frames.length === 0) as Finding;
+    const { container, unmount } = render(<UiProvider>{summary?.cell(framed, ctx)}</UiProvider>);
+    const count = container.querySelector("[data-slot=frame-count]") as HTMLElement;
+    expect(count).toHaveAttribute("title", "2 кадра");
+    expect(count).toHaveTextContent(/^2 кадра2$/);
+    expect(count).toHaveClass("shrink-0", "tabular-nums");
+    // the sentence truncates against it; the count keeps its width (rules/ui → Tables 5)
+    expect(container.querySelector("[data-slot=frame-count]")?.previousElementSibling).toHaveClass("min-w-0", "truncate");
+    unmount();
+    const plain = render(<UiProvider>{summary?.cell(bare, ctx)}</UiProvider>);
+    expect(plain.container.querySelector("[data-slot=frame-count]")).toBeNull();
+    expect(plain.container).toHaveTextContent(bare.summary);
+  });
+
+  test("cand-3: the view's mark hook is named for its rows, not after the shared hook it wraps", () => {
+    expect(Object.keys(marks).sort()).toEqual(["changeSign", "useFindingMarks"]);
+  });
+
+  test("the columns fit the 924 px view at 1280 px; every header clears its width; four start hidden", () => {
     expect(() => assertLayout(COLUMNS)).not.toThrow();
     const visible = COLUMNS.filter((c) => !c.hidden);
     expect(visible.map((c) => c.label)).toEqual(["Серьёзность", "ID", "Находка", "Отчёт", "Состояние", "Оценка"]);
@@ -61,6 +185,7 @@ describe("the view's configuration at the production shape", () => {
     expect(Object.fromEntries(PRESETS.map((p) => [p.label, q.presetCounts[p.id]]))).toEqual({
       Все: 723,
       "Без оценки": by((f) => !f.verdict),
+      "С возражением": by((f) => Boolean(f.verdict) && f.verdict?.verdict !== "agree"),
       "В исправление": by((f) => ["queued", "in-progress", "blocked", "unresolved", "repeated"].includes(f.effectiveStatus)),
       Кандидаты: by((f) => f.effectiveStatus === "candidate"),
       Закоммичены: by((f) => f.effectiveStatus === "fixed" || f.effectiveStatus === "closed"),
@@ -122,6 +247,7 @@ describe("the task walk over u1's handler (surfaces/findings.md → WALK)", () =
       "filter-unit",
       "filter-cause",
       "filter-command",
+      "facts",
       "columns",
     ]);
     expect(within(bodyRows()[0]).getByText("critical")).toBeInTheDocument();

@@ -13,10 +13,11 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { AppDialog, notify, RETRY } from "@/ui";
+import { AppDialog, Hint, notify, RETRY, useShortcut } from "@/ui";
 import {
   DIALOG_PROMPT,
   failedCause,
+  KEY_HINT,
   NOTE_LABEL,
   NOTE_PLACEHOLDER,
   NOTE_SAVE,
@@ -31,6 +32,18 @@ import {
 } from "@/finding/words.ts";
 
 export const VERDICTS = Object.keys(VERDICT) as Verdict[];
+/** The verdicts' keys, in their order: 1 «согласен» … 4 «ложная находка» (craft-review cand-4; physical keys,
+ * rules/ui → Conventions 11). */
+export const VERDICT_KEYS = ["Digit1", "Digit2", "Digit3", "Digit4"] as const;
+
+/** Binds 1–4 to `rate` with the verdict of that place; the shortcut hook keeps them off in a text field and under a
+ * dialog. */
+export function useVerdictKeys(rate: (verdict: Verdict) => void): void {
+  useShortcut(VERDICT_KEYS[0], () => rate(VERDICTS[0]));
+  useShortcut(VERDICT_KEYS[1], () => rate(VERDICTS[1]));
+  useShortcut(VERDICT_KEYS[2], () => rate(VERDICTS[2]));
+  useShortcut(VERDICT_KEYS[3], () => rate(VERDICTS[3]));
+}
 /** The server's bound on a note (server/http.ts). */
 export const NOTE_MAX = 4000;
 /** The dialog's lead on a selection: what one choice does to every selected finding. */
@@ -156,35 +169,51 @@ export interface VerdictControlProps {
   /** The note's status in the detail: whether its text differs from the saved one, and how to save it alone. */
   noteStatus?: { unsaved: boolean; onSave: (() => void) | null };
   autoFocusNote?: boolean;
+  /** The detail's keys, one per verdict in its order, shown as `Kbd` caps in the toggles' tooltip (Conventions 11).
+   * The dialog has none: its note takes the keys. */
+  keys?: readonly string[];
 }
 
-export function VerdictControl({ value, lead, note, onNoteChange, onChoose, order = "choice-first", noteStatus, autoFocusNote = false }: VerdictControlProps) {
+export function VerdictControl({ value, lead, note, onNoteChange, onChoose, order = "choice-first", noteStatus, autoFocusNote = false, keys }: VerdictControlProps) {
   const id = useId();
+  // the keys' tooltip sits on a box around the group, never on the group or an item: a trigger writes its own
+  // data-slot and data-state over its child's, which would hide the pressed item's «on»
+  const group: ReactNode = (
+    <ToggleGroup
+      type="single"
+      variant="outline"
+      size="sm"
+      spacing={0}
+      aria-label={SECTION.verdict}
+      value={value ?? ""}
+      onValueChange={(v) => {
+        const chosen = (v || value) as Verdict | null;
+        if (chosen) onChoose(chosen);
+      }}
+      className="flex-wrap"
+    >
+      {VERDICTS.map((v) => (
+        <ToggleGroupItem key={v} value={v} className="data-[state=on]:bg-foreground data-[state=on]:text-background data-[state=on]:hover:bg-foreground">
+          {VERDICT[v].compact}
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
+  );
   const choice: ReactNode = (
     <div data-slot="verdict-choice" className="flex min-w-0 flex-col gap-1.5">
       {/* one line, always there: saving never moves what follows (Strict 1) */}
       <p data-slot="verdict-line" role="status" className="m-0 h-5 truncate" title={lead}>
         {lead}
       </p>
-      <ToggleGroup
-        type="single"
-        variant="outline"
-        size="sm"
-        spacing={0}
-        aria-label={SECTION.verdict}
-        value={value ?? ""}
-        onValueChange={(v) => {
-          const chosen = (v || value) as Verdict | null;
-          if (chosen) onChoose(chosen);
-        }}
-        className="flex-wrap"
-      >
-        {VERDICTS.map((v) => (
-          <ToggleGroupItem key={v} value={v} className="data-[state=on]:bg-foreground data-[state=on]:text-background data-[state=on]:hover:bg-foreground">
-            {VERDICT[v].compact}
-          </ToggleGroupItem>
-        ))}
-      </ToggleGroup>
+      {keys ? (
+        <Hint label={KEY_HINT} keys={keys}>
+          <div data-slot="verdict-keys" className="w-fit max-w-full">
+            {group}
+          </div>
+        </Hint>
+      ) : (
+        group
+      )}
     </div>
   );
   const field: ReactNode = (
@@ -249,6 +278,7 @@ export function FindingVerdict({ finding, verdicts, now }: { finding: Finding; v
       onNoteChange={(text) => verdicts.setDraft(finding.id, text)}
       onChoose={save}
       noteStatus={{ unsaved, onSave: saved ? () => save(saved.verdict) : null }}
+      keys={VERDICT_KEYS}
     />
   );
 }

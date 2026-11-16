@@ -1,8 +1,10 @@
 // A finding's compact parts, one per fact, read by the findings table's cells, the compact finding row other views
 // list and the finding article (rules/ui → Conventions 1, 4, 5): the severity, the run's state with its unit, the
 // user's verdict. Words and tones come from shared/states.ts; an absent field reads «не записано», never a guess.
+import { ImageIcon } from "lucide-react";
 import type { Finding } from "../../shared/model.ts";
 import { FINDING_STATUS, NOT_RECORDED, SEVERITY, VERDICT } from "../../shared/states.ts";
+import { count, NOUNS } from "../../shared/text.ts";
 import { Dash, StatusDot, type DotState } from "@/ui";
 
 type Severe = Pick<Finding, "severity">;
@@ -23,6 +25,20 @@ export function SeverityCell({ finding, form = "compact" }: { finding: Severe; f
 export function StateCell({ finding }: { finding: Pick<Finding, "effectiveStatus" | "unit" | "units"> }) {
   const unit = stateUnit(finding);
   return <StatusDot state={FINDING_STATUS[finding.effectiveStatus]} detail={unit ?? undefined} truncate />;
+}
+
+/** A finding's frames, counted where its sentence stands, so a row with frames shows it before it expands
+ * (u4-shape cand-4): a picture's mark and the number, «2 кадра» in its title and for a screen reader. It keeps its
+ * width; the sentence beside it truncates (rules/ui → Tables 5). */
+export function FrameCount({ frames }: { frames: number }) {
+  const full = count(frames, NOUNS.frame);
+  return (
+    <span data-slot="frame-count" title={full} className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground tabular-nums">
+      <ImageIcon aria-hidden="true" className="size-3.5" />
+      <span className="sr-only">{full}</span>
+      <span aria-hidden="true">{frames}</span>
+    </span>
+  );
 }
 
 /** The user's verdict, compact; «—» before one is set. */

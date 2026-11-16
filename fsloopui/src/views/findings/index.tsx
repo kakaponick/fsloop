@@ -6,27 +6,34 @@
 // The URL holds the open finding (`finding=`) and the page (`page=`), replaced on expand and paging; filters,
 // search and sort are the table's view state in the browser (rules/ui → Conventions 12). A link to a finding opens
 // its page, expands, scrolls to and marks it, «вне фильтра» when the filters hide it.
-import { useMemo, useState } from "react";
+//
+// The reading pace: keys 1–4 set the verdict of the finding in focus — its row, or anything in its detail — and move
+// on to the next row of the page without a verdict, its detail opened in place of the rated one's when that was
+// open; «Свернуть все находки» in the toolbar's right cluster closes every detail, its box held while none is open.
+import { ChevronsDownUpIcon } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import type { Finding, Run } from "../../../shared/model.ts";
-import { stageOf, type Step } from "../../../shared/states.ts";
+import { stageOf, STEPS, type Step, type Verdict } from "../../../shared/states.ts";
 import { NOUNS } from "../../../shared/text.ts";
-import { emptyWhen, NotFound, STEPS, type HeldNoun } from "@/ui";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { emptyWhen, Hint, NotFound, type HeldNoun } from "@/ui";
 import { copyAction, DataTable, type EmptyWhen, type RowAction } from "@/table";
 // From the files, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
 import { FindingArticle } from "@/finding/article.tsx";
 import { stateUnit } from "@/finding/cells.tsx";
 import { FINDINGS_TABLE } from "@/finding/facets.ts";
-import { NOT_FOUND_NEXT, RATE_ACTION } from "@/finding/words.ts";
+import { COLLAPSE_ALL, NOT_FOUND_NEXT, RATE_ACTION } from "@/finding/words.ts";
 import { useNow } from "../../app/clock.tsx";
 import { objectHref } from "../../app/links.tsx";
 import { useUpdatedAt } from "../../app/live.tsx";
 import { runPath } from "../../app/routes.ts";
 import type { LoadedRun, ViewProps } from "../index.ts";
 import { COLUMNS } from "./columns.tsx";
-import { useEdgeMarks } from "./marks.ts";
+import { useFindingMarks } from "./marks.ts";
 import { DEFAULT_SORT, filtersFor, PRESETS, SEARCH } from "./query.ts";
-import { FindingVerdict, useVerdicts, VerdictDialog, type Verdicts } from "./verdict.tsx";
+import { FindingVerdict, useVerdictKeys, useVerdicts, VerdictDialog, type Verdicts } from "./verdict.tsx";
 
 const NOUN: HeldNoun = { forms: NOUNS.finding, gender: "f" };
 const rowId = (f: Finding) => f.id;
@@ -60,7 +67,8 @@ function Findings({ run }: { run: LoadedRun }) {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const verdicts = useVerdicts(run.key, now);
-  const edge = useEdgeMarks(run.version, run.findings, now);
+  const edge = useFindingMarks(run.version, run.findings, now);
+  const root = useRef<HTMLDivElement | null>(null);
 
   // ── the rows: the run's findings with the user's newest verdicts laid over ─────────────────────
   const rows = useMemo(
@@ -110,6 +118,26 @@ function Findings({ run }: { run: LoadedRun }) {
   const page = Number(params.get("page")) || 1;
   const onPageChange = (p: number) => replace({ page: p > 1 ? String(p) : null });
 
+  // ── the reading pace: a verdict by its key, then the next finding without one (craft-review cand-4) ──────
+  useVerdictKeys((verdict: Verdict) => {
+    const host = root.current;
+    const at = document.activeElement;
+    if (!host || !(at instanceof HTMLElement) || !host.contains(at)) return;
+    const tr = at.closest<HTMLElement>("tr[data-row-id], tr[data-detail-for]");
+    const id = tr?.dataset.rowId ?? tr?.dataset.detailFor;
+    const finding = id ? rows.find((f) => f.id === id) : undefined;
+    if (!id || !finding) return;
+    // the note goes with it, as a choice in the detail takes it: the draft, else the saved one
+    verdicts.save([id], verdict, verdicts.draft(id) ?? finding.verdict?.note ?? "");
+    const unrated = new Set(rows.filter((f) => !f.verdict && f.id !== id).map((f) => f.id));
+    const shown = [...host.querySelectorAll<HTMLElement>("tr[data-row-id]")];
+    const next = shown.slice(shown.findIndex((el) => el.dataset.rowId === id) + 1).find((el) => unrated.has(el.dataset.rowId ?? ""));
+    const nextId = next?.dataset.rowId;
+    if (!next || !nextId) return;
+    if (open.includes(id)) onOpenChange([...open.filter((x) => x !== id && x !== nextId), nextId]);
+    next.focus();
+  });
+
   // ── the row menu (table #4) and the verdict dialog ─────────────────────────────────────────────
   const [rating, setRating] = useState<readonly string[] | null>(null);
   const actions = useMemo<RowAction<Finding>[]>(
@@ -149,8 +177,18 @@ function Findings({ run }: { run: LoadedRun }) {
 
   const missing = param !== null && !holds(param) ? param : null;
 
+  // ── «Свернуть все находки» (u4-shape cand-1): its box is there before any row opens (Strict 1) ───────────
+  const anyOpen = open.length > 0;
+  const collapseAll = (
+    <Hint label={COLLAPSE_ALL}>
+      <Button variant="outline" size="icon-sm" aria-label={COLLAPSE_ALL} data-slot="collapse-all" className={cn(!anyOpen && "invisible")} onClick={() => onOpenChange([])}>
+        <ChevronsDownUpIcon />
+      </Button>
+    </Hint>
+  );
+
   return (
-    <div data-slot="findings-view" className="absolute inset-0 flex flex-col gap-2 px-5 pt-3 pb-1">
+    <div ref={root} data-slot="findings-view" className="absolute inset-0 flex flex-col gap-2 px-5 pt-3 pb-1">
       {missing && (
         <p role="status" data-slot="finding-missing" className="m-0 shrink-0">
           <NotFound kind="finding" id={missing} start />
@@ -170,6 +208,7 @@ function Findings({ run }: { run: LoadedRun }) {
         presets={PRESETS}
         search={SEARCH}
         actions={actions}
+        toolbarEnd={collapseAll}
         detail={(f) => <FindingDetail run={run} finding={f} verdicts={verdicts} now={now} />}
         defaultSort={DEFAULT_SORT}
         empty={empty}

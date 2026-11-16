@@ -5,7 +5,7 @@ import type { Finding, Run } from "../../../shared/model.ts";
 import { FINDING_STATUS, NOT_RECORDED, SEVERITY, stageOf, STEPS, VERDICT, type FindingStatus, type Verdict } from "../../../shared/states.ts";
 import type { FilterDef, Preset, SearchDef } from "@/table";
 // From the file, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
-import { DONE_STATES, FACETS, FIX_STATES, MAJOR_UP, NONE, OWN } from "@/finding/facets.ts";
+import { DONE_STATES, FACETS, FIX_STATES, MAJOR_UP, NONE, OBJECTED, OWN } from "@/finding/facets.ts";
 
 // ── ranks (table #2: states by rank, never by alphabet) ─────────────────────────────────────────
 
@@ -28,6 +28,8 @@ export const DEFAULT_SORT = { id: "severity", desc: false } as const;
 export const PRESETS: readonly Preset[] = [
   { id: "all", label: "Все", filters: {} },
   { id: "unrated", label: "Без оценки", filters: { verdict: [NONE] } },
+  // the three verdicts that dispute a finding, together: «…и с чем я не согласен?» (PRODUCT.md → Surfaces; cand-7)
+  { id: "objected", label: "С возражением", filters: { verdict: [OBJECTED] } },
   { id: "fix", label: "В исправление", filters: { state: [...FIX_STATES] } },
   { id: "candidates", label: "Кандидаты", filters: { state: ["candidate"] } },
   { id: "done", label: "Закоммичены", filters: { state: [...DONE_STATES] } },
@@ -71,7 +73,12 @@ export function filtersFor(run: FilterRun): FilterDef<Finding>[] {
       options: [{ value: MAJOR_UP, label: "major и выше" }, ...(["critical", "major", "minor"] as const).map((v) => ({ value: v, label: SEVERITY[v].compact })), { value: NONE, label: NOT_RECORDED }],
     },
     { id: "state", label: "Состояние", values: FACETS.state, options: (Object.keys(FINDING_STATUS) as FindingStatus[]).map((v) => ({ value: v, label: FINDING_STATUS[v].compact })), placeholder: "Найти состояние" },
-    { id: "verdict", label: "Оценка", values: FACETS.verdict, options: [...(Object.keys(VERDICT) as Verdict[]).map((v) => ({ value: v, label: VERDICT[v].compact })), { value: NONE, label: "без оценки" }] },
+    {
+      id: "verdict",
+      label: "Оценка",
+      values: FACETS.verdict,
+      options: [{ value: OBJECTED, label: "с возражением" }, ...(Object.keys(VERDICT) as Verdict[]).map((v) => ({ value: v, label: VERDICT[v].compact })), { value: NONE, label: "без оценки" }],
+    },
     { id: "report", label: "Отчёт", values: FACETS.report, options: reportOptions(run), placeholder: "Найти отчёт" },
     { id: "unit", label: "Юнит", values: FACETS.unit, options: [...unitIds.map((id) => ({ value: id, label: title.has(id) ? `${id} «${title.get(id)}»` : id })), { value: NONE, label: "без юнита" }], placeholder: "Найти юнит" },
     { id: "cause", label: "Охват", values: FACETS.cause, options: [...CAUSES.map((v) => ({ value: v, label: v })), { value: NONE, label: NOT_RECORDED }] },

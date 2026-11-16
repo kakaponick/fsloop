@@ -85,6 +85,11 @@ export const verdictTitle = (ids: readonly string[]): string => (ids.length === 
 
 /** The row menu's item that opens the dialog. */
 export const RATE_ACTION = "Оценить…";
+/** The toolbar's icon control that closes every open detail: its name and tooltip (cand-1). */
+export const COLLAPSE_ALL = "Свернуть все находки";
+/** The verdict toggles' tooltip in the detail, before the four keys' caps in the toggles' order: «Выбрать клавишами
+ * 1 2 3 4». */
+export const KEY_HINT = "Выбрать клавишами";
 
 /** The failed write's toast: its title, and the cause under it without the server's own copy of the title. */
 export const SAVE_FAILED = "Оценка не сохранилась";

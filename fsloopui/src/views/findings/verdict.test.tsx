@@ -167,7 +167,9 @@ describe("setting a verdict over u1's handler", () => {
     for (let i = 1; i < order.length; i++) expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING, `${i}`).toBeTruthy();
     // nothing stands between the prompt and its choices
     expect(line).toHaveTextContent(/^Оценки ещё нет — выберите одну$/);
-    expect(line.nextElementSibling).toBe(group);
+    // (the group sits alone in the box that holds its keys' tooltip)
+    expect(line.nextElementSibling).toBe(group.parentElement);
+    expect(group.parentElement?.children).toHaveLength(1);
     // the hint is gone: what it said is now the note's own status line
     expect(d).not.toHaveTextContent("выберите оценку ещё раз");
     // Strict 1: the line, the field and the status line keep fixed boxes
