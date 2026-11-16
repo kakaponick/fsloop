@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import { criticReport, decisionTable, writeRun } from "../fixtures/make.ts";
 import { createStore, type Store } from "./store.ts";
@@ -38,9 +38,9 @@ const iso = (ms: number) => new Date(ms).toISOString();
 /** Writes a file of the run folder dated `at`, as a run writes it. */
 function write(rel: string, text: string, at: number) {
   const path = join(dir, rel);
-  mkdirSync(join(path, ".."), { recursive: true });
+  mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, text);
-  utimesSync(path, new Date(at), new Date(at));
+  for (let p = path; p !== dir; p = dirname(p)) utimesSync(p, new Date(at), new Date(at));
 }
 
 const journal = (rows: number) => ["| # | stage | question | decision | why | refs |", "|---|---|---|---|---|---|", ...Array.from({ length: rows }, (_, k) => `| ${k + 1} | p1-map | Route ${k + 1}? | worktree | many pages | — |`), ""].join("\n");
