@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
@@ -67,6 +67,46 @@ describe("handle — the API", () => {
     for (const name of ["../run.json", "..%2F..%2Fsecret.txt", "p1.png/../../run.json", "run.json", "a b.png"]) expect((await get(`/api/frame?run=app/${OPEN}&name=${name}`)).status).toBe(400);
     expect((await get(`/api/frame?run=app/nope&name=p1-baseline-shell-1440-light.png`)).status).toBe(404);
     expect((await get(`/api/frame?run=app/${OPEN}&name=p9-none.png`)).status).toBe(404);
+  });
+
+  test("/api/report serves a launch's report as written, by its file name among the run's reports", async () => {
+    const ok = await get(`/api/report?run=app/${OPEN}&file=p1-map-craft-shell.md`);
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+    expect(await ok.text()).toBe(readFileSync(join(runs, OPEN, "reports", "p1-map-craft-shell.md"), "utf8"));
+  });
+
+  test("/api/report refuses a traversal, an unknown run and a file no launch of the run names", async () => {
+    for (const file of ["../run.json", "..%2F..%2F..%2F..%2Fsecret.txt", "reports/p1-map-craft-shell.md", "p1.md/../../run.json", "run.json", "a b.md", "..", ""]) {
+      const res = await get(`/api/report?run=app/${OPEN}&file=${file}`);
+      expect(res.status, file).toBe(400);
+      expect(await res.json()).toEqual({ error: "Недопустимое имя отчёта" });
+    }
+    const unknown = await get(`/api/report?run=app/nope&file=p1-map-craft-shell.md`);
+    expect(unknown.status).toBe(404);
+    expect(await unknown.json()).toEqual({ error: "Прогон app/nope не найден" });
+    // a well-formed name the run's launches do not name — common.md is a file of the folder, not a report
+    for (const file of ["p9-none.md", "common.md"]) {
+      const res = await get(`/api/report?run=app/${OPEN}&file=${file}`);
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: `Отчёт ${file} не найден в прогоне app/${OPEN}`, cause: "ни один запуск прогона не называет этот файл" });
+    }
+  });
+
+  test("/api/report names why a report of the run cannot be read", async () => {
+    const dir = join(runs, OPEN, "reports");
+    rmSync(join(dir, "p1-map-craft-shell.md"));
+    mkdirSync(join(dir, "p1-map-craft-shell.md"));
+    try {
+      const res = await get(`/api/report?run=app/${OPEN}&file=p1-map-craft-shell.md`);
+      expect(res.status).toBe(500);
+      const body = await res.json();
+      expect(body.error).toBe("Отчёт p1-map-craft-shell.md не прочитан");
+      expect(body.cause).toMatch(/EISDIR/);
+    } finally {
+      rmSync(join(dir, "p1-map-craft-shell.md"), { recursive: true });
+      writeFileSync(join(dir, "p1-map-craft-shell.md"), criticReport({ lens: "craft assess" }));
+    }
   });
 
   test("/api/events sends a tick at once, then one after a file of the run changes", async () => {

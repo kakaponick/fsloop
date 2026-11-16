@@ -1,7 +1,7 @@
 // The HTTP handler of fsloopUI: a web Request in, a Response out — the run list, one run, the live tick stream,
 // frames, the verdict write and the built client. main.ts puts it behind node:http on 127.0.0.1.
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { extname, join, resolve, sep } from "node:path";
+import { basename, extname, join, resolve, sep } from "node:path";
 import { HUMAN_VERDICTS } from "../../skills/fsloop/fsl.mjs";
 import { VERDICT, type Verdict } from "../shared/states.ts";
 import type { Git } from "./run.ts";
@@ -45,7 +45,10 @@ const isFile = (p: string) => {
 };
 const notFound = (key: string) => json(404, { error: `Прогон ${key} не найден` });
 
-const ROUTES: Record<string, string> = { "/api/runs": "GET", "/api/run": "GET", "/api/events": "GET", "/api/frame": "GET", "/api/verdict": "POST" };
+/** A report's file name: no folder, no traversal — looked up among the run's own launches, never joined into a path. */
+export const REPORT_NAME = /^[A-Za-z0-9_-][A-Za-z0-9._-]*\.md$/;
+
+const ROUTES: Record<string, string> = { "/api/runs": "GET", "/api/run": "GET", "/api/events": "GET", "/api/frame": "GET", "/api/report": "GET", "/api/verdict": "POST" };
 
 export function createApp({ roots, distDir, intervalMs = 2000, now = Date.now, git }: AppOptions) {
   const store = createStore({ roots, git });
@@ -111,6 +114,25 @@ export function createApp({ roots, distDir, intervalMs = 2000, now = Date.now, g
     return new Response(readFileSync(path), { headers: { "content-type": "image/png", "cache-control": "no-cache" } });
   }
 
+  /** A launch's report as written. The name is matched strictly, then looked up among the reports the run's own
+   * launches name; the path is the model's, never joined from the request. */
+  function report(url: URL): Response {
+    const key = url.searchParams.get("run") ?? "";
+    const name = url.searchParams.get("file") ?? "";
+    if (!REPORT_NAME.test(name)) return json(400, { error: "Недопустимое имя отчёта" });
+    const run = store.run(key);
+    if (!run) return notFound(key);
+    const launch = run.launches.find((l) => l.report && basename(l.report) === name);
+    const path = launch?.report ? resolve(run.dir, launch.report) : null;
+    if (!path || !path.startsWith(resolve(run.dir) + sep)) return json(404, { error: `Отчёт ${name} не найден в прогоне ${key}`, cause: "ни один запуск прогона не называет этот файл" });
+    try {
+      return new Response(readFileSync(path, "utf8"), { headers: { "content-type": "text/markdown; charset=utf-8", "cache-control": "no-store" } });
+    } catch (e) {
+      const missing = (e as NodeJS.ErrnoException)?.code === "ENOENT";
+      return json(missing ? 404 : 500, { error: `Отчёт ${name} не прочитан`, cause: missing ? "файла нет" : e instanceof Error ? e.message : String(e) });
+    }
+  }
+
   async function verdict(req: Request): Promise<Response> {
     let body: Record<string, unknown>;
     try {
@@ -168,6 +190,7 @@ export function createApp({ roots, distDir, intervalMs = 2000, now = Date.now, g
       }
       if (url.pathname === "/api/events") return events();
       if (url.pathname === "/api/frame") return frame(url);
+      if (url.pathname === "/api/report") return report(url);
       return verdict(req);
     }
     if (req.method !== "GET" && req.method !== "HEAD") return new Response(null, { status: 405 });

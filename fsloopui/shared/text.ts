@@ -16,6 +16,8 @@ export const NOUNS = {
   frame: ["кадр", "кадра", "кадров"],
   convention: ["соглашение", "соглашения", "соглашений"],
   entry: ["запись", "записи", "записей"],
+  /** A journal entry as the journal's reader counts it: one decision of the run. */
+  decision: ["решение", "решения", "решений"],
   pass: ["проход", "прохода", "проходов"],
   token: ["токен", "токена", "токенов"],
 } as const satisfies Record<string, Forms>;

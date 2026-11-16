@@ -15,6 +15,8 @@ describe("plural (rules/ui → Copy 3)", () => {
     expect(count(0, NOUNS.unit)).toBe("0 юнитов");
     expect(count(2, NOUNS.unit)).toBe("2 юнита");
     expect(count(97, NOUNS.launch)).toBe("97 запусков агента");
+    expect([1, 3, 143].map((n) => count(n, NOUNS.decision))).toEqual(["1 решение", "3 решения", "143 решения"]);
+    expect(count(11, NOUNS.decision)).toBe("11 решений");
     expect(plural(24, NOUNS.commit)).toBe("коммита");
   });
 

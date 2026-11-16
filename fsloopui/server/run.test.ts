@@ -211,3 +211,58 @@ describe("readRun — the record and its fallbacks", () => {
     expect(readRun(dir).errors).toEqual([{ file: "reports/p1-map-craft-gone.md", cause: "файла нет" }]);
   });
 });
+
+describe("readRun — a launch's boot, child launches and agent id; a unit's checks", () => {
+  test("launches.md's boot, children and agent id reach the launch as written", () => {
+    const dir = fixture({
+      launches: [
+        { id: "p1-map-craft-actions-bots", stage: "p1-map", agent: "fsloop-critic", description: "craft actions-bots", agentId: "a1b2c3d4e5", boot: 41_250, children: { launches: 2, input: 1_800, output: 22_000, cacheWrite: 90_000, cacheRead: 610_000 }, report: criticReport({ lens: "craft assess", findings: [REAL.craft9] }) },
+        { id: "p1-review-critic-code", stage: "p1-review", agent: "fsloop-critic", description: "critic code", report: criticReport({ lens: "code", findings: [REAL.code29] }) },
+      ],
+    });
+    const [craft, code] = readRun(dir).launches;
+    expect(craft.agentId).toBe("a1b2c3d4e5");
+    expect(craft.boot).toBe(41_250);
+    expect(craft.children).toEqual({ launches: 2, input: 1_800, output: 22_000, cacheWrite: 90_000, cacheRead: 610_000 });
+    // no agent id written: absent, never guessed
+    expect(code).not.toHaveProperty("agentId");
+    expect(code.boot).toBe(0);
+  });
+
+  test("a launches.md written before the boot and children columns: both absent", () => {
+    const legacy = ["| launch | stage | agent | description | model | started | ended | seconds | input | output | cache write | cache read | transcript | report |", "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|", "| p1-review-critic-code | p1-review | fsloop-critic | critic code | claude-opus-5-5 | — | — | — | 10 | 20 | 30 | 40 | — | reports/p1-review-critic-code.md |", ""].join("\n");
+    const dir = fixture({ launches: [], files: { "launches.md": legacy, "reports/p1-review-critic-code.md": criticReport({ lens: "code", findings: [REAL.code29] }) } });
+    const [l] = readRun(dir).launches;
+    expect(l.id).toBe("p1-review-critic-code");
+    expect(l).not.toHaveProperty("boot");
+    expect(l).not.toHaveProperty("children");
+    expect(l).not.toHaveProperty("agentId");
+  });
+
+  test("a unit's checks across its verify, land and debug logs, in the shape the units view reads", () => {
+    const dir = fixture({
+      units: [
+        {
+          id: "u1",
+          state: "verify",
+          title: "actions pages",
+          checks: ["1 type-check — exit 0 — 12 s — ", "2 tests — exit 1 — 31 s — 2 failed"],
+          logs: { "debug.log": ["1 tests — exit 0 — 20 s — after the fix"], "land.log": ["1 merge — exit 0 — 3 s — "] },
+        },
+      ],
+    });
+    const [u] = readRun(dir).units;
+    expect(u.checks?.map(({ file, n, label, exit, line, seconds }) => ({ file, n, label, exit, line, seconds }))).toEqual([
+      { file: "debug.log.lines", n: 1, label: "tests", exit: 0, line: "20 s — after the fix", seconds: 20 },
+      { file: "land.log.lines", n: 1, label: "merge", exit: 0, line: "3 s —", seconds: 3 },
+      { file: "verify.log.lines", n: 1, label: "type-check", exit: 0, line: "12 s —", seconds: 12 },
+      { file: "verify.log.lines", n: 2, label: "tests", exit: 1, line: "31 s — 2 failed", seconds: 31 },
+    ]);
+    for (const c of u.checks ?? []) expect(c.endedAt).toBe(new Date(NOW - 10 * 60_000).toISOString());
+  });
+
+  test("a unit with no logs carries no checks", () => {
+    const dir = fixture({ units: [{ id: "u1", state: "ready", title: "actions pages" }] });
+    expect(readRun(dir).units[0].checks).toEqual([]);
+  });
+});

@@ -88,6 +88,31 @@ export interface Unit {
   launches: string[];
   /** The running launch's start, else the last check's end; absent when neither is recorded. */
   since?: string;
+  /** Every line of the unit's check logs (units/<id>/*.log.lines — verify, land, debug), by log, in order. */
+  checks?: UnitCheck[];
+}
+
+/** One line of a unit's check log, as fsl.mjs reads it; a line it cannot read keeps only `file` and `line`. */
+export interface UnitCheck {
+  /** The log's file under the unit's folder: «verify.log.lines». */
+  file: string;
+  n: number | null;
+  label: string | null;
+  exit: number | null;
+  /** What the line says after its exit code: «31 s — 2 failed». */
+  line: string | null;
+  seconds?: number | null;
+  startedAt?: string | null;
+  endedAt?: string | null;
+}
+
+/** The launches an agent started itself, and their tokens. */
+export interface ChildLaunches {
+  launches: number;
+  input: number;
+  output: number;
+  cacheWrite: number;
+  cacheRead: number;
 }
 
 export interface ReportSection {
@@ -115,6 +140,12 @@ export interface Launch {
   endedAt: string | null;
   seconds: number | null;
   spend: Spend | null;
+  /** The tokens of the launch's first request; absent when launches.md has no boot column. */
+  boot?: number;
+  /** The launches it started itself; absent when launches.md has no children columns. */
+  children?: ChildLaunches;
+  /** The agent's id; absent when the row names none. */
+  agentId?: string;
   transcript: string | null;
   report: string | null;
   reportMissing: boolean;

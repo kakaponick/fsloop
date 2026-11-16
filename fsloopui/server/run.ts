@@ -6,7 +6,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { build, collect, HUMAN_VERDICTS } from "../../skills/fsloop/fsl.mjs";
-import type { Convention, FileError, Finding, FindingSource, JournalEntry, Launch, Run, RunningLaunch, Surface, Unit, UserVerdict } from "../shared/model.ts";
+import type { Convention, FileError, Finding, FindingSource, JournalEntry, Launch, Run, RunningLaunch, Surface, Unit, UnitCheck, UserVerdict } from "../shared/model.ts";
 import { agentKind, launchName, unitStateOf, type Decision, type FindingStatus, type Verdict } from "../shared/states.ts";
 import { firstSentence, framesOf, headOf, splitText } from "./finding-text.ts";
 
@@ -200,6 +200,11 @@ function journalOf(json: Json, findings: Finding[], units: Unit[], launches: Lau
   return rows.map((r) => ({ n: String(r.n), stage: r.stage, question: r.question, decision: r.decision, why: r.why, refs: (r.refs ?? []).map((ref: Json) => ({ id: ref.id, kind: ref.kind ?? null, found: found(ref.id, ref.kind ?? null) })) }));
 }
 
+/** A check line of run.json → units[].checks, field for field; what fsl.mjs did not read stays null. */
+function checkOf(c: Json): UnitCheck {
+  return { file: String(c.file ?? ""), n: c.n ?? null, label: c.label ?? null, exit: c.exit ?? null, line: c.line ?? null, seconds: c.seconds ?? null, startedAt: c.startedAt ?? null, endedAt: c.endedAt ?? null };
+}
+
 function sinceOf(u: Json, running: RunningLaunch[]): string | undefined {
   const run = running.find((r) => new RegExp(`^${u.id}\\b`).test(r.description ?? ""));
   if (run?.startedAt) return run.startedAt;
@@ -237,6 +242,7 @@ export function readRun(runDir: string, opts: ReadOptions = {}): Run {
     const unit: Unit = { id: u.id, pass: u.pass ?? 1, state, stateText: state === "unknown" ? (u.state ?? null) : null, sha: u.sha ?? null, commits: u.commits ?? [], blockedWhy: u.blockedWhy ?? null, tree: u.tree && !NONE.test(u.tree) ? u.tree : null, title: u.title ?? "", brief: u.brief ?? null, kind: u.kind || null, blockedBy: u.blockedBy ?? [], closes: u.closes ?? [], launches: u.launches ?? [] };
     const since = sinceOf(u, running);
     if (since) unit.since = since;
+    if (Array.isArray(u.checks)) unit.checks = (u.checks as Json[]).map(checkOf);
     return unit;
   });
 
@@ -246,7 +252,7 @@ export function readRun(runDir: string, opts: ReadOptions = {}): Run {
   const launches: Launch[] = rawLaunches.map((l) => {
     if (l.reportMissing) errors.push({ file: l.report || l.id, cause: l.report && existsSync(join(runDir, l.report)) ? "файл пуст" : "файла нет" });
     const sections = Object.fromEntries(Object.entries((l.block ?? {}) as Json).map(([k, v]) => [k, { value: v.value ?? "", items: v.items ?? [] }]));
-    return {
+    const launch: Launch = {
       id: l.id,
       stage: l.stage,
       agent: l.agent || null,
@@ -266,6 +272,12 @@ export function readRun(runDir: string, opts: ReadOptions = {}): Run {
       unparsed: l.unparsed ?? [],
       findings: findings.filter((f) => f.launch === l.id).map((f) => f.id),
     };
+    // Written by the row or absent: a row saved before a column existed is unknown, never zero.
+    if (typeof l.spend?.boot === "number") launch.boot = l.spend.boot;
+    const c = l.spend?.children;
+    if (c && typeof c === "object") launch.children = { launches: c.launches ?? 0, input: c.input ?? 0, output: c.output ?? 0, cacheWrite: c.cacheWrite ?? 0, cacheRead: c.cacheRead ?? 0 };
+    if (typeof l.agentId === "string" && l.agentId && !NONE.test(l.agentId)) launch.agentId = l.agentId;
+    return launch;
   });
 
   const closed = recorded ? json.closed === true : null;

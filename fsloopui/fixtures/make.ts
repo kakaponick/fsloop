@@ -19,6 +19,12 @@ export interface LaunchSpec {
   endedAt?: string;
   seconds?: number;
   spend?: { input: number; output: number; cacheWrite: number; cacheRead: number };
+  /** The tokens of the launch's first request; 0 by default. */
+  boot?: number;
+  /** The launches it started itself and their tokens; none by default. */
+  children?: { launches: number; input: number; output: number; cacheWrite: number; cacheRead: number };
+  /** The agent's id; «—» by default. */
+  agentId?: string;
   transcript?: string;
   /** The report's text; null writes the row without its file. */
   report: string | null;
@@ -36,6 +42,8 @@ export interface UnitSpec {
   brief?: string;
   /** `<n> <label> — exit <code> — <s> s` lines of units/<id>/verify.log.lines, each with its log file. */
   checks?: string[];
+  /** Other check logs of the unit by name («land.log», «debug.log»): units/<id>/<name>.lines, same line shape. */
+  logs?: Record<string, string[]>;
 }
 
 export interface RunSpec {
@@ -118,7 +126,8 @@ export function writeRun(dir: string, spec: RunSpec): string {
         LAUNCH_HEAD,
         launches.map((l) => {
           const s = l.spend ?? { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
-          return [l.id, l.stage, l.agent, l.description, l.model ?? "claude-opus-5-5", l.startedAt ?? "—", l.endedAt ?? "—", l.seconds ?? "—", s.input, s.output, s.cacheWrite, s.cacheRead, 0, 0, 0, 0, 0, 0, "—", l.transcript ?? "—", l.reportPath ?? `reports/${l.id}.md`];
+          const c = l.children ?? { launches: 0, input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
+          return [l.id, l.stage, l.agent, l.description, l.model ?? "claude-opus-5-5", l.startedAt ?? "—", l.endedAt ?? "—", l.seconds ?? "—", s.input, s.output, s.cacheWrite, s.cacheRead, l.boot ?? 0, c.launches, c.input, c.output, c.cacheWrite, c.cacheRead, l.agentId ?? "—", l.transcript ?? "—", l.reportPath ?? `reports/${l.id}.md`];
         }),
       ),
     );
@@ -132,6 +141,10 @@ export function writeRun(dir: string, spec: RunSpec): string {
       if (u.checks?.length) {
         w(`units/${u.id}/verify.log.lines`, u.checks.join("\n") + "\n");
         u.checks.forEach((_, k) => w(`units/${u.id}/verify.log.${k + 1}`, "ok\n"));
+      }
+      for (const [name, lines] of Object.entries(u.logs ?? {})) {
+        w(`units/${u.id}/${name}.lines`, lines.join("\n") + "\n");
+        lines.forEach((_, k) => w(`units/${u.id}/${name}.${k + 1}`, "ok\n"));
       }
     }
   }
@@ -222,6 +235,18 @@ export function criticReport(parts: { lens: string; audit?: string; findings?: s
   out.push("CANDIDATES:", ...list(parts.candidates));
   if (parts.order) out.push("ORDER:", ...list(parts.order));
   return out.join("\n") + "\n";
+}
+
+/** The map's free-text report: a heading and a table per part, eight tables as the real map writes them. */
+export function mapReport(): string {
+  const parts = ["Functions", "Server", "Parser gaps", "fsl.mjs computes", "Production shape", "Building blocks", "Tokens", "Components"];
+  const out = ["# Map of the project", "", "What the prototype does, function by function, and what the rebuild reuses.", ""];
+  parts.forEach((title, t) => {
+    out.push(`## ${t + 1}. ${title}`, "", "| # | what | where | note |", "|---|---|---|---|");
+    for (let k = 1; k <= 9; k++) out.push(`| ${k} | ${title.toLowerCase()} item ${k} with a name long enough to need room | template.html:${t * 100 + k * 7} | kept as is, read by \`fsl.mjs\` |`);
+    out.push("");
+  });
+  return out.join("\n");
 }
 
 export function implementReport(parts: { changed: string[]; open?: string[]; notes?: string[] }): string {
@@ -387,7 +412,7 @@ function maxRun(now: number): Omit<RunSpec, "id" | "mtime" | "now"> {
   const decisions: Record<string, { finding: string; decision: string; ref?: string; why: string }[]> = {};
   const decide = (stage: string, finding: string, decision: string, ref?: string) => (decisions[stage] ??= []).push({ finding, decision, ref, why: decision === "fix" ? "above the bar by its cited rule" : "below the bar, listed in the report" });
   const add = (l: Omit<LaunchSpec, "startedAt" | "endedAt" | "seconds" | "spend">) => {
-    launches.push({ ...l, startedAt: iso(clock), endedAt: iso(clock + 9 * MIN), seconds: 540, spend: { input: 900 + launches.length, output: 40_000, cacheWrite: 250_000, cacheRead: 3_100_000 } });
+    launches.push({ ...l, startedAt: iso(clock), endedAt: iso(clock + 9 * MIN), seconds: 540, spend: { input: 900 + launches.length, output: 40_000, cacheWrite: 250_000, cacheRead: 3_100_000 }, boot: 38_000 + launches.length, agentId: `a${(0x5e0000 + launches.length).toString(16)}` });
     clock += 10 * MIN;
   };
   const closes: Record<string, string[]> = {};
@@ -395,7 +420,7 @@ function maxRun(now: number): Omit<RunSpec, "id" | "mtime" | "now"> {
   const unitFor = (pass: number, k: number) => (pass === 1 ? `u${1 + (k % 16)}` : `u${17 + (k % 16)}`);
   const fixUnit = (pass: number, k: number) => (pass === 1 ? `f${1 + (k % 5)}` : `f${6 + (k % 5)}`);
 
-  add({ id: "p1-map-map", stage: "p1-map", agent: "Explore", description: "map", report: "Map of the project.\n" });
+  add({ id: "p1-map-map", stage: "p1-map", agent: "Explore", description: "map", report: mapReport(), children: { launches: 3, input: 2_400, output: 61_000, cacheWrite: 180_000, cacheRead: 1_450_000 } });
   add({ id: "p1-spike-spike-telegram", stage: "p1-spike", agent: "spike-researcher", description: "spike telegram", report: "SPIKE: telegram\n" });
   SURFACES.forEach((s, si) => {
     const lid = `p1-map-craft-${s}`;
@@ -479,7 +504,7 @@ function maxRun(now: number): Omit<RunSpec, "id" | "mtime" | "now"> {
   for (let k = 1; k <= 32; k++) {
     const pass = k <= 16 ? 1 : 2;
     const state = pass === 1 || k <= 22 ? `committed ${(0xc0ffee00 + k).toString(16)}` : k === 23 ? "blocked: waits for the user — the empty state's wording (j140)" : k === 30 ? "implement" : k === 31 ? "verify" : k <= 26 ? "ready" : "drafted";
-    units.push({ id: `u${k}`, pass, state, title: `part ${k}`, brief: briefText(`u${k}`, `part ${k}`, closes[`u${k}`] ?? [], k === 24 ? "u23" : "—"), checks: k === 31 ? [`1 type-check — exit 0 — 14 s — `, `2 tests — exit 1 — 31 s — 2 failed`] : undefined });
+    units.push({ id: `u${k}`, pass, state, title: `part ${k}`, brief: briefText(`u${k}`, `part ${k}`, closes[`u${k}`] ?? [], k === 24 ? "u23" : "—"), checks: k === 31 ? [`1 type-check — exit 0 — 14 s — `, `2 tests — exit 1 — 31 s — 2 failed`] : k === 22 ? [`1 type-check — exit 0 — 13 s — `, `2 tests — exit 0 — 40 s — `] : undefined, logs: k === 22 ? { "land.log": [`1 merge — exit 0 — 4 s — `] } : k === 31 ? { "debug.log": [`1 tests — exit 1 — 28 s — 2 failed`, `2 tests — exit 1 — 30 s — 1 failed`] } : undefined });
   }
   for (let k = 1; k <= 10; k++) units.push({ id: `f${k}`, pass: k <= 5 ? 1 : 2, state: k <= 8 ? `committed ${(0xf1f1f100 + k).toString(16)}` : "ready", title: `fixes ${k}`, brief: briefText(`f${k}`, `fixes ${k}`, [...(closes[`f${k}`] ?? []), ...own.filter((o) => o.ref === `f${k}`).map((o) => o.finding)]) });
 
