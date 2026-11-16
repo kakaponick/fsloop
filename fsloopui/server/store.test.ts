@@ -1,9 +1,29 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { afterAll, beforeEach, describe, expect, test } from "vitest";
-import { criticReport, decisionTable, writeRun } from "../fixtures/make.ts";
+import { dirname, join, resolve } from "node:path";
+import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
+import { criticReport, decisionTable, writeRecord, writeRun, writeRunningLaunch, writeTranscript } from "../fixtures/make.ts";
 import { createStore, type Store } from "./store.ts";
+
+/** Every folder the server lists while `on`, sync or not: the walks a tick makes, counted (improve-17). */
+const reads = vi.hoisted(() => ({ on: false, paths: [] as string[] }));
+vi.mock("node:fs", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  const readdirSync = ((p: Parameters<typeof fs.readdirSync>[0], o?: unknown) => {
+    if (reads.on) reads.paths.push(String(p));
+    return (fs.readdirSync as (p: unknown, o?: unknown) => unknown)(p, o);
+  }) as typeof fs.readdirSync;
+  return { ...fs, default: { ...fs, readdirSync }, readdirSync };
+});
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs/promises")>();
+  const readdir = ((p: Parameters<typeof fs.readdir>[0], o?: unknown) => {
+    if (reads.on) reads.paths.push(String(p));
+    return (fs.readdir as (p: unknown, o?: unknown) => unknown)(p, o);
+  }) as typeof fs.readdir;
+  return { ...fs, default: { ...fs, readdir }, readdir };
+});
+const listed = (dir: string) => reads.paths.filter((p) => resolve(p) === resolve(dir)).length;
 
 const NOW = Date.parse("2026-11-16T10:00:00Z");
 const temp = mkdtempSync(join(tmpdir(), "fsloopui-store-"));
@@ -99,6 +119,92 @@ describe("createStore — a run re-read only from settled bytes (runtime-2)", ()
     await store.refresh();
     expect(store.list().list[0].lastWriteAt).toBe(iso(NOW + 5000));
     expect(store.versions().runs[KEY]).toBe(version);
+  });
+});
+
+describe("improve-17 · a live run with a launch running", () => {
+  const MIN = 60_000;
+  const SESSION = "5e550000-0000-4000-8000-0000000017a1";
+  const LIVE_ID = "11fe0017";
+  const LIVE_KEY = `app/${LIVE_ID}`;
+  /** An open run whose orchestrator session has a transcript and one launch running, in a root of its own. */
+  function liveRoot() {
+    const at = join(temp, `live-${++n}`);
+    const runDir = join(at, "app", ".claude", "fsloop", "runs", LIVE_ID);
+    const projects = join(at, "config", "projects");
+    writeRun(runDir, { id: LIVE_ID, mtime: NOW - MIN, now: NOW, record: true, sessions: [SESSION] });
+    const main = writeTranscript(projects, "C--dev-app", SESSION, NOW - 20 * MIN);
+    writeRunningLaunch(projects, "C--dev-app", SESSION, runDir, { agentId: "feed17", description: "u1 implement", agent: "fsloop-implement", startedAt: NOW - 30 * MIN, lastAt: NOW - 4 * MIN });
+    writeRecord(runDir, NOW, projects);
+    for (const f of ["run.json", "summary.json"]) utimesSync(join(runDir, f), new Date(NOW - MIN), new Date(NOW - MIN));
+    const subagents = join(projects, "C--dev-app", SESSION, "subagents");
+    return { root: at, runDir, main, subagents, launch: join(subagents, "agent-feed17.jsonl") };
+  }
+  /** The launch writes on: its transcript grows, dated `at`. */
+  const launchWrites = (path: string, at: number) => {
+    appendFileSync(path, '{"type":"progress"}\n');
+    utimesSync(path, new Date(at), new Date(at));
+  };
+  /** The orchestrator answers once more: one message whose tokens its transcript records. */
+  const orchestratorSpends = (path: string, at: number) => {
+    appendFileSync(path, JSON.stringify({ type: "assistant", message: { id: "m-17", role: "assistant", content: [], usage: { input_tokens: 10, output_tokens: 20, cache_creation_input_tokens: 0, cache_read_input_tokens: 300 } } }) + "\n");
+    utimesSync(path, new Date(at), new Date(at));
+  };
+
+  test("read again a tick apart with nothing moved but the launch's last write and the run's live tokens: the model keeps its version — it is not sent again — and the card carries both", async () => {
+    const live = liveRoot();
+    const s = createStore({ roots: [live.root], git: () => null });
+    await s.refresh({ full: true });
+    const version = s.versions().runs[LIVE_KEY];
+    const listVersion = s.versions().list;
+    // A Verify streams into the unit's folder — the run is read again — while the launch and the orchestrator write.
+    const log = join(live.runDir, "units", "u1", "verify.log.9");
+    mkdirSync(dirname(log), { recursive: true });
+    writeFileSync(log, "ok\n");
+    for (let p = log; p !== live.runDir; p = dirname(p)) utimesSync(p, new Date(NOW + 5000), new Date(NOW + 5000));
+    orchestratorSpends(live.main, NOW + 8000);
+    launchWrites(live.launch, NOW + 9000);
+    await s.refresh();
+    await s.refresh();
+    expect(s.versions().runs[LIVE_KEY]).toBe(version);
+    const card = s.list().list[0];
+    expect(card.lastWriteAt).toBe(iso(NOW + 9000));
+    expect(card.runningLastAt).toEqual({ feed17: iso(NOW + 9000) });
+    expect(card.spend?.orchestrator).toEqual({ input: 10, output: 20, cacheWrite: 0, cacheRead: 300 });
+    // The list moved instead: a client reads the card, a few hundred bytes, and not the run.
+    expect(s.versions().list).toBeGreaterThan(listVersion);
+    // Whoever reads the run now reads it as fresh as the card.
+    const served = s.run(LIVE_KEY);
+    expect(served?.running.map((r) => [r.agentId, r.lastAt])).toEqual([["feed17", iso(NOW + 9000)]]);
+    expect(served?.spend?.orchestrator).toEqual({ input: 10, output: 20, cacheWrite: 0, cacheRead: 300 });
+  });
+
+  test("a tick lists each folder once — the run folder and the session's sub-agents — and the launch's last write comes from that walk", async () => {
+    const live = liveRoot();
+    const s = createStore({ roots: [live.root], git: () => null });
+    await s.refresh({ full: true });
+    const version = s.versions().runs[LIVE_KEY];
+    launchWrites(live.launch, NOW + 9000);
+    reads.paths = [];
+    reads.on = true;
+    await s.refresh();
+    reads.on = false;
+    expect([listed(live.runDir), listed(live.subagents)]).toEqual([1, 1]);
+    expect(s.list().list[0]).toMatchObject({ lastWriteAt: iso(NOW + 9000), runningLastAt: { feed17: iso(NOW + 9000) } });
+    expect(s.versions().runs[LIVE_KEY]).toBe(version);
+  });
+
+  test("start-up reads each run and the first tick walks its folder once: the card's last write comes from that walk", async () => {
+    const live = liveRoot();
+    reads.paths = [];
+    reads.on = true;
+    const s = createStore({ roots: [live.root], git: () => null });
+    s.prime();
+    await s.refresh({ full: true });
+    reads.on = false;
+    expect(listed(live.runDir)).toBe(1);
+    // The folder's newest write (NOW − 1 min) is newer than the launch's (NOW − 4 min).
+    expect(s.list().list[0]).toMatchObject({ key: LIVE_KEY, lastWriteAt: iso(NOW - MIN), runningLastAt: { feed17: iso(NOW - 4 * MIN) } });
   });
 });
 

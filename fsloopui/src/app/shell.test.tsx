@@ -141,7 +141,9 @@ describe("the shell's walk", () => {
     app.answer((path) => (path.startsWith("/api/run?") ? Promise.resolve(json(500, { error: "нет доступа к run.json" })) : null));
     renderShell(app.transport, { path: `/r/${keyOf(24)}` });
     expect(await within(await screen.findByRole("region", { name: "Раздел прогона" })).findByText("Прогон 077e72d5 не прочитан: нет доступа к run.json")).toBeInTheDocument();
-    expect(fact("Этап")).toBe("ревью · проход 1 из 2 · с 15:38 МСК");
+    // The card comes with the list, which the server answers after its first walk (improve-17): the failed run's
+    // answer, given at once here, may come first.
+    await waitFor(() => expect(fact("Этап")).toBe("ревью · проход 1 из 2 · с 15:38 МСК"));
     app.answer(null);
     await user.click(within(body()).getByRole("button", { name: "Повторить" }));
     await loaded();

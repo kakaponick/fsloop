@@ -2,7 +2,7 @@
 // a frame's address. Every call goes through a transport — the browser's `fetch` and `EventSource` in the app, the
 // server's own handler in the tests — and every refusal reads as an Error carrying the server's own words.
 import { createContext, createElement, useContext, type ReactNode } from "react";
-import type { RunCard, ServedRun, UserVerdict } from "../../shared/model.ts";
+import type { RunCard, RunSpend, ServedRun, UserVerdict } from "../../shared/model.ts";
 import type { Verdict } from "../../shared/states.ts";
 
 export interface Versions {
@@ -99,6 +99,25 @@ const basename = (p: string) => p.split(/[\\/]/).at(-1) ?? p;
 function reportStamp(run: ServedRun, file: string): string | null {
   const l = run.launches.find((x) => x.report && basename(x.report) === file);
   return l ? JSON.stringify([l.report, l.reportMissing, l.sections, l.unparsed, l.verdicts, l.findings]) : null;
+}
+
+const spent = (s: RunSpend | null) => (s ? [s.launches, s.orchestrator].reduce((sum, p) => sum + (p ? p.input + p.output + p.cacheWrite + p.cacheRead : 0), 0) : -1);
+
+/** The run as a view reads it. A running launch's last write and the run's tokens move with every write of the run,
+ * so the server keeps them out of the run's version and serves them with its card (improve-17): each is the card's
+ * when the card's is newer — a later time, more tokens — and the run stays the same object when neither is. */
+export function withLive(run: ServedRun, card: Pick<RunCard, "runningLastAt" | "spend"> | undefined): ServedRun {
+  if (!card) return run;
+  let moved = false;
+  const running = run.running.map((r) => {
+    const at = card.runningLastAt[r.agentId];
+    if (!at || (r.lastAt !== null && at <= r.lastAt)) return r;
+    moved = true;
+    return { ...r, lastAt: at };
+  });
+  const spend = spent(card.spend) > spent(run.spend) ? card.spend : run.spend;
+  if (!moved && spend === run.spend) return run;
+  return { ...run, running: moved ? running : run.running, spend };
 }
 
 /** Runs and report texts kept for the re-read rule: a few, the newest. */

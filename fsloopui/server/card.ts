@@ -1,8 +1,7 @@
 // The sidebar card of a run and the time its liveness counts from — computed here once, read by every surface.
-import { readdirSync, statSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
 import type { Run, RunCard } from "../shared/model.ts";
 import { NOT_RECORDED, stageOf, type UnitState } from "../shared/states.ts";
+import type { Walk } from "./walk.ts";
 
 const GOAL_MAX = 300;
 
@@ -15,7 +14,8 @@ export function goalLine(goal: string | null): string | null {
   return s.slice(0, cut > 0 ? cut : GOAL_MAX).replace(/[\s,;:—-]+$/, "") + "…";
 }
 
-export function cardOf({ key, project, run, lastWriteAt }: { key: string; project: string; run: Run; lastWriteAt: string | null }): RunCard {
+/** `runningLastAt` — as the tick's walk dated the running launches; the model's own times when absent. */
+export function cardOf({ key, project, run, lastWriteAt, runningLastAt = runningLastAtOf(run) }: { key: string; project: string; run: Run; lastWriteAt: string | null; runningLastAt?: Record<string, string | null> }): RunCard {
   const units: Partial<Record<UnitState, number>> = {};
   for (const u of run.units) units[u.state] = (units[u.state] ?? 0) + 1;
   const stage = run.now?.stage ?? null;
@@ -42,6 +42,7 @@ export function cardOf({ key, project, run, lastWriteAt }: { key: string; projec
     blocked: run.units.filter((u) => u.state === "blocked").map((u) => ({ id: u.id, why: u.blockedWhy })),
     launches: run.launches.length,
     running: run.running.length,
+    runningLastAt,
     launchCount: run.launchCount,
     spend: run.spend,
     passes: run.passes,
@@ -57,49 +58,32 @@ export function cardOf({ key, project, run, lastWriteAt }: { key: string; projec
   };
 }
 
-function mtime(path: string): number {
-  try {
-    return statSync(path).mtimeMs;
-  } catch {
-    return 0;
-  }
-}
-
-/** The newest mtime of a folder's entries, nested folders included; `skip` — names left out at its top. */
-function newestUnder(dir: string, only?: RegExp, skip?: ReadonlySet<string>): number {
-  let latest = 0;
-  let entries;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return 0;
-  }
-  for (const e of entries) {
-    if (skip?.has(e.name)) continue;
-    const p = join(dir, e.name);
-    if (e.isDirectory()) latest = Math.max(latest, only ? 0 : mtime(p), newestUnder(p, only));
-    else if (!only || only.test(e.name)) latest = Math.max(latest, mtime(p));
-  }
-  return latest;
-}
-
 /** Files of a run folder the run does not write: the user's verdicts, which fsloopUI itself appends. A verdict is
  * not the run working (rules/ui → Live data 4); the version stamp still sees it. */
 export const NOT_THE_RUNS: ReadonlySet<string> = new Set(["human.jsonl"]);
 
+/** The times a walk of the run took (walk.ts → walkRun): the store's one walk per tick (runtime cand-1, improve-17). */
+export type Written = Pick<Walk, "newest" | "transcripts" | "agents">;
+
+const isoOf = (ms: number) => (ms ? new Date(ms).toISOString() : null);
+
 /** When the run last wrote anything: its folder's files at any depth but fsloopUI's own; for an open run also the
  * orchestrator's transcripts its record names with their sub-agents' transcripts, the launches' transcripts, and
- * each running launch's last write. Null when nothing is dated. `folderNewest` — the folder's part, when a walk of
- * it already took it (the store's one walk per tick, runtime cand-1). */
-export function lastWriteOf(run: Run, folderNewest?: number): string | null {
-  let latest = folderNewest ?? newestUnder(run.dir, undefined, NOT_THE_RUNS);
+ * each running launch's last write. Null when nothing is dated. */
+export function lastWriteOf(run: Pick<Run, "closed" | "running">, at: Written): string | null {
+  let latest = at.newest;
   if (!run.closed) {
-    for (const s of run.sessions) {
-      if (!s.transcript) continue;
-      latest = Math.max(latest, mtime(s.transcript), newestUnder(join(dirname(s.transcript), basename(s.transcript, ".jsonl"), "subagents"), /\.jsonl$/));
-    }
-    for (const l of run.launches) if (l.transcript) latest = Math.max(latest, mtime(l.transcript));
-    for (const r of run.running) latest = Math.max(latest, r.lastAt ? Date.parse(r.lastAt) || 0 : 0);
+    latest = Math.max(latest, at.transcripts);
+    for (const r of run.running) latest = Math.max(latest, at.agents.get(r.agentId) ?? (r.lastAt ? Date.parse(r.lastAt) || 0 : 0));
   }
-  return latest ? new Date(latest).toISOString() : null;
+  return isoOf(latest);
 }
+
+/** Each running launch's last write by its agent id: its transcript's time as the walk read it, else the model's. It
+ * moves with every write of the launch, so it travels with the card, never in the model's hash (improve-17). */
+export function runningLastAtOf(run: Pick<Run, "running">, at?: Written): Record<string, string | null> {
+  return Object.fromEntries(run.running.map((r) => [r.agentId, isoOf(at?.agents.get(r.agentId) ?? 0) ?? r.lastAt]));
+}
+
+/** What the card carries live of the run's writes, from the tick's walk. */
+export const writtenOf = (run: Pick<Run, "closed" | "running">, at: Written): Pick<RunCard, "lastWriteAt" | "runningLastAt"> => ({ lastWriteAt: lastWriteOf(run, at), runningLastAt: runningLastAtOf(run, at) });

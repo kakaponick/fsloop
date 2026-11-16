@@ -107,7 +107,8 @@ const isJson = (req: Request) => (req.headers.get("content-type") ?? "").split("
 
 export function createApp({ roots, distDir, intervalMs = 2000, poll = true, now = Date.now, git }: AppOptions) {
   const store = createStore({ roots, git });
-  // The roots read once before anything is answered; from here on every tick walks them without holding a request.
+  // The roots read once, then walked once by the first tick, before anything is answered (improve-17: the walk that
+  // dates each card is the tick's own); from there on every tick walks them without holding a request.
   store.prime();
   const encoder = new TextEncoder();
   const clients = new Set<ReadableStreamDefaultController<Uint8Array>>();
@@ -149,6 +150,8 @@ export function createApp({ roots, distDir, intervalMs = 2000, poll = true, now 
       broadcast();
     });
   }
+  /** The first tick, at once and full: it walks every folder and dates every card; every request waits for it. */
+  const first = pulse({ full: true });
 
   let n = 0;
   let ticking = false;
@@ -277,7 +280,8 @@ export function createApp({ roots, distDir, intervalMs = 2000, poll = true, now 
       if (!method) return json(404, { error: `Нет такого адреса: ${url.pathname}` });
       if (req.method !== method) return json(405, { error: `Метод ${req.method} не поддерживается` });
       // With no poller the caller moves the server step by step: a request sees every tick it started. The poller's
-      // own ticks never hold a request; neither does the store's walk itself (store.refresh).
+      // own ticks never hold a request but the first, which dates the cards; neither does the store's walk itself.
+      await first;
       if (!poll) await queue;
       // The roots go with the list: the empty-root and not-found texts name them.
       if (url.pathname === "/api/runs") return json(200, { ...store.list(), roots: roots.map((r) => resolve(r)) });

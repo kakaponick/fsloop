@@ -1,10 +1,11 @@
 // The server's runtime numbers (p1-review-critic-runtime#cand-1, #cand-2), taken on a fixture root by one command:
 //   node fixtures/measure.ts [<root>]   — default fixtures/root (`npm run fixtures` writes it)
 // start to listening and to the first list; a normal tick and a fifth (full) tick, each with the longest stretch the
-// event loop was held; /api/runs latency while the poller runs; the bytes a watching client re-reads from the live
-// run at the production maximum while a Verify streams its log into the run folder (a write every 5 s).
+// event loop was held; /api/runs latency while the poller runs; the version moves per minute and the bytes a watching
+// client re-reads from the live run at the production maximum while a Verify streams its log into the run folder (a
+// write every 5 s) and its running launch and the orchestrator write their transcripts (improve-17).
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -58,6 +59,9 @@ let first = 0;
 const maxProject = PROJECTS.find((p) => (first += p.runs) > 40)?.name ?? "";
 const maxKey = `${maxProject}/${runId(40)}`;
 const maxDir = join(root, maxProject, ".claude", "fsloop", "runs", runId(40));
+// The max run's session and its running launch, as fixtures/make.ts writes them.
+const session = join(root, ".claude-config", "projects", maxProject, `5e55${runId(40)}-0000-4000-8000-000000000001`);
+const transcripts = [`${session}.jsonl`, join(session, "subagents", `agent-a${runId(40)}u30.jsonl`)];
 
 // ── the server as `npm start` runs it ─────────────────────────────────────────────────────────
 const port = await freePort();
@@ -79,7 +83,8 @@ while (performance.now() < until) {
   await wait(25);
 }
 
-// ── a watched live run: a Verify streams into units/u31/verify.log.<n>, a write every 5 s ─────
+// ── a watched live run: a Verify streams into units/u31/verify.log.<n>, a write every 5 s; its running launch and
+// the orchestrator write their transcripts at the same pace, the orchestrator's tokens growing ─────────────────
 const events = await fetch(`${base}/api/events`);
 const reader = (events.body as ReadableStream<Uint8Array>).getReader();
 const decoder = new TextDecoder();
@@ -107,17 +112,26 @@ const watch = (async () => {
   }
 })();
 const streamed: string[] = [];
+const kept = transcripts.map((path) => ({ path, text: readFileSync(path, "utf8"), at: statSync(path).mtime }));
+const usage = (k: number) => JSON.stringify({ type: "assistant", message: { id: `measure-${k}`, role: "assistant", content: [], usage: { input_tokens: 10 * k, output_tokens: 100 * k, cache_creation_input_tokens: 0, cache_read_input_tokens: 1000 * k } } }) + "\n";
+const watchedFor = performance.now();
 for (let k = 1; k <= 6; k++) {
   const file = join(maxDir, "units", "u31", `verify.log.${100 + k}`);
   writeFileSync(file, `line ${k}\n`);
   streamed.push(file);
+  for (const t of transcripts) appendFileSync(t, usage(k));
   await wait(5_000);
 }
 await wait(6_000);
+const watchedSeconds = (performance.now() - watchedFor) / 1000;
 watching = false;
 await reader.cancel().catch(() => {});
 await watch.catch(() => {});
 for (const f of streamed) rmSync(f, { force: true });
+for (const t of kept) {
+  writeFileSync(t.path, t.text);
+  utimesSync(t.path, t.at, t.at);
+}
 const runBytes = (await (await fetch(`${base}/api/run?run=${encodeURIComponent(maxKey)}`)).arrayBuffer()).byteLength;
 server.kill();
 
@@ -136,4 +150,4 @@ console.log(`root: ${root} — ${firstList.list.length} runs`);
 console.log(`start → listening ${ms(listening)} · → first /api/runs answered ${ms(listed)}`);
 console.log(`normal tick: ${ms(median(normal.map((t) => t.wall)))} (loop held ${ms(median(normal.map((t) => t.block)))}) · fifth tick: ${ms(median(full.map((t) => t.wall)))} (loop held ${ms(median(full.map((t) => t.block)))})`);
 console.log(`/api/runs over ${latencies.length} requests: p50 ${ms(quantile(latencies, 0.5))} · p95 ${ms(quantile(latencies, 0.95))} · max ${ms(Math.max(...latencies))}`);
-console.log(`watched live run ${maxKey} (${runBytes} bytes): 6 log writes in 30 s → ${moves} version moves, ${bytes} bytes re-read`);
+console.log(`watched live run ${maxKey} (${runBytes} bytes), a launch running: 6 log and transcript writes in ${Math.round(watchedSeconds)} s → ${moves} version moves (${(moves / (watchedSeconds / 60)).toFixed(1)} per minute), ${bytes} bytes re-read`);

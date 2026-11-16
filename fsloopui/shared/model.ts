@@ -348,6 +348,9 @@ export interface RunCard {
   blocked: { id: string; why: string | null }[];
   launches: number;
   running: number;
+  /** Each running launch's last write — its transcript's time — by agent id, as the last tick saw it. It moves with
+   * every write of the launch, so it travels here and the model's `running[].lastAt` is read from it (improve-17). */
+  runningLastAt: Record<string, string | null>;
   /** The run model's `launchCount`: the recorded and the running, counted once (rules/ui → Conventions 3). */
   launchCount: number;
   /** The run's tokens, for «Подробнее» before the run is read. */

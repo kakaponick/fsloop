@@ -3,17 +3,21 @@
 // title, 28 closes, 6 launches, 31 checks — with every absent part in its place: «юнит u7 не найден», «находка <id>
 // не найдена», «не записано», «Бриф units/u3/brief.md не прочитан: …». Strict 1: every list line is one fixed row.
 import "../../ui/test-setup.ts";
-import { render, screen, within } from "@testing-library/react";
+import { appendFileSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterAll, describe, expect, test } from "vitest";
 import type { Unit, UnitCheck } from "../../../shared/model.ts";
 import { glossaryLines, UiProvider } from "@/ui";
+import { runId, writeRunningLaunch } from "../../../fixtures/make.ts";
 import { applyStylesheet, usedBlockSize } from "../../app/layout-testing.ts";
 import { runPath } from "../../app/routes.ts";
+import { projectOf } from "../../app/testing.tsx";
 import { ROW_TITLE_CHARS, UnitDetail, unitFacts, type UnitDetailProps } from "./detail.tsx";
 import { checkGroups, checksOf, launchRows } from "./query.ts";
-import { fixtureApp, keyOf, loadedRun, MIN, NOW } from "./testing.tsx";
+import { fixtureApp, keyOf, loadedRun, MIN, NOW, renderUnits } from "./testing.tsx";
 import { attemptsText, CHECK_HEAD, checkOutcome, closesTitle, LAUNCH_HEAD, LAUNCH_STATE_GLOSSARY, LOG_LINE_GLOSSARY, LOG_WORD, logName } from "./words.ts";
 
 const N = 40;
@@ -430,5 +434,47 @@ describe("an open detail under a live run (rules/ui → Strict 1: a live update 
     await user.click(within(strip("Закрывает 29 находок")).getByRole("button", { name: /показать/ }));
     expect(closesItems()).toHaveLength(29);
     expect(closesItems()[28]).toHaveTextContent(`находка ${MISSING} не найдена`);
+  });
+});
+
+// Last in the file: it writes into the fixture's run, which the cases above read as it was.
+describe("improve-17 · a running launch in a unit's detail, live from the server", () => {
+  test("its line stands while only its last write and the run's tokens move — the run is not read again — and a launch that starts still arrives", async () => {
+    const id = runId(N);
+    const projects = join(fx.root, ".claude-config", "projects", projectOf(N));
+    const session = `5e55${id}-0000-4000-8000-000000000001`;
+    const dated = (path: string, ms: number) => utimesSync(path, new Date(ms), new Date(ms));
+    const reads = (path: string) => fx.requests.filter((p) => p === path || p.startsWith(`${path}?`)).length;
+    // u30 ran once before: the running launch is its last «u30 implement» line, the one the record does not hold yet.
+    const line = () => [...section("Запуски агентов").querySelectorAll("[data-slot=unit-launch]")].filter((l) => l.textContent?.includes("u30 implement")).at(-1) as HTMLElement;
+    renderUnits(fx, KEY, runPath(KEY, { view: "units", unit: "u30" }));
+    await waitFor(() => expect(line()).toHaveTextContent("работает"), { timeout: 4000 });
+    const shown = line().textContent;
+    const [runs, lists] = [reads("/api/run"), reads("/api/runs")];
+
+    // A Verify streams into the unit's folder — the run is read again — while the launch writes and the orchestrator answers.
+    const log = join(fx.dirOf(N), "units", "u30", "verify.log.9");
+    mkdirSync(dirname(log), { recursive: true });
+    writeFileSync(log, "ok\n");
+    for (let p = log; p !== fx.dirOf(N); p = dirname(p)) dated(p, NOW - 20_000);
+    appendFileSync(join(projects, `${session}.jsonl`), JSON.stringify({ type: "assistant", message: { id: "m-17", role: "assistant", content: [], usage: { input_tokens: 10, output_tokens: 20, cache_creation_input_tokens: 0, cache_read_input_tokens: 300 } } }) + "\n");
+    dated(join(projects, `${session}.jsonl`), NOW - 10_000);
+    appendFileSync(join(projects, session, "subagents", `agent-a${id}u30.jsonl`), '{"type":"progress"}\n');
+    dated(join(projects, session, "subagents", `agent-a${id}u30.jsonl`), NOW - 5_000);
+    await act(async () => {
+      for (let k = 0; k < 3; k++) await fx.app.pulse();
+    });
+    // The card moved and was read; the run was not.
+    await waitFor(() => expect(reads("/api/runs")).toBeGreaterThan(lists));
+    expect(reads("/api/run")).toBe(runs);
+    expect(line().textContent).toBe(shown);
+
+    // A launch of the unit starts: the run is read again and the launch waits in the section's heading line.
+    writeRunningLaunch(join(fx.root, ".claude-config", "projects"), projectOf(N), session, fx.dirOf(N), { agentId: `a${id}u30v`, description: "u30 verify", agent: "fsloop-implement", startedAt: NOW - 2 * MIN, lastAt: NOW - 2 * MIN });
+    await act(async () => {
+      for (let k = 0; k < 2; k++) await fx.app.pulse();
+    });
+    await waitFor(() => expect(section("Запуски агентов").querySelector("[data-slot=held-strip]")).toHaveTextContent("1 новый запуск агента · показать"), { timeout: 4000 });
+    expect(reads("/api/run")).toBe(runs + 1);
   });
 });

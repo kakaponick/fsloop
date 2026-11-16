@@ -1,11 +1,16 @@
-import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
+import type { Run } from "../shared/model.ts";
 import { livenessOf } from "../shared/liveness.ts";
 import { briefText, writeRecord, writeRun, writeRunningLaunch, writeTranscript, type RunSpec } from "../fixtures/make.ts";
-import { cardOf, lastWriteOf } from "./card.ts";
+import { cardOf, lastWriteOf, writtenOf } from "./card.ts";
 import { readRun } from "./run.ts";
+import { targetsOf, walkRun, type Walk } from "./walk.ts";
+
+/** The run walked as the store's tick walks it. */
+const walked = async (r: Run): Promise<Walk> => (await walkRun(r.dir, targetsOf(r))) as Walk;
 
 const NOW = Date.parse("2026-11-16T10:00:00Z");
 const MIN = 60_000;
@@ -102,6 +107,18 @@ describe("cardOf", () => {
     expect(cardOf({ key: "k", project: "app", run: readRun(dir), lastWriteAt: null })).toMatchObject({ launches: 3, running: 1, launchCount: 4 });
   });
 
+  test("improve-17 · each running launch's last write, by its agent id: served with the card, so the run's model need not move with it", () => {
+    const projects = join(temp, "config-last", "projects");
+    const session = "5e550000-0000-4000-8000-0000000000c3";
+    const dir = run({ sessions: [session] });
+    writeTranscript(projects, "C--dev-app", session, NOW - 20 * MIN);
+    writeRunningLaunch(projects, "C--dev-app", session, dir, { agentId: "feed03", description: "u2 implement", agent: "fsloop-implement", startedAt: NOW - 30 * MIN, lastAt: NOW - 4 * MIN });
+    writeRecord(dir, NOW, projects);
+    expect(cardOf({ key: "k", project: "app", run: readRun(dir), lastWriteAt: null }).runningLastAt).toEqual({ feed03: new Date(NOW - 4 * MIN).toISOString() });
+    // No launch running: an empty map, never absent.
+    expect(card.runningLastAt).toEqual({});
+  });
+
   test("the run's spend as summary.json counts it, for «Подробнее» (u3-shape cand-2)", () => {
     const dir = run({
       launches: [
@@ -130,15 +147,16 @@ describe("cardOf", () => {
 });
 
 describe("lastWriteOf — the time liveness counts from", () => {
-  test("the newest write anywhere under the run folder, nested files included", () => {
+  test("the newest write anywhere under the run folder, nested files included", async () => {
     const dir = run();
     utimesSync(join(dir, "units", "u2", "brief.md"), new Date(NOW - 2 * MIN), new Date(NOW - 2 * MIN));
-    const at = lastWriteOf(readRun(dir));
+    const r = readRun(dir);
+    const at = lastWriteOf(r, await walked(r));
     expect(at).toBe(new Date(NOW - 2 * MIN).toISOString());
     expect(livenessOf(at, NOW).label).toBe("работает");
   });
 
-  test("the orchestrator's transcript the run's record names, and its launches still running", () => {
+  test("the orchestrator's transcript the run's record names, and its launches still running; improve-17 · the card's running launch dated by the same walk", async () => {
     const projects = join(temp, "config", "projects");
     const session = "5e550000-0000-4000-8000-0000000000c1";
     const dir = run({ sessions: [session] });
@@ -149,27 +167,31 @@ describe("lastWriteOf — the time liveness counts from", () => {
     utimesSync(join(dir, "summary.json"), new Date(NOW - 40 * MIN), new Date(NOW - 40 * MIN));
     const r = readRun(dir);
     expect(r.running[0].lastAt).toBe(new Date(NOW - 4 * MIN).toISOString());
-    expect(lastWriteOf(r)).toBe(new Date(NOW - 4 * MIN).toISOString());
+    expect(lastWriteOf(r, await walked(r))).toBe(new Date(NOW - 4 * MIN).toISOString());
     // The running launch's transcript moves on; its last write is read, not the record's copy.
     writeFileSync(join(projects, "C--dev-app", session, "subagents", "agent-feed01.jsonl"), "{}\n");
     utimesSync(join(projects, "C--dev-app", session, "subagents", "agent-feed01.jsonl"), new Date(NOW - MIN), new Date(NOW - MIN));
-    expect(lastWriteOf(r)).toBe(new Date(NOW - MIN).toISOString());
+    expect(writtenOf(r, await walked(r))).toEqual({ lastWriteAt: new Date(NOW - MIN).toISOString(), runningLastAt: { feed01: new Date(NOW - MIN).toISOString() } });
   });
 
-  test("the user's verdict is fsloopUI's write, not the run's: human.jsonl leaves lastWriteAt alone (runtime-1)", () => {
+  test("the user's verdict is fsloopUI's write, not the run's: human.jsonl leaves lastWriteAt alone (runtime-1)", async () => {
     const dir = run();
-    const before = lastWriteOf(readRun(dir));
+    const r = readRun(dir);
+    const before = lastWriteOf(r, await walked(r));
     expect(before).toBe(new Date(NOW - 40 * MIN).toISOString());
     writeFileSync(join(dir, "human.jsonl"), JSON.stringify({ finding: "p1-map-map#1", verdict: "agree", note: null, at: new Date(NOW).toISOString() }) + "\n");
     utimesSync(join(dir, "human.jsonl"), new Date(NOW), new Date(NOW));
-    expect(lastWriteOf(readRun(dir))).toBe(before);
+    const after = readRun(dir);
+    expect(lastWriteOf(after, await walked(after))).toBe(before);
   });
 
-  test("no write at all reads «не записано»", () => {
+  test("no write at all reads «не записано»; a folder gone has no walk", async () => {
     const empty = join(temp, "empty-run");
-    writeRun(empty, { id: "empty-run", common: false, mtime: NOW, now: NOW });
-    rmSync(empty, { recursive: true });
-    expect(lastWriteOf({ ...readRun(join(temp, "cafe0001")), dir: empty, sessions: [], running: [], launches: [] })).toBeNull();
+    mkdirSync(empty);
+    const none = { closed: false, running: [] };
+    expect(lastWriteOf(none, (await walkRun(empty, { sessions: [], launches: [], open: true })) as Walk)).toBeNull();
     expect(livenessOf(null, NOW).label).toBe("не записано");
+    rmSync(empty, { recursive: true });
+    expect(await walkRun(empty, { sessions: [], launches: [], open: true })).toBeNull();
   });
 });

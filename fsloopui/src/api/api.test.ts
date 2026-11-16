@@ -4,8 +4,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import type { ServedRun } from "../../shared/model.ts";
-import { createApi, frameSrc, type StreamHandlers, type Transport } from "./index.ts";
+import type { RunCard, RunSpend, ServedRun } from "../../shared/model.ts";
+import { createApi, frameSrc, withLive, type StreamHandlers, type Transport } from "./index.ts";
 
 interface Call {
   method: "GET" | "POST";
@@ -159,6 +159,35 @@ describe("report(runKey, file)", () => {
     expect(await api.report(KEY, "p1-map-map.md")).toBe("text");
     expect(await api.report(KEY, "p1-map-map.md")).toBe("text");
     expect(fake.calls).toHaveLength(3);
+  });
+});
+
+describe("improve-17 · withLive(run, card): what a view reads of a running launch", () => {
+  const AT = "2026-11-16T10:00:00.000Z";
+  const LATER = "2026-11-16T10:04:30.000Z";
+  const spendOf = (orchestratorOutput: number): RunSpend => ({ launches: { input: 100, output: 200, cacheWrite: 300, cacheRead: 400, boot: 10, continuations: 0 }, orchestrator: { input: 1, output: orchestratorOutput, cacheWrite: 0, cacheRead: 5 } });
+  const running = (agentId: string, lastAt: string | null) => ({ agentId, description: `${agentId} implement`, agent: "fsloop-implement", name: `${agentId} · исполнитель`, startedAt: AT, lastAt });
+  const served = { key: KEY, project: "tga", version: 7, running: [running("u2", AT), running("u3", AT)], spend: spendOf(20), findings: [], launches: [] } as unknown as ServedRun;
+  const card = (runningLastAt: RunCard["runningLastAt"], spend: RunSpend | null): Pick<RunCard, "runningLastAt" | "spend"> => ({ runningLastAt, spend });
+
+  test("a running launch's last write and the run's tokens come from the card, the rest of the run as read", () => {
+    const run = withLive(served, card({ u2: LATER, u3: AT }, spendOf(90)));
+    expect(run.running.map((r) => [r.agentId, r.lastAt])).toEqual([
+      ["u2", LATER],
+      ["u3", AT],
+    ]);
+    expect(run.spend?.orchestrator).toEqual({ input: 1, output: 90, cacheWrite: 0, cacheRead: 5 });
+    // The same version, the same parts: nothing else was read again.
+    expect(run.version).toBe(7);
+    expect(run.findings).toBe(served.findings);
+    expect(run.launches).toBe(served.launches);
+  });
+
+  test("a card no newer than the run gives it nothing back: the same run, so a view does not draw again", () => {
+    expect(withLive(served, card({ u2: AT, u3: AT }, spendOf(20)))).toBe(served);
+    // A card a tick behind a run just read: an older time and fewer tokens stay the run's.
+    expect(withLive(served, card({ u2: "2026-11-16T09:59:00.000Z" }, spendOf(5)))).toBe(served);
+    expect(withLive(served, undefined)).toBe(served);
   });
 });
 

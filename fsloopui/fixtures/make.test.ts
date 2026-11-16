@@ -8,6 +8,7 @@ import { cardOf, lastWriteOf } from "../server/card.ts";
 import { discover } from "../server/discover.ts";
 import { startServer } from "../server/main.ts";
 import { readRun } from "../server/run.ts";
+import { targetsOf, walkRun, type Walk } from "../server/walk.ts";
 import { makeFixtureRoot } from "./make.ts";
 
 const NOW = MAKE_NOW;
@@ -33,12 +34,16 @@ function snapshot(dir: string): string[] {
 describe("makeFixtureRoot", () => {
   let runs: ReturnType<typeof discover>;
   let models: ReturnType<typeof readRun>[];
+  let walks: (Walk | null)[];
   let first: string[];
-  beforeAll(() => {
+  beforeAll(async () => {
     runs = discover([root]);
     models = runs.map((r) => readRun(r.dir, { git: () => null }));
+    // Each run walked as the server's tick walks it: what its card's last write is read from.
+    walks = await Promise.all(models.map((run) => walkRun(run.dir, targetsOf(run))));
     first = snapshot(root);
   });
+  const lastWrite = (run: ReturnType<typeof readRun>) => lastWriteOf(run, walks[models.indexOf(run)] as Walk);
 
   test("5 projects, 63 run folders", () => {
     expect(new Set(runs.map((r) => r.project))).toEqual(new Set(["shop", "fsloop", "bots", "admin", "trigger"]));
@@ -47,7 +52,7 @@ describe("makeFixtureRoot", () => {
 
   test("3 live, 4 open and long silent, 53 closed, 3 without run.json — liveness from mtimes set by now", () => {
     const states = models.map((run) => {
-      const l = livenessOf(lastWriteOf(run), NOW, { closed: run.closed === true });
+      const l = livenessOf(lastWrite(run), NOW, { closed: run.closed === true });
       return run.recorded ? l.state + (l.longSilent ? "-long" : "") : "unrecorded";
     });
     const tally = (s: string) => states.filter((x) => x === s).length;
@@ -96,7 +101,7 @@ describe("makeFixtureRoot", () => {
   test("improve-16: one open silent run also waits for the user", () => {
     const waiting = runs.flatMap((r, i) => {
       const run = models[i];
-      const silent = livenessOf(lastWriteOf(run), NOW, { closed: run.closed === true }).state === "silent";
+      const silent = livenessOf(lastWrite(run), NOW, { closed: run.closed === true }).state === "silent";
       const card = cardOf({ key: r.key, project: r.project, run, lastWriteAt: null });
       return silent && (card.blocked.length > 0 || card.redGate) ? [{ key: r.key, blocked: card.blocked }] : [];
     });
@@ -134,7 +139,7 @@ describe("makeFixtureRoot", () => {
     expect(max.launches.map((l) => l.id)).toContain("p1-review-critic-craft");
     for (const key of ["shop/37d5a31e", "shop/a49bc6c7"]) {
       const run = at(key);
-      expect(livenessOf(lastWriteOf(run), NOW, { closed: run.closed === true }).state).toBe("silent");
+      expect(livenessOf(lastWrite(run), NOW, { closed: run.closed === true }).state).toBe("silent");
     }
   });
 

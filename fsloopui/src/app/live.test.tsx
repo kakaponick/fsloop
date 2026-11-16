@@ -5,7 +5,10 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test } from "vitest";
 import { writeRun } from "../../fixtures/make.ts";
-import { fixtureApp, keyOf, MIN, NOW, renderShell, type FixtureApp } from "./testing.tsx";
+import type { RunCard, ServedRun } from "../../shared/model.ts";
+import type { StreamHandlers, Transport } from "@/api";
+import { createLiveStore } from "./live.tsx";
+import { fixtureApp, json, keyOf, MIN, NOW, renderShell, type FixtureApp } from "./testing.tsx";
 import { join } from "node:path";
 
 let fx: FixtureApp | null = null;
@@ -106,5 +109,44 @@ describe("the live store", () => {
     expect(screen.queryByText(/Нет связи/)).toBeNull();
     expect(screen.queryByText(/live/i)).toBeNull();
     expect(container.querySelector(".animate-pulse")).toBeNull();
+  });
+});
+
+describe("improve-17 · a running launch's last write and the run's tokens come with the card", () => {
+  test("a tick that moves the list and not the run: the watched run reads the card's last write and tokens, and is not read again", async () => {
+    const KEY = "app/11fe0017";
+    const at = (ms: number) => new Date(ms).toISOString();
+    const spend = (output: number) => ({ launches: { input: 1, output: 2, cacheWrite: 3, cacheRead: 4, boot: 0, continuations: 0 }, orchestrator: { input: 1, output, cacheWrite: 0, cacheRead: 0 } });
+    const run = { key: KEY, project: "app", version: 1, running: [{ agentId: "feed17", description: "u1 implement", agent: "fsloop-implement", name: "u1 · исполнитель", startedAt: at(NOW - 30 * MIN), lastAt: at(NOW - 4 * MIN) }], spend: spend(20) } as unknown as ServedRun;
+    let list = { version: 1, list: [{ key: KEY, runningLastAt: { feed17: at(NOW - 4 * MIN) }, spend: spend(20) } as unknown as RunCard] };
+    const paths: string[] = [];
+    let stream: StreamHandlers | null = null;
+    const transport: Transport = {
+      async get(path) {
+        paths.push(path);
+        return path === "/api/runs" ? json(200, list) : json(200, run);
+      },
+      post: async () => json(500, {}),
+      events(handlers) {
+        stream = handlers;
+        return () => {};
+      },
+    };
+    const store = createLiveStore(transport, { now: () => NOW });
+    store.start();
+    const stop = store.watch(KEY);
+    const shown = () => {
+      const s = store.getSnapshot().runs[KEY];
+      return s?.status === "ready" ? s.run : null;
+    };
+    await waitFor(() => expect(shown()?.version).toBe(1));
+    // The launch wrote and the orchestrator answered: the card moved, the run's version did not.
+    list = { version: 2, list: [{ ...list.list[0], runningLastAt: { feed17: at(NOW - MIN / 2) }, spend: spend(90) }] };
+    act(() => (stream as StreamHandlers | null)?.tick({ list: 2, runs: { [KEY]: 1 } }));
+    await waitFor(() => expect(shown()?.running[0].lastAt).toBe(at(NOW - MIN / 2)));
+    expect(shown()?.spend?.orchestrator?.output).toBe(90);
+    expect(paths.filter((p) => p.startsWith("/api/run?"))).toHaveLength(1);
+    stop();
+    store.stop();
   });
 });

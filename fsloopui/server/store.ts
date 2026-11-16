@@ -1,15 +1,16 @@
 // The runs the server watches: their cards, their models and a version per run and for the list. A run's version
 // rises when its model changes — a file of its folder, or a launch of its session starting, is read and the model
-// differs; the list's when a card changes. Liveness is not a version: it comes from each card's last write time and
-// the client's clock. A tick walks the folders asynchronously, one walk per folder: a request is answered while a
-// walk is in flight (runtime cand-1).
+// differs; the list's when a card changes. What moves with every write of a running launch — its last write, the
+// orchestrator's tokens — is no part of the model's version: the card carries it (improve-17). Liveness is not a
+// version: it comes from each card's last write time and the client's clock. A tick walks each run once,
+// asynchronously, its folder and its transcripts together (walk.ts): a request is answered while a walk is in
+// flight (runtime cand-1).
 import { createHash } from "node:crypto";
-import { readdir, stat } from "node:fs/promises";
-import { basename, dirname, join, relative } from "node:path";
 import type { Run, RunCard, ServedRun } from "../shared/model.ts";
-import { cardOf, lastWriteOf, NOT_THE_RUNS } from "./card.ts";
+import { cardOf, writtenOf } from "./card.ts";
 import { discover, type FoundRun } from "./discover.ts";
 import { readRun, type Git } from "./run.ts";
+import { targetsOf, walkAgain, walkRun, type Targets, type Walk } from "./walk.ts";
 
 interface Entry {
   found: FoundRun;
@@ -22,73 +23,33 @@ interface Entry {
   /** Ticks in a row that found the folder changed and did not read it. */
   waits: number;
   version: number;
-  /** The model's hash: a read that changes nothing moves no version (runtime cand-2). */
+  /** The model's hash, its live parts left out: a read that changes nothing else moves no version (runtime cand-2). */
   hash: string;
   card: RunCard;
   /** Kept for a run that is not closed; a closed one is read again when it is asked for. */
   run: Run | null;
   closed: boolean | null;
-  sessions: string[];
+  /** What the next walk reads beside the folder: the transcripts the last model named. */
+  targets: Targets;
   /** The errors of the last model read whole, run.json's own left out. */
   goodErrors: number;
-}
-
-/** One walk of a run folder. */
-interface Walk {
-  /** Every file under it with its size and mtime, and the launches started, as one hash: the version stamp. */
-  stamp: string;
-  /** The newest mtime of the run's own writes: every entry at any depth but fsloopUI's (card.ts → lastWriteOf). */
-  newest: number;
 }
 
 const RECORD = "run.json";
 /** A folder that changes on every tick is read anyway on the third (verdict-2): a Verify streaming its log for ten
  * minutes would otherwise freeze the run's view. */
 const SETTLE_TICKS = 3;
+const NO_TARGETS: Targets = { sessions: [], launches: [], open: true };
 
-/** The folder walked once; null when it is gone. */
-async function walkFolder(dir: string, extra: string[]): Promise<Walk | null> {
-  try {
-    if (!(await stat(dir)).isDirectory()) return null;
-  } catch {
-    return null;
-  }
-  let newest = 0;
-  // Every entry of a folder at once, its subfolders too; the lines come back in name order, so the stamp is stable.
-  const walk = async (d: string, top: boolean): Promise<string[]> => {
-    let entries;
-    try {
-      entries = (await readdir(d, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
-    } catch {
-      return [];
-    }
-    const lines = await Promise.all(
-      entries.map(async (e) => {
-        const p = join(d, e.name);
-        const s = await stat(p).catch(() => null);
-        if (!s) return [];
-        if (!(top && NOT_THE_RUNS.has(e.name))) newest = Math.max(newest, s.mtimeMs);
-        return e.isDirectory() ? walk(p, false) : [`${relative(dir, p)}:${s.size}:${s.mtimeMs}\n`];
-      }),
-    );
-    return lines.flat();
-  };
-  const hash = createHash("sha1").update((await walk(dir, true)).join(""));
-  for (const x of extra) hash.update(x);
-  return { stamp: hash.digest("hex"), newest };
-}
+/** The model as its version sees it: what moves with every write of a running launch — its last write, the
+ * orchestrator's tokens — left out; the card carries both (improve-17). */
+const versionedOf = (run: Run): Run => ({ ...run, running: run.running.map((r) => ({ ...r, lastAt: null })), spend: run.spend && { ...run.spend, orchestrator: null } });
 
-/** The launches the orchestrator started: the meta files beside its session's transcript. */
-async function launchesStarted(sessions: string[]): Promise<string[]> {
-  const out: string[] = [];
-  for (const t of sessions)
-    try {
-      out.push(...(await readdir(join(dirname(t), basename(t, ".jsonl"), "subagents"))).filter((f) => f.endsWith(".meta.json")));
-    } catch {}
-  return out;
-}
+/** The run whose writes a card dates: a closed one's model is not kept, and only its folder counts. */
+const datedOf = (e: Entry): Pick<Run, "closed" | "running"> => e.run ?? { closed: e.closed, running: [] };
 
 const BUCKET = 15_000;
+const bucketOf = (at: string | null) => (at ? Math.floor(Date.parse(at) / BUCKET) : null);
 const CACHE = 4;
 
 export function createStore({ roots, git }: { roots: string[]; git?: Git }) {
@@ -117,9 +78,9 @@ export function createStore({ roots, git }: { roots: string[]; git?: Git }) {
     forget(key);
   }
 
-  /** The entry of a model just read. */
-  function entryOf(found: FoundRun, prev: Entry | undefined, run: Run, { stamp, readAt, lastWriteAt }: { stamp: string | null; readAt: number; lastWriteAt: string | null }): Entry {
-    const hash = createHash("sha1").update(JSON.stringify(run)).digest("hex");
+  /** The entry of a model just read; `at` — the walk that dates its card, null before the first. */
+  function entryOf(found: FoundRun, prev: Entry | undefined, run: Run, { stamp, readAt, at }: { stamp: string | null; readAt: number; at: Walk | null }): Entry {
+    const hash = createHash("sha1").update(JSON.stringify(versionedOf(run))).digest("hex");
     if (!run.closed) forget(found.key);
     else if (closedRuns.has(found.key)) remember(found.key, run);
     return {
@@ -130,18 +91,18 @@ export function createStore({ roots, git }: { roots: string[]; git?: Git }) {
       waits: 0,
       version: prev && prev.hash === hash ? prev.version : (prev?.version ?? 0) + 1,
       hash,
-      card: cardOf({ key: found.key, project: found.project, run, lastWriteAt }),
+      card: cardOf({ key: found.key, project: found.project, run, ...(at ? writtenOf(run, at) : { lastWriteAt: null }) }),
       run: run.closed ? null : run,
       closed: run.closed,
-      sessions: run.sessions.map((s) => s.transcript).filter((t): t is string => Boolean(t)),
+      targets: targetsOf(run),
       goodErrors: run.errors.filter((e) => e.file !== RECORD).length,
     };
   }
 
-  /** Reads a run; `walked` — its folder's walk this tick, when the caller took it. Null when the folder is gone. */
+  /** Reads a run; `walked` — its walk this tick, when the caller took it. Null when the folder is gone. */
   async function load(found: FoundRun, prev?: Entry, walked?: Walk): Promise<Entry | null> {
-    const sessions = prev?.sessions ?? [];
-    const at = walked ?? (await walkFolder(found.dir, await launchesStarted(sessions)));
+    const targets = prev?.targets ?? NO_TARGETS;
+    const at = walked ?? (await walkRun(found.dir, targets));
     if (!at) return null;
     const readAt = Date.now();
     let run = readRun(found.dir, { git });
@@ -155,27 +116,28 @@ export function createStore({ roots, git }: { roots: string[]; git?: Git }) {
       // A closed run with no model kept: the card carries the error.
       if (!before) return { ...prev, pending: null, waits: 0, card: { ...prev.card, errors: prev.goodErrors + recordFailed.length } };
       run = { ...before, errors: [...before.errors.filter((e) => e.file !== RECORD), ...recordFailed] };
-      return entryOf(found, prev, run, { stamp: prev.stamp, readAt: prev.readAt, lastWriteAt: lastWriteOf(run, at.newest) });
+      return entryOf(found, prev, run, { stamp: prev.stamp, readAt: prev.readAt, at });
     }
-    const transcripts = run.sessions.map((s) => s.transcript).filter((t): t is string => Boolean(t));
-    const stamp = transcripts.join() === sessions.join() ? at.stamp : ((await walkFolder(found.dir, await launchesStarted(transcripts)))?.stamp ?? at.stamp);
-    return entryOf(found, prev, run, { stamp, readAt, lastWriteAt: lastWriteOf(run, at.newest) });
+    // A record that names other sessions than the walk read: their transcripts walked, the folder not again.
+    const next = targetsOf(run);
+    const walk = next.sessions.join() === targets.sessions.join() ? at : await walkAgain(at, next);
+    return entryOf(found, prev, run, { stamp: walk.stamp, readAt, at: walk });
   }
 
   /** The first read of the roots, at once: every run folder and its model, before the server answers anything. The
-   * folders are walked by the first tick (`refresh`), which keeps each model unless its folder was written since. */
+   * first tick (`refresh`) walks the folders, dates each card and keeps each model unless its folder was written
+   * since; the server answers after it (http.ts). */
   function prime() {
     for (const f of discover(roots)) {
       const readAt = Date.now();
-      const run = readRun(f.dir, { git });
-      entries.set(f.key, entryOf(f, undefined, run, { stamp: null, readAt, lastWriteAt: lastWriteOf(run) }));
+      entries.set(f.key, entryOf(f, undefined, readRun(f.dir, { git }), { stamp: null, readAt, at: null }));
     }
   }
 
   /** Re-reads what changed. `full` also discovers new run folders and checks the closed runs. A run is re-read only
    * from settled bytes: a tick that finds its folder changed waits, and the next tick that finds it unchanged reads
    * it — a file caught half-written never replaces the last good model (rules/ui → Conventions 4, 14); a folder that
-   * changes on every tick is read on the third. */
+   * changes on every tick is read on the third. Every walk dates its card, read or not. */
   async function refresh({ full = false }: { full?: boolean } = {}) {
     if (full || !entries.size) {
       const found = discover(roots);
@@ -183,16 +145,16 @@ export function createStore({ roots, git }: { roots: string[]; git?: Git }) {
       for (const k of [...entries.keys()]) if (!keys.has(k)) drop(k);
       // The new folders walked at once, then read one by one.
       const fresh = found.filter((f) => !entries.has(f.key));
-      const walked = await Promise.all(fresh.map((f) => walkFolder(f.dir, [])));
+      const walked = await Promise.all(fresh.map((f) => walkRun(f.dir, NO_TARGETS)));
       for (const [i, f] of fresh.entries()) {
         const at = walked[i];
         const e = at && !entries.has(f.key) ? await load(f, undefined, at) : null;
         if (e) entries.set(f.key, e);
       }
     }
-    // The folders this tick checks, walked at once; what changed is then read one run at a time.
+    // The runs this tick checks, walked at once; what changed is then read one run at a time.
     const due = [...entries].filter(([, e]) => full || e.closed !== true);
-    const walks = await Promise.all(due.map(async ([, e]) => walkFolder(e.found.dir, await launchesStarted(e.sessions))));
+    const walks = await Promise.all(due.map(([, e]) => walkRun(e.found.dir, e.targets)));
     for (const [i, [key, e]] of due.entries()) {
       const at = walks[i];
       // Read again meanwhile (a verdict's touch): that entry stands.
@@ -202,23 +164,21 @@ export function createStore({ roots, git }: { roots: string[]; git?: Git }) {
         drop(key);
         continue;
       }
+      // The run is writing or still: its liveness counts from this walk, read or not (verdict-2, rules/ui → Live data 4).
+      e.card = { ...e.card, ...writtenOf(datedOf(e), at) };
       // Read at start-up with no walk: this walk is its stamp, unless the folder was written after the read.
       if (e.stamp === null && at.newest <= e.readAt) {
         e.stamp = at.stamp;
         continue;
       }
-      const live = e.run && !e.closed ? e.run : null;
       if (at.stamp === e.stamp) {
         e.pending = null;
         e.waits = 0;
-        if (live) e.card = { ...e.card, lastWriteAt: lastWriteOf(live, at.newest) };
         continue;
       }
       e.waits++;
       if (at.stamp !== e.pending && e.waits < SETTLE_TICKS) {
         e.pending = at.stamp;
-        // The run is writing: its liveness counts from this write, read or not (verdict-2, rules/ui → Live data 4).
-        if (live) e.card = { ...e.card, lastWriteAt: lastWriteOf(live, at.newest) };
         continue;
       }
       const next = await load(e.found, e, at);
@@ -226,7 +186,8 @@ export function createStore({ roots, git }: { roots: string[]; git?: Git }) {
       if (next) entries.set(key, next);
       else drop(key);
     }
-    const sig = JSON.stringify([...entries.values()].map((e) => ({ ...e.card, lastWriteAt: e.card.lastWriteAt ? Math.floor(Date.parse(e.card.lastWriteAt) / BUCKET) : null })));
+    // A card's times move the list once per bucket, not on every write.
+    const sig = JSON.stringify([...entries.values()].map(({ card }) => ({ ...card, lastWriteAt: bucketOf(card.lastWriteAt), runningLastAt: Object.fromEntries(Object.entries(card.runningLastAt).map(([id, at]) => [id, bucketOf(at)])) })));
     if (sig !== listSig) {
       listSig = sig;
       listVersion++;
@@ -249,7 +210,9 @@ export function createStore({ roots, git }: { roots: string[]; git?: Git }) {
         // A model whose run.json failed is served, never kept: the next ask reads the folder again.
         if (!run.errors.some((x) => x.file === RECORD)) remember(key, run);
       }
-      return { ...run, key, project: e.found.project, version: e.version };
+      // A running launch's last write as the card has it: the last tick's, newer than the model's read (improve-17).
+      const running = run.running.map((r) => ({ ...r, lastAt: e.card.runningLastAt[r.agentId] ?? r.lastAt }));
+      return { ...run, running, key, project: e.found.project, version: e.version };
     },
     /** Reads one run again now — after fsloopUI's own write to it. */
     async touch(key: string) {

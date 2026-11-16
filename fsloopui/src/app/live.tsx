@@ -1,11 +1,12 @@
 // The client's data layer (rules/ui → Live data): the run list and the runs a page watches, kept live by the
 // server's tick stream. A tick carries versions only; a moved version re-reads its part, in place — what is shown
 // stays until the new copy arrives, so nothing returns to a loading state. A dropped stream is a lost connection:
-// the data stays with its time; on reconnect the list and every watched run are re-read whole.
+// the data stays with its time; on reconnect the list and every watched run are re-read whole. A running launch's
+// last write and the run's tokens come with the run's card: a list read brings them into every run kept (improve-17).
 // The store reaches the server through the API module only; the tree under its provider gets the same API.
 import { createContext, useContext, useEffect, useSyncExternalStore, type ReactNode } from "react";
 import type { RunCard } from "../../shared/model.ts";
-import { ApiProvider, createApi, type Transport, type Versions } from "@/api";
+import { ApiProvider, createApi, withLive, type Transport, type Versions } from "@/api";
 import type { LoadedRun } from "../views/index.ts";
 
 export type ListState = { status: "loading" } | { status: "ready"; cards: RunCard[]; roots: string[] } | { status: "error"; cause: string };
@@ -44,6 +45,7 @@ export function createLiveStore(transport: Transport, { now = Date.now }: { now?
     for (const l of listeners) l();
   };
   const setRun = (key: string, run: RunState, patch: Partial<LiveSnapshot> = {}) => set({ ...patch, runs: { ...state.runs, [key]: run } });
+  const cardOf = (key: string) => (state.list.status === "ready" ? state.list.cards.find((c) => c.key === key) : undefined);
 
   async function loadList() {
     const n = ++seq.list;
@@ -52,7 +54,15 @@ export function createLiveStore(transport: Transport, { now = Date.now }: { now?
       const body = await api.runs();
       if (n !== seq.list) return;
       known.list = body.version;
-      set({ list: { status: "ready", cards: body.list, roots: body.roots }, updatedAt: now() });
+      // Each run kept takes what its card brings live; a run nothing moved in stays the same object.
+      const cards = new Map(body.list.map((c) => [c.key, c]));
+      let runs = state.runs;
+      for (const [key, r] of Object.entries(state.runs)) {
+        if (r.status !== "ready") continue;
+        const run = withLive(r.run, cards.get(key));
+        if (run !== r.run) runs = { ...runs, [key]: { status: "ready", run } };
+      }
+      set({ list: { status: "ready", cards: body.list, roots: body.roots }, runs, updatedAt: now() });
     } catch (e) {
       // A failed re-read keeps the list it has; only a first read shows the failure.
       if (n === seq.list && state.list.status !== "ready") set({ list: { status: "error", cause: messageOf(e) } });
@@ -78,7 +88,7 @@ export function createLiveStore(transport: Transport, { now = Date.now }: { now?
         return;
       }
       known.runs.set(key, run.version);
-      setRun(key, { status: "ready", run }, { updatedAt: now() });
+      setRun(key, { status: "ready", run: withLive(run, cardOf(key)) }, { updatedAt: now() });
     } catch (e) {
       if (mine() && state.runs[key]?.status !== "ready") setRun(key, { status: "error", cause: messageOf(e) });
     } finally {
