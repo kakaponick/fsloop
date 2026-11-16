@@ -3,6 +3,7 @@
 export { CLOSE, Dash, MissingLine, missingText, NotFound, NotRecorded, notFoundText, NUMBERED, numberRange, numberText, OBJECT_WORDS, type NumberedKind, type ObjectKind } from "./absent.tsx";
 export { AddressLink, addressLabel, AddressMenu, addressWhat, type AddressLinkProps } from "./address.tsx";
 export { Clamp, COLLAPSE, EXPAND, type ClampProps } from "./clamp.tsx";
+export { ChoiceToggles, type Choice, type ChoiceTogglesProps } from "./choice-toggles.tsx";
 export { CountLink, type CountLinkProps } from "./count-link.tsx";
 export { CountTabs, CountTabsContent, TabCount, type CountTab, type CountTabsProps } from "./count-tabs.tsx";
 export { AppDialog, type AppDialogProps } from "./dialog.tsx";

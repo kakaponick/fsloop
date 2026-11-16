@@ -103,7 +103,7 @@ describe("cand-4 (craft review): verdict keys", () => {
     // focus inside the detail rates its finding; in the note a digit is text
     const toggle = within(detail(d) as HTMLElement).getByRole("radio", { name: "не та серьёзность" });
     fireEvent.focus(toggle);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent(/^Выбрать клавишами1234$/);    const note = within(detail(d) as HTMLElement).getByLabelText("Заметка к оценке");
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/^Оценить клавишей3$/);    const note = within(detail(d) as HTMLElement).getByLabelText("Заметка к оценке");
     await user.click(note);
     await user.keyboard("3");
     expect(note).toHaveValue("3");

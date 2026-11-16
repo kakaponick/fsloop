@@ -9,12 +9,14 @@ import userEvent from "@testing-library/user-event";
 import { afterAll, describe, expect, test, vi } from "vitest";
 import type { Finding, Launch, Surface } from "../../../shared/model.ts";
 import { glossaryLines, readPref, writePref } from "@/ui";
+import { applyStylesheet, usedBlockSize } from "../../app/layout-testing.ts";
 import { runPath } from "../../app/routes.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ReportsView } from "./index.tsx";
-import { reportPath, SEVERITY_PREF } from "./reader.tsx";
-import { lensGlossary, reportFindings, reportTabs, unparsedText } from "./sections.ts";
+import { reportPath, severityShown, SEVERITY_PREF } from "./reader.tsx";
+import { SCORES_GLOSSARY } from "./scores.tsx";
+import { bySeverity, lensGlossary, reportFindings, reportTabs, unparsedText } from "./sections.ts";
 import { fixtureApp, handlerReport, keyOf, loadedRun, renderOver, type FetchReport } from "./testing.tsx";
 
 const N = 40;
@@ -38,7 +40,7 @@ const factRows = () => [...reader().querySelectorAll<HTMLElement>("[data-slot=fa
 const at = (probe: { location: { search: string } | null }) => new URLSearchParams(probe.location?.search).get("report");
 
 describe("a critic's report", () => {
-  test("identity: the description as title, the launch id, the report's path copied on click", async () => {
+  test("identity, improve-10 (2): the description as title, the launch id, the report's path once — behind its copy button", async () => {
     const user = userEvent.setup({ delay: null });
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
@@ -46,8 +48,11 @@ describe("a critic's report", () => {
     expect(within(reader()).getByRole("heading", { level: 2 })).toHaveTextContent("craft accounts");
     expect(reader()).toHaveTextContent("отчёт критика");
     expect(reader().querySelector("[data-slot=report-id]")).toHaveTextContent("p1-map-craft-accounts");
-    const path = reader().querySelector("[data-slot=report-path]") as HTMLElement;
-    expect(path).toHaveTextContent("reports/p1-map-craft-accounts.md");
+    // the id names the report on the line; its path, which repeats the id, is what the button copies
+    const path = within(reader()).getByRole("button", { name: "Скопировать путь к отчёту" });
+    expect(path).toHaveAttribute("data-slot", "report-path");
+    expect(path).toHaveTextContent(/^$/);
+    expect(reader()).not.toHaveTextContent("reports/p1-map-craft-accounts.md");
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     await user.click(path);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(reportPath(run.dir, "reports/p1-map-craft-accounts.md")));
@@ -55,11 +60,10 @@ describe("a critic's report", () => {
     expect(reportPath("/home/op/runs/a5/", "reports/x.md")).toBe("/home/op/runs/a5/reports/x.md");
   });
 
-  test("craft-13: the reader opens on its outcome — the outcome rows, one muted line agent · model · duration · tokens, the rest behind «Подробнее»", async () => {
+  test("craft-13, improve-10 (2): the reader opens on its outcome — the outcome rows, «Состояние» only when not «завершён», one muted line agent · model · duration · tokens, the rest behind «Подробнее»", async () => {
     const user = userEvent.setup({ delay: null });
     open("p1-map-craft-accounts");
     expect(factRows()).toEqual([
-      ["Состояние", "завершён"],
       ["Находки", "18 находок3 critical6 major9 minor"],
       ["Оценки раздела", "accountsаудит 8 из 20·критика 18 из 40"],
     ]);
@@ -75,7 +79,7 @@ describe("a critic's report", () => {
     // the current report's score is marked, not a link
     expect(reader().querySelector("[data-slot=score-audit] [aria-current]")).toHaveTextContent("8");
     await user.click(screen.getByRole("button", { name: "Подробнее" }));
-    expect(factRows().slice(3, 7)).toEqual([
+    expect(factRows().slice(2, 6)).toEqual([
       ["Агент", "критикfsloop-critic"],
       ["Линза критика", "craft assess"],
       ["Этап", "проход 1 · карта"],
@@ -288,6 +292,114 @@ describe("a critic's report", () => {
     expect(list.querySelectorAll("[data-slot=finding-row]")).toHaveLength(3);
   });
 
+  test("improve-2 (1): the severity filter is the shared choice toggles — the pressed one ink, no key tooltip", async () => {
+    const user = userEvent.setup({ delay: null });
+    open("p1-review-critic-craft");
+    const group = within(reader()).getByRole("radiogroup", { name: "Серьёзность находок" });
+    await user.click(within(group).getByRole("radio", { name: "critical" }));
+    await applyStylesheet();
+    // DESIGN.md → Colors, light: ink #1b1b1a on the pressed item, as on the verdict's
+    expect(getComputedStyle(within(group).getByRole("radio", { name: "critical" })).backgroundColor).toBe("rgb(27, 27, 26)");
+    expect(getComputedStyle(within(group).getByRole("radio", { name: "все" })).backgroundColor).not.toBe("rgb(27, 27, 26)");
+    await user.hover(within(group).getByRole("radio", { name: "major" }));
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  test("improve-2 (3), design-9: a severity that hides rows says so beside the group — «5 из 30 находок · показать все» — on a line reserved before it", async () => {
+    // Copy 3, 4: the status bar's one form, the noun genitive after «из», then the verb of the click
+    expect(severityShown(5, 30)).toBe("5 из 30 находок · показать все");
+    expect(severityShown(5, 30).split(/\s+/)).toHaveLength(7);
+    expect(severityShown(1, 21)).toBe("1 из 21 находки · показать все");
+    const user = userEvent.setup({ delay: null });
+    open("p1-review-critic-craft");
+    const line = reader().querySelector("[data-slot=severity-bar]") as HTMLElement;
+    const group = within(line).getByRole("radiogroup", { name: "Серьёзность находок" });
+    const shown = line.querySelector("[data-slot=severity-shown]") as HTMLElement;
+    await applyStylesheet();
+    // Strict 1: the line holds its 28 px with nothing hidden, the group first, so the count beside it moves nothing
+    expect(usedBlockSize(line)).toBe(28);
+    expect(line.firstElementChild).toBe(group);
+    expect(shown).toHaveTextContent(/^$/);
+    await user.click(within(group).getByRole("radio", { name: "critical" }));
+    await applyStylesheet();
+    expect(usedBlockSize(line)).toBe(28);
+    expect(line.firstElementChild).toBe(group);
+    expect(shown).toHaveTextContent(/^5 из 30 находок · показать все$/);
+    expect(reader().querySelectorAll("[data-slot=report-findings] [data-slot=finding-row]")).toHaveLength(5);
+    // the verb is the click: every row back, the choice «все» kept for the view
+    await user.click(within(shown).getByRole("button", { name: "показать все" }));
+    expect(reader().querySelectorAll("[data-slot=report-findings] [data-slot=finding-row]")).toHaveLength(30);
+    expect(readPref(SEVERITY_PREF, "critical")).toBe("all");
+    expect(shown).toHaveTextContent(/^$/);
+  });
+
+  test("improve-10 (1): a report's findings read critical, major, minor — the critic's order inside each", () => {
+    const f = (id: string, severity: Finding["severity"]) => ({ id, severity });
+    // a critical one sixth, as p2-final-reports-reader.png shows it
+    expect(bySeverity([f("craft-1", "major"), f("craft-2", "major"), f("craft-3", "minor"), f("craft-4", null), f("craft-5", "minor"), f("craft-6", "critical"), f("craft-7", "major"), f("craft-8", "critical")]).map((x) => x.id)).toEqual(["craft-6", "craft-8", "craft-1", "craft-2", "craft-7", "craft-3", "craft-5", "craft-4"]);
+    open("p1-review-critic-craft");
+    const ids = [...reader().querySelectorAll<HTMLElement>("[data-slot=report-findings] > li")].map((li) => li.dataset.finding as string);
+    expect(ids).toHaveLength(30);
+    const severity = new Map(run.findings.map((x) => [x.id, x.severity ?? "none"]));
+    const rank = { critical: 0, major: 1, minor: 2, none: 3 } as const;
+    const ranks = ids.map((id) => rank[severity.get(id) as keyof typeof rank]);
+    expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
+    expect(ranks[0]).toBe(0);
+    // inside a severity, the critic's numbering runs up
+    for (let i = 1; i < ids.length; i++) if (ranks[i] === ranks[i - 1]) expect(Number(ids[i].split("-").at(-1))).toBeGreaterThan(Number(ids[i - 1].split("-").at(-1)));
+  });
+
+  test("improve-10 (2), Strict 1: «Состояние» comes and goes with the state — an open reader keeps the rows it opened with", async () => {
+    // a file missing at open: the row stands; the file arrives — the row stays, now «завершён»
+    const missing: Launch = { ...launch("p1-map-craft-accounts"), reportMissing: true };
+    const view = open(missing.id, {}, { ...run, launches: run.launches.map((x) => (x.id === missing.id ? missing : x)) });
+    expect(factRows()[0]).toEqual(["Состояние", "нет отчёта"]);
+    view.again({ ...run, version: 2 });
+    expect(factRows()[0]).toEqual(["Состояние", "завершён"]);
+    view.unmount();
+    // a running launch ends while its reader is open: the reader follows it to its record and keeps the row
+    const live = open("aa5b5ec85u30");
+    expect(factRows()[0]).toEqual(["Состояние", "работает · 12 мин"]);
+    live.again({ ...run, version: 2, running: [] });
+    expect(document.querySelector("[data-slot=report-id]")).toHaveTextContent("p2-units-u30-implement");
+    expect(factRows()[0]).toEqual(["Состояние", "завершён"]);
+  });
+
+  test("improve-10 (5), design-20: every list drawn without markers keeps its list role — a part's mono list, a design check's lines, the file's outline", async () => {
+    /** The reader's lists the stylesheet draws with no marker, and those of them a screen reader would lose. */
+    const unlisted = async () => {
+      await applyStylesheet();
+      const bare = [...reader().querySelectorAll<HTMLElement>("ol, ul")].filter((l) => getComputedStyle(l).listStyleType === "none");
+      return { bare: bare.length, lost: bare.filter((l) => l.getAttribute("role") !== "list").length };
+    };
+    const files = open("p1-units-u1-implement", { tab: "files" });
+    expect(await unlisted()).toMatchObject({ lost: 0 });
+    expect((await unlisted()).bare).toBeGreaterThan(0);
+    files.unmount();
+    const check = open("p1-decompose-design-check", { tab: "conventions" });
+    expect(await unlisted()).toMatchObject({ lost: 0 });
+    check.unmount();
+    open("p1-map-map");
+    await loadedFile();
+    expect(within(reader()).getByRole("navigation", { name: "Содержание отчёта" }).querySelector("ol")).toHaveAttribute("role", "list");
+    expect(await unlisted()).toMatchObject({ lost: 0 });
+  });
+
+  test("improve-12 (3), design-13: «Оценки раздела» carries the scores' glossary — whose scale, where the bar is — the one constant the overview's lead reads", async () => {
+    const user = userEvent.setup({ delay: null });
+    expect(glossaryLines(SCORES_GLOSSARY)).toEqual([
+      "аудит — техническая проверка impeccable audit, из 20; от 18 — отлично",
+      "критика — удобство по 10 эвристикам impeccable critique, из 40; от 36 — отлично",
+      "8 → 9 — оценка раздела на каждом этапе прогона, в порядке этапов",
+      "craft — интерфейс раздела: критика и аудит impeccable по кадру и коду",
+    ]);
+    open("p1-map-craft-accounts");
+    const term = within(reader()).getByRole("button", { name: "Оценки раздела" });
+    expect(term).toHaveAttribute("data-slot", "glossary-term");
+    await user.hover(term);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("от 36 — отлично");
+  });
+
   test("cand-1: the severity filter carries no counts — the outcome row above holds them, the tab the total", () => {
     open("p1-map-craft-accounts");
     expect(screen.getAllByRole("radio").map((r) => r.textContent)).toEqual(["все", "critical", "major", "minor"]);
@@ -337,7 +449,7 @@ describe("a critic's report", () => {
 
   test("a verdict critic: resolved / partial / unresolved as its outcome; ids in its text are links", () => {
     open("p1-verdict-critic-code-verdict", { tab: "verdict" });
-    expect(factRows()[1]).toEqual(["Вердикты", "1 resolved · 1 partial · 0 unresolved"]);
+    expect(factRows()[0]).toEqual(["Вердикты", "1 resolved · 1 partial · 0 unresolved"]);
     const panel = within(reader()).getByRole("tabpanel");
     expect(panel.querySelector("[data-slot=section-lead]")).toHaveTextContent(/^Исправлена ли каждая находка прошлого прохода: resolved — да, partial — отчасти, unresolved — нет\.$/);
     expect(within(panel).getByRole("link", { name: "p1-review-critic-code#code-1" })).toHaveAttribute("href", runPath(KEY, { view: "findings", finding: "p1-review-critic-code#code-1" }));
@@ -485,7 +597,6 @@ describe("other kinds", () => {
     // no frames: an implementer's strip has no «Кадры»
     expect(tabNames()).toEqual(["Итог1", "Файлы1", "Тесты2", "Заметки0", "Находки1", "Паритет0", "Проверка кода1", "Файл отчёта"]);
     expect(factRows()).toEqual([
-      ["Состояние", "завершён"],
       ["Итог", "done"],
       ["Находки", "1 находка1 без серьёзности"],
     ]);
@@ -513,7 +624,8 @@ describe("other kinds", () => {
   test("research: its own section as written, then the file", () => {
     open("p1-spike-spike-telegram");
     expect(tabNames()).toEqual(["SPIKE1", "Файл отчёта"]);
-    expect(factRows()[0]).toEqual(["Состояние", "завершён"]);
+    // finished: no «Состояние» row to say so (improve-10 (2))
+    expect(factRows().map((r) => r[0])).not.toContain("Состояние");
   });
 });
 

@@ -14,7 +14,9 @@ import { DIALOG_PROMPT, failedCause, NOTE_SAVE, NOTE_UNSAVED, NOTE_UNSAVED_FIRST
 import { FINDINGS_TABLE } from "@/finding/facets.ts";
 import { tableKey } from "@/table/view-state.ts";
 import { writePref } from "@/ui";
+import { applyStylesheet } from "../../app/layout-testing.ts";
 import { findingsApp, keyOf, MIN, NOW, renderFindings } from "./testing.tsx";
+import { VERDICT_KEY_HINT } from "./verdict.tsx";
 
 // A live fixture run whose second critic of the map reported 14 findings: one page holds every row, and a
 // selection of 12 fits it (the 723-finding run is view.test.tsx's).
@@ -96,7 +98,8 @@ describe("setting a verdict over u1's handler", () => {
     await waitFor(() => expect(detail(id)).toBeTruthy());
     expect(detail(id).querySelector("[data-slot=verdict-line]")).toHaveTextContent(/^согласен · 19:41 МСК$/);
     expect(within(detail(id)).getByLabelText("Заметка к оценке")).toHaveValue("верно, проверил");
-    expect(within(detail(id)).getByRole("radio", { name: "согласен" })).toHaveAttribute("data-state", "on");
+    // design-10: the pressed state is the item's own `aria-checked` — its tooltip writes `data-state` over it
+    expect(within(detail(id)).getByRole("radio", { name: "согласен" })).toHaveAttribute("aria-checked", "true");
   });
 
   test("«Оценить…» on a selection of 12 with one note: 12 rows at once, 12 lines, kept on a re-read", async () => {
@@ -175,9 +178,8 @@ describe("setting a verdict over u1's handler", () => {
     for (let i = 1; i < order.length; i++) expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING, `${i}`).toBeTruthy();
     // nothing stands between the prompt and its choices
     expect(line).toHaveTextContent(/^Оценки ещё нет — выберите одну$/);
-    // (the group sits alone in the box that holds its keys' tooltip)
-    expect(line.nextElementSibling).toBe(group.parentElement);
-    expect(group.parentElement?.children).toHaveLength(1);
+    // improve-2 (2): the group follows the line itself — each toggle holds its own key's tooltip, no box around them
+    expect(line.nextElementSibling).toBe(group);
     // the hint is gone: what it said is now the note's own status line
     expect(d).not.toHaveTextContent("выберите оценку ещё раз");
     // Strict 1: the line, the field and the status line keep fixed boxes
@@ -185,6 +187,28 @@ describe("setting a verdict over u1's handler", () => {
     expect(note).toHaveClass("h-16", "min-h-16");
     expect(status).toHaveClass("h-6");
     expect(status).toHaveTextContent(/^$/);
+  });
+
+  test("improve-2 (1, 2), design-10: the detail's toggles are the shared choice toggles — Tab onto «согласен» opens its own tooltip «Оценить клавишей 1»; the pressed one is ink", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderFindings(app, KEY, runPath(KEY, { view: "findings" }));
+    await loaded();
+    // a row no other case of this file rates
+    const id = bodyRows()[1].dataset.rowId as string;
+    await user.click(row(id).querySelector("td[data-col=summary]") as HTMLElement);
+    expect(VERDICT_KEY_HINT).toBe("Оценить клавишей");
+    expect(VERDICT_KEY_HINT.split(" ")).toHaveLength(2);
+    // the note's field, then Shift+Tab back onto the group's one stop: with nothing pressed, its first toggle
+    await user.click(within(detail(id)).getByLabelText("Заметка к оценке"));
+    await user.tab({ shift: true });
+    const agree = within(detail(id)).getByRole("radio", { name: "согласен" });
+    expect(agree).toHaveFocus();
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/^Оценить клавишей1$/);
+    await user.click(within(detail(id)).getByRole("radio", { name: "не согласен" }));
+    await applyStylesheet();
+    // DESIGN.md → Colors, light: ink #1b1b1a — the pressed item, under its open tooltip's trigger
+    expect(getComputedStyle(within(detail(id)).getByRole("radio", { name: "не согласен" })).backgroundColor).toBe("rgb(27, 27, 26)");
+    await waitFor(() => expect(linesOf(id)).toHaveLength(1));
   });
 
   test("craft-24: a typed note outlives a collapse; the reserved line says it is not saved, and saves it", async () => {

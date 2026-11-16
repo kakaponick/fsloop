@@ -158,7 +158,8 @@ function Reports({ run }: { run: LoadedRun }) {
         <nav aria-label={RAIL_LABEL} data-slot="report-rail" className="hidden w-60 shrink-0 flex-col border-r @min-[52rem]/reports:flex">
           {/* each scroller is the containing block of everything in it (`SCROLLER`): a finding row's sr-only never
               hangs below the view to give the page's body an overflow (craft-1) */}
-          <div data-slot="rail-scroll" className={cn(SCROLLER, "flex-1 py-1 pr-1")}>
+          {/* scroll padding: the sticky stage heading's 28 px, so a focus ↑/↓ moves to is never under it */}
+          <div data-slot="rail-scroll" className={cn(SCROLLER, "flex-1 scroll-pt-7 py-1 pr-1")}>
             <Rail
               items={railShown}
               outside={q.outside}
@@ -188,7 +189,8 @@ function Reports({ run }: { run: LoadedRun }) {
                 <EmptyState form="not-yet" noun={NOUNS.report} step="map" className="py-16" />
               )
             ) : item ? (
-              <Reader key={item.id} run={run} item={item} tab={tab} onTab={onTab} prev={order[at - 1] ?? null} next={at < 0 ? null : (order[at + 1] ?? null)} hrefOf={hrefOf} now={now} />
+              // keyed by the address: a running launch that ends under it is the same reader, its rows kept
+              <Reader key={reportId ?? item.id} run={run} item={item} tab={tab} onTab={onTab} prev={order[at - 1] ?? null} next={at < 0 ? null : (order[at + 1] ?? null)} hrefOf={hrefOf} now={now} />
             ) : (
               <div className="flex flex-col gap-6">
                 {reportId && (

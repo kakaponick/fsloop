@@ -3,18 +3,20 @@
 // (and one running) over u1's handler — the rail, search and filters, the overview, the report's address with Back,
 // the held strip, the fold — and the strict rules: every late part's box reserved, no skeleton.
 import "../../ui/test-setup.ts";
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, describe, expect, test, vi } from "vitest";
 import type { Launch } from "../../../shared/model.ts";
-import { readPref } from "@/ui";
+import { glossaryLines, readPref } from "@/ui";
 import { isSelectFilter, type FilterDef } from "@/table";
+import { applyStylesheet, textWidth, usedBlockSize } from "../../app/layout-testing.ts";
 import { renderShell } from "../../app/testing.tsx";
 import { runPath } from "../../app/routes.ts";
 import { ReportsView, REPORT_NOT_FOUND_NEXT } from "./index.tsx";
-import { commonKind, filtersFor, groupsOf, railItems, rankSurfaces } from "./model.ts";
+import { commonKind, filtersFor, groupsOf, itemState, pickerLabel, railItems, rankSurfaces, type RailItem } from "./model.ts";
 import { OVERVIEW_EMPTY, OVERVIEW_LEAD } from "./overview.tsx";
 import { OVERVIEW_ITEM } from "./rail.tsx";
+import { SCORES_GLOSSARY } from "./scores.tsx";
 import { fixtureApp, keyOf, loadedRun, NOW, renderOver, renderView } from "./testing.tsx";
 
 const N = 40; // the production maximum: 97 launches, one more running
@@ -133,8 +135,9 @@ describe("the task walk (surfaces/reading.md → WALK «Отчёты»)", () => 
     expect(running).toHaveTextContent("u30 implement");
     expect(within(running).getByText("работает · 12 мин")).toBeInTheDocument();
     expect(running.querySelector("[data-slot=dot]")).toBeNull();
+    // improve-10 (3): an implementer whose result its group shares reads how long it took — «итог» only where it differs
     const implement = railLinks().find((a) => a.dataset.flatItem === "p1-units-u1-implement") as HTMLElement;
-    expect(within(implement).getByText("итог: done · 1 находка")).toBeInTheDocument();
+    expect(within(implement).getByText("завершён за 9 мин · 1 находка")).toBeInTheDocument();
     const verdict = railLinks().find((a) => a.dataset.flatItem === "p1-verdict-critic-code-verdict") as HTMLElement;
     expect(within(verdict).getByText("1 resolved · 1 partial · 0 unresolved")).toBeInTheDocument();
 
@@ -215,11 +218,69 @@ describe("the task walk (surfaces/reading.md → WALK «Отчёты»)", () => 
     await waitFor(() => expect(railLinks().map((a) => a.dataset.flatItem)).toEqual(["p2-units-u30-implement", "aa5b5ec85u30"]));
   });
 
+  test("improve-10 (3): a heading's count names its noun in its title; «итог: done» only on a row whose result differs from its group's", async () => {
+    // one implementer of «юниты в работе · проход 1» blocked: it says so, its 15 neighbours do not repeat «done»
+    const own = run.launches.filter((l) => l.stage === "p1-units" && l.agent === "fsloop-implement");
+    expect(own.length).toBeGreaterThan(2);
+    const blocked = own[2];
+    const over = { ...run, launches: run.launches.map((l) => (l.id === blocked.id ? { ...l, sections: { ...l.sections, RESULT: { value: "blocked", items: [] } } } : l)) };
+    renderOver(fx, over, reportsPath(), ReportsView);
+    const titles = [...document.querySelectorAll<HTMLElement>("[data-slot=rail-heading] [data-slot=rail-count]")].map((c) => c.title);
+    expect(titles).toEqual(["21 отчёт", "1 отчёт", "7 отчётов", "16 отчётов", "4 отчёта", "5 отчётов", "2 отчёта", "4 отчёта", "7 отчётов", "16 отчётов", "3 отчёта", "5 отчётов", "2 отчёта", "5 отчётов"]);
+    const state = (id: string) => (railLinks().find((a) => a.dataset.flatItem === id) as HTMLElement).querySelector("[data-slot=rail-state]")?.textContent;
+    expect(state(blocked.id)).toMatch(/^итог: blocked/);
+    expect(own.filter((l) => l.id !== blocked.id).map((l) => state(l.id)).filter((t) => t?.startsWith("итог:"))).toEqual([]);
+    // the picker stands in for the rail with no group beside it: its options keep every result
+    expect(pickerLabel(railItems(over).find((i) => i.id === own[0].id) as RailItem, itemState(railItems(over).find((i) => i.id === own[0].id) as RailItem, over.findings, NOW))).toMatch(/· итог: done/);
+  });
+
+  test("improve-10 (4), design-6: the rail's scroller pads its top by the sticky heading's height; a report revealed above it lands under the heading, 8 px clear", async () => {
+    renderOver(fx, run, reportsPath(), ReportsView);
+    const scroller = document.querySelector("[data-slot=rail-scroll]") as HTMLElement;
+    const heading = document.querySelector("[data-slot=rail-heading]") as HTMLElement;
+    await applyStylesheet();
+    // ↑/↓ move focus through the browser, which keeps a focused item below the scroll padding
+    expect(getComputedStyle(heading).height).toBe("28px");
+    expect(getComputedStyle(scroller).scrollPaddingTop).toBe(getComputedStyle(heading).height);
+    cleanup();
+    // jsdom lays nothing out: the rail's box 100 px down, 400 px high, each item 44 px under the one before it
+    const target = "p1-units-u10-implement";
+    const rects = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const box = document.querySelector("[data-slot=rail-scroll]") as HTMLElement | null;
+      const items = [...document.querySelectorAll<HTMLElement>("[data-slot=report-rail] [data-flat-item]")];
+      const at = items.indexOf(this);
+      const scrolled = box?.scrollTop ?? 0;
+      const top = this.dataset.slot === "rail-scroll" ? 100 : at >= 0 ? 100 + at * 44 - scrolled : 0;
+      const height = this.dataset.slot === "rail-scroll" ? 400 : 44;
+      return { top, bottom: top + height, left: 0, right: 0, width: 0, height, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+    });
+    try {
+      const view = renderOver(fx, run, reportsPath(), ReportsView);
+      const box = document.querySelector("[data-slot=rail-scroll]") as HTMLElement;
+      const at = [...document.querySelectorAll<HTMLElement>("[data-slot=report-rail] [data-flat-item]")].findIndex((el) => el.dataset.flatItem === target);
+      // the rail scrolled past the report — and a report 10 px under the scroller's top, under the heading
+      for (const past of [at * 44 + 200, at * 44 - 10]) {
+        act(() => void (box.scrollTop = past));
+        act(() => void view.probe.navigate?.(reportsPath({ report: target })));
+        const top = (railLinks().find((a) => a.dataset.flatItem === target) as HTMLElement).getBoundingClientRect().top;
+        // its top 8 px below the 28 px heading's bottom
+        expect(top - 100).toBe(28 + 8);
+        act(() => void view.probe.navigate?.(reportsPath()));
+      }
+    } finally {
+      rects.mockRestore();
+    }
+  });
+
   test("1: no report chosen — the overview: surfaces ranked by critical + major, each score a link to its stage's report", async () => {
     renderView(fx, KEY, reportsPath(), ReportsView);
     await loaded();
     const overview = document.querySelector("[data-slot=reports-overview]") as HTMLElement;
-    expect(within(overview).getByRole("heading", { name: "Разделы интерфейса" })).toBeInTheDocument();
+    // improve-12 (1): one name — the rail item's words head the place it opens
+    expect(within(overview).getByRole("heading", { level: 2 })).toHaveTextContent(/^Обзор: оценки и токены$/);
+    expect(within(overview).queryByRole("heading", { name: "Разделы интерфейса" })).toBeNull();
+    // design-20: the lines are a list for a screen reader too
+    expect(overview.querySelector("ol")).toHaveAttribute("role", "list");
     const lines = [...overview.querySelectorAll<HTMLElement>("li[data-surface]")];
     expect(lines).toHaveLength(20);
     // every surface was judged once at the map: 3 critical and 6 major each, so the score orders them, the lowest
@@ -259,13 +320,53 @@ describe("the task walk (surfaces/reading.md → WALK «Отчёты»)", () => 
   });
 
   test("craft-27: the overview's lead and its empty line name no side — the list is on the left only in the wide view", () => {
-    expect(OVERVIEW_LEAD).toBe(
-      "Критики craft оценивали эти разделы; сначала идут те, где больше находок critical и major, а при равенстве — с более низкой оценкой. Оценки — аудит из 20 и критика из 40 по этапам прогона; каждое число открывает отчёт, который его поставил. Отчёт любого запуска выбирается в списке отчётов.",
-    );
-    expect(OVERVIEW_LEAD.split(/\s+/)).toHaveLength(48);
     expect(OVERVIEW_EMPTY).toBe("Критики craft не оценивали разделов интерфейса в этом прогоне — выберите отчёт в списке отчётов.");
     expect(OVERVIEW_EMPTY.split(/\s+/)).toHaveLength(15);
-    for (const s of [OVERVIEW_LEAD, OVERVIEW_EMPTY, REPORT_NOT_FOUND_NEXT]) expect(s).not.toMatch(/слева|справа/);
+    for (const s of [OVERVIEW_LEAD.join(""), OVERVIEW_EMPTY, REPORT_NOT_FOUND_NEXT]) expect(s).not.toMatch(/слева|справа/);
+  });
+
+  test("improve-12 (2, 3), design-13, Strict 1: the lead is one line from first paint — «Оценки» its glossary term, the scores' one constant", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderOver(fx, run, reportsPath(), ReportsView);
+    const lead = document.querySelector("[data-slot=overview-lead]") as HTMLElement;
+    const text = "Оценки разделов; первыми — где больше находок critical и major · Расход токенов";
+    expect(lead).toHaveTextContent(new RegExp(`^${text}$`));
+    expect(OVERVIEW_LEAD.join("")).toBe(text);
+    expect(text.split(/\s+/)).toHaveLength(13);
+    await applyStylesheet();
+    // one line: its 20 px box, and the words at the body's 13 px within the 75-character measure (75 × 7.5 px)
+    expect(usedBlockSize(lead)).toBe(20);
+    expect(textWidth(text)).toBeLessThanOrEqual(75 * 7.5);
+    // the term the lead names for the whole set carries its glossary, once — never a line of the list
+    const term = within(lead).getByRole("button", { name: "Оценки" });
+    expect(term).toHaveAttribute("data-slot", "glossary-term");
+    expect(document.querySelectorAll("[data-slot=reports-overview] [data-slot=glossary-term]")).toHaveLength(1);
+    await user.hover(term);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(glossaryLines(SCORES_GLOSSARY).join(""));
+  });
+
+  test("improve-12 (4), design-18: «Расход токенов» in the lead brings the spend into view in the reader's own scroller — no hash, nothing above it moving", async () => {
+    const user = userEvent.setup({ delay: null });
+    const into = vi.spyOn(HTMLElement.prototype, "scrollIntoView");
+    const box = () => document.querySelector("[data-slot=report-reader-scroll]") as HTMLElement;
+    // jsdom lays nothing out: the reader's box 100 px down; the spend 1 500 px into it
+    const rects = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const top = this.dataset.slot === "report-reader-scroll" ? 100 : this.dataset.slot === "reports-spend" ? 1600 - box().scrollTop : 0;
+      return { top, bottom: top + 20, left: 0, right: 0, width: 0, height: 20, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+    });
+    try {
+      const view = renderOver(fx, run, reportsPath(), ReportsView);
+      const jump = within(document.querySelector("[data-slot=overview-lead]") as HTMLElement).getByRole("button", { name: "Расход токенов" });
+      await user.click(jump);
+      // 8 px under the reader's top: 1 600 − 100 − 8
+      expect(box().scrollTop).toBe(1492);
+      expect((document.querySelector("[data-slot=view-body]") as HTMLElement).scrollTop).toBe(0);
+      expect(into).not.toHaveBeenCalled();
+      expect(view.probe.location?.hash).toBe("");
+    } finally {
+      rects.mockRestore();
+      into.mockRestore();
+    }
   });
 
   test("3–6: opening a report pushes its address, the tab is `tab=`, Back returns to the same report, tab and scroll", async () => {
@@ -433,7 +534,8 @@ describe("u6-shape cand-1: tokens by stage and by agent kind in the overview", (
   test("u6-shape cand-1: «Расход токенов» — each stage and each kind with its launches and its tokens, the split in the title", () => {
     renderOver(fx, { ...run, tokens }, reportsPath(), ReportsView);
     const section = document.querySelector("[data-slot=reports-spend]") as HTMLElement;
-    expect(within(section).getByRole("heading", { level: 2 })).toHaveTextContent(/^Расход токенов$/);
+    // a part of the overview, under its one heading (improve-12 (1))
+    expect(within(section).getByRole("heading", { level: 3 })).toHaveTextContent(/^Расход токенов$/);
     const rows = (name: string) => [...within(section).getByRole("region", { name }).querySelectorAll<HTMLElement>("[data-slot=fact]")].map((r) => [r.querySelector("dt")?.textContent, r.querySelector("dd")?.textContent]);
     expect(rows("По этапам")).toEqual([
       ["проход 1 · карта", "21 запуск агента · 3,4 млн токенов"],

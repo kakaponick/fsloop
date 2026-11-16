@@ -7,15 +7,16 @@
 // «Ещё N». Bodies are running text at the reading measure, each critic's part led by what it holds; ids in them are
 // links; the findings are compact rows that expand in place (craft-13: the product first, in the first viewport).
 import { ChevronDownIcon, ChevronUpIcon, CopyIcon } from "lucide-react";
-import { useRef, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { Finding, Launch } from "../../../shared/model.ts";
 import { launchState, NOT_RECORDED, reportWord, SEVERITY, stageOf } from "../../../shared/states.ts";
 import { ago, count, duration, mskDateTime, mskTime, NOUNS, num, tokens } from "../../../shared/text.ts";
 import { Button } from "@/components/ui/button";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { frameSrc } from "@/api";
+import { shownText } from "@/table";
 import {
+  ChoiceToggles,
   copyLabel,
   copyText,
   CountLink,
@@ -45,8 +46,9 @@ import { runPath } from "../../app/routes.ts";
 import type { LoadedRun } from "../index.ts";
 import { useReportText } from "./report-text.ts";
 import { earlierReport, type RailItem } from "./model.ts";
-import { SurfaceScores } from "./scores.tsx";
+import { SCORES_GLOSSARY, SurfaceScores } from "./scores.tsx";
 import {
+  bySeverity,
   compareFindings,
   emptyTabText,
   FILE_TAB,
@@ -88,6 +90,12 @@ export const OUTLINE_LABEL = "Содержание отчёта";
 export const FINDINGS_LIST_LABEL = "Находки отчёта";
 /** The severity chosen over a report's findings: one per view, kept in the browser (cand-3). */
 export const SEVERITY_PREF = "reports:severity";
+export const SEVERITY_LABEL = "Серьёзность находок";
+/** The verb of the count beside the severity filter: its click brings every row back. */
+export const SHOW_ALL = "показать все";
+/** What a chosen severity hides, beside the filter (improve-2 (3), design-9): the status bar's one form, then the
+ * verb of the click — «5 из 30 находок · показать все». */
+export const severityShown = (shown: number, total: number): string => `${shownText(shown, total, NOUNS.finding)} · ${SHOW_ALL}`;
 
 /** The report file's full path: the run folder joined with the launch's relative report path. */
 export function reportPath(dir: string, report: string): string {
@@ -112,10 +120,14 @@ export interface ReaderProps {
 
 export function Reader({ run, item, tab, onTab, prev, next, hrefOf, now }: ReaderProps) {
   const l = item.launch;
+  // «Состояние» stands only while the launch is not «завершён» (improve-10 (2)): a running one, a missing file. An
+  // open reader keeps the rows it opened with (the design check's convention; Strict 1) — a launch that ends under
+  // it keeps its row, now «завершён», and a row never appears above what the user reads.
+  const [withState] = useState(() => !l || l.reportMissing);
   return (
     <article data-slot="report-reader" aria-labelledby="report-title" className="flex min-w-0 flex-col gap-4">
       <Identity run={run} item={item} prev={prev} next={next} hrefOf={hrefOf} />
-      {l ? <Finished run={run} launch={l} item={item} tab={tab} onTab={onTab} now={now} /> : <Running item={item} now={now} />}
+      {l ? <Finished run={run} launch={l} item={item} tab={tab} onTab={onTab} now={now} withState={withState} /> : <Running item={item} now={now} />}
     </article>
   );
 }
@@ -165,11 +177,11 @@ function Identity({ run, item, prev, next, hrefOf }: { run: LoadedRun; item: Rai
         <span data-slot="report-id" className="font-mono text-xs break-all text-foreground">
           {item.id}
         </span>
+        {/* the path repeats the id beside it: it shows once, behind its copy button (improve-10 (2)) */}
         {l?.report && path && (
           <Hint label={copyLabel(COPY_PATH_WHAT)}>
-            <Button variant="ghost" size="sm" data-slot="report-path" className="h-6 max-w-full gap-1.5 px-1.5 font-mono text-xs font-normal" onClick={() => void copyText(path, COPY_PATH_WHAT)}>
-              <span className="truncate">{l.report}</span>
-              <CopyIcon aria-hidden="true" className="text-muted-foreground" />
+            <Button variant="ghost" size="icon-xs" data-slot="report-path" aria-label={copyLabel(COPY_PATH_WHAT)} className="text-muted-foreground" onClick={() => void copyText(path, COPY_PATH_WHAT)}>
+              <CopyIcon aria-hidden="true" />
             </Button>
           </Hint>
         )}
@@ -259,7 +271,7 @@ function SeverityLine({ run, launch, findings, linkable }: { run: LoadedRun; lau
   );
 }
 
-function Finished({ run, launch: l, item, tab, onTab, now }: { run: LoadedRun; launch: Launch; item: RailItem; tab: string | null; onTab: (tab: string) => void; now: number }) {
+function Finished({ run, launch: l, item, tab, onTab, now, withState }: { run: LoadedRun; launch: Launch; item: RailItem; tab: string | null; onTab: (tab: string) => void; now: number; withState: boolean }) {
   const kind = reportKind(l);
   const findings = reportFindings(run.findings, l.id);
   const all = run.findings.filter((f) => f.launch === l.id).length;
@@ -271,7 +283,7 @@ function Finished({ run, launch: l, item, tab, onTab, now }: { run: LoadedRun; l
   const hrefOf = (launch: string) => (run.launches.some((x) => x.id === launch) ? runPath(run.key, { view: "reports", report: launch }) : null);
 
   // ── the outcome: what the report says, the only rows open by default ───────────────────────────
-  const facts: Fact[] = [{ label: "Состояние", outcome: true, value: <StatusDot state={{ tone: state.tone, label: state.label }} form="full" /> }];
+  const facts: Fact[] = withState ? [{ label: "Состояние", outcome: true, value: <StatusDot state={{ tone: state.tone, label: state.label }} form="full" /> }] : [];
   if (kind === "implement") facts.push({ label: "Итог", outcome: true, value: result ? <span className="font-mono text-xs">{result}</span> : <NotRecorded /> });
   if (verdicts) facts.push({ label: SECTION_LABELS.VERDICT, outcome: true, value: <span className="tabular-nums">{verdictText(verdicts)}</span> });
   if (kind === "critic" ? !verdicts || findings.length > 0 : findings.length > 0)
@@ -279,6 +291,7 @@ function Finished({ run, launch: l, item, tab, onTab, now }: { run: LoadedRun; l
   if (scored.length)
     facts.push({
       label: "Оценки раздела",
+      glossary: SCORES_GLOSSARY,
       outcome: true,
       value: (
         <span className="flex flex-col gap-1">
@@ -456,7 +469,7 @@ function Body({ run, launch: l, tab, findings, earlier, frames, framesTitle, now
             {p.items.length === 0 ? (
               <Muted>—</Muted>
             ) : p.mono ? (
-              <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+              <ul role="list" className="m-0 flex list-none flex-col gap-0.5 p-0">
                 {p.items.map((x, i) => (
                   <li key={i} className="font-mono text-xs break-all">
                     {x}
@@ -478,7 +491,7 @@ function Body({ run, launch: l, tab, findings, earlier, frames, framesTitle, now
         (conventions ? (
           // gap 8 (f15): a design check's line leads with its convention's ordinal in the run — a link to its address
           // in «Соглашения», in the fixed box that view gives it
-          <ol data-slot="section-items" className="m-0 flex list-none flex-col gap-2 p-0">
+          <ol role="list" data-slot="section-items" className="m-0 flex list-none flex-col gap-2 p-0">
             {body.items.map((x, i) => {
               const c = conventions.find((own) => own.text === x);
               return (
@@ -601,7 +614,7 @@ function ReportFile({ run, file }: { run: LoadedRun; file: string }) {
       {outline.length > 0 && (
         <nav aria-label={OUTLINE_LABEL} data-slot="report-outline" className="flex max-w-measure flex-col gap-1">
           <h3 className="m-0 text-xs font-normal text-muted-foreground">{OUTLINE_LABEL}</h3>
-          <ol className="m-0 flex list-none flex-wrap gap-x-4 gap-y-0.5 p-0">
+          <ol role="list" className="m-0 flex list-none flex-wrap gap-x-4 gap-y-0.5 p-0">
             {outline.map((h) => (
               <li key={h.index}>
                 <Button variant="link" size="xs" className="h-auto px-0 text-sm font-normal" onClick={() => go(h.index)}>
@@ -621,28 +634,47 @@ function ReportFile({ run, file }: { run: LoadedRun; file: string }) {
 
 const ALL = "all";
 
-/** «Находки»: a severity filter over the report's findings — the words alone, their counts are the outcome row's
- * (cand-1) — kept for the view in the browser (cand-3), then the shared rows that expand in place into the article
- * (`@/finding` → ExpandingFindings: one Tab stop, ↑/↓, Enter; craft-3) — several may stay open, so the list reads
- * like «Находки» and the whole report scans in a screen (rules/ui → Tables 3). */
+/** «Находки»: a severity filter over the report's findings — the shared choice toggles in words alone, their counts
+ * are the outcome row's (cand-1) — kept for the view in the browser (cand-3); beside it, on a line of its own fixed
+ * 28 px, what a chosen severity hides and the click that shows it all. Then the shared rows that expand in place into
+ * the article (`@/finding` → ExpandingFindings: one Tab stop, ↑/↓, Enter; craft-3) — several may stay open, so the
+ * list reads like «Находки» and the whole report scans in a screen (rules/ui → Tables 3) — critical first, the
+ * critic's order inside each severity (Conventions 2). */
 function FindingsBody({ run, findings, now }: { run: LoadedRun; findings: Finding[]; now: number }) {
   const [stored, setStored] = usePref<string>(SEVERITY_PREF, ALL);
   const counts = severityCounts(findings);
   // a severity this report has none of reads «все» here and stays chosen for the next report
   const severity = stored === ALL || counts.some((c) => c.severity === stored) ? stored : ALL;
-  const shown = severity === ALL ? findings : findings.filter((f) => (f.severity ?? "none") === severity);
+  const ordered = bySeverity(findings);
+  const rows = severity === ALL ? ordered : ordered.filter((f) => (f.severity ?? "none") === severity);
   return (
     <div className="flex min-w-0 flex-col gap-3">
       {counts.length > 1 && (
-        <ToggleGroup type="single" variant="outline" size="sm" spacing={0} value={severity} onValueChange={(v) => v && setStored(v)} aria-label="Серьёзность находок">
-          {[ALL, ...counts.map((c) => c.severity)].map((s) => (
-            <ToggleGroupItem key={s} value={s} className="px-2.5 font-normal">
-              {s === ALL ? "все" : SEVERITY[s as keyof typeof SEVERITY].compact}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
+        <div data-slot="severity-bar" className="flex h-7 min-w-0 items-center gap-3">
+          <ChoiceToggles
+            label={SEVERITY_LABEL}
+            value={severity}
+            choices={[ALL, ...counts.map((c) => c.severity)].map((s) => ({ value: s, label: s === ALL ? "все" : SEVERITY[s as keyof typeof SEVERITY].compact }))}
+            onChoose={setStored}
+            className="shrink-0 flex-nowrap"
+          />
+          {/* in a narrow reader the count gives way, never the verb that undoes the choice */}
+          <p data-slot="severity-shown" className="m-0 flex min-w-0 items-baseline text-xs text-muted-foreground tabular-nums">
+            {rows.length < findings.length && (
+              <>
+                <span className="min-w-0 truncate">{shownText(rows.length, findings.length, NOUNS.finding)}</span>
+                <span aria-hidden="true" className="shrink-0 whitespace-pre">
+                  {" · "}
+                </span>
+                <Button variant="link" size="xs" className="h-auto shrink-0 px-0 text-xs font-normal" onClick={() => setStored(ALL)}>
+                  {SHOW_ALL}
+                </Button>
+              </>
+            )}
+          </p>
+        </div>
       )}
-      <ExpandingFindings run={run} items={shown} label={FINDINGS_LIST_LABEL} now={now} slot="report-findings" />
+      <ExpandingFindings run={run} items={rows} label={FINDINGS_LIST_LABEL} now={now} slot="report-findings" />
     </div>
   );
 }

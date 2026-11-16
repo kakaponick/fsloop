@@ -122,6 +122,19 @@ export function commonKind(items: readonly Pick<RailItem, "kind">[]): string | n
   return best;
 }
 
+/** The result most of a group's implementers share, when two or more share it (improve-10 (3)): the rail says
+ * «итог: <result>» only on a row whose result differs from it — «итог: done» on 16 rows of one stage ranked nothing. */
+export function commonResult(items: readonly Pick<RailItem, "launch">[]): string | null {
+  const counts = new Map<string, number>();
+  for (const i of items) {
+    const result = i.launch && reportKind(i.launch) === "implement" ? resultOf(i.launch) : null;
+    if (result) counts.set(result, (counts.get(result) ?? 0) + 1);
+  }
+  let best: string | null = null;
+  for (const [result, n] of counts) if (best === null || n > (counts.get(best) ?? 0)) best = result;
+  return best !== null && (counts.get(best) ?? 0) >= 2 ? best : null;
+}
+
 /** The narrow view's «Отчёт» option for an item: what the rail shows of it — the description, its stage heading and
  * its state line (cand-4: the picker stands in for the rail, so it recalls nothing the rail shows). */
 export function pickerLabel(item: RailItem, state: ItemState): string {
@@ -145,8 +158,9 @@ export interface ItemState {
 
 /** The rail's second line: «2 major · 5 minor», neutral — on a rail of reports in run order every critic would wear
  * the same red, so severity's tone stays where it ranks (the reader, the overview); a verdict's counts; an
- * implementer's result; «работает · 12 мин» while it runs; «нет отчёта», in its warning tone, when its file is missing. */
-export function itemState(item: RailItem, findings: readonly Finding[], now: number, { ended = false } = {}): ItemState {
+ * implementer's result — but for the result its group shares (`usual`), where it reads how long it took; «работает ·
+ * 12 мин» while it runs; «нет отчёта», in its warning tone, when its file is missing. */
+export function itemState(item: RailItem, findings: readonly Finding[], now: number, { ended = false, usual = null }: { ended?: boolean; usual?: string | null } = {}): ItemState {
   if (item.running) {
     if (ended) return { tone: "neutral", text: launchState({ running: false }, now).label };
     const s = launchState({ running: true, startedAt: item.running.startedAt }, now);
@@ -164,7 +178,7 @@ export function itemState(item: RailItem, findings: readonly Finding[], now: num
   if (kind === "implement") {
     const result = resultOf(l);
     const open = own.length ? ` · ${count(own.length, NOUNS.finding)}` : "";
-    return { tone: "neutral", text: result ? `итог: ${result}${open}` : `${launchState({ running: false, seconds: l.seconds }, now).label}${open}` };
+    return { tone: "neutral", text: result && result !== usual ? `итог: ${result}${open}` : `${launchState({ running: false, seconds: l.seconds }, now).label}${open}` };
   }
   if (kind === "critic") {
     const counts = severityCounts(own);

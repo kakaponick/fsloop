@@ -12,12 +12,10 @@ import { useApi } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { AppDialog, Hint, notify, RETRY, useShortcut } from "@/ui";
+import { AppDialog, ChoiceToggles, notify, RETRY, useShortcut } from "@/ui";
 import {
   DIALOG_PROMPT,
   failedCause,
-  KEY_HINT,
   NOTE_LABEL,
   NOTE_PLACEHOLDER,
   NOTE_SAVE,
@@ -44,6 +42,8 @@ export function useVerdictKeys(rate: (verdict: Verdict) => void): void {
   useShortcut(VERDICT_KEYS[2], () => rate(VERDICTS[2]));
   useShortcut(VERDICT_KEYS[3], () => rate(VERDICTS[3]));
 }
+/** The words of a verdict toggle's tooltip before its key's cap: «Оценить клавишей 1» (design-10; ui → Tooltip). */
+export const VERDICT_KEY_HINT = "Оценить клавишей";
 /** The server's bound on a note (server/http.ts). */
 export const NOTE_MAX = 4000;
 /** The dialog's lead on a selection: what one choice does to every selected finding. */
@@ -169,51 +169,21 @@ export interface VerdictControlProps {
   /** The note's status in the detail: whether its text differs from the saved one, and how to save it alone. */
   noteStatus?: { unsaved: boolean; onSave: (() => void) | null };
   autoFocusNote?: boolean;
-  /** The detail's keys, one per verdict in its order, shown as `Kbd` caps in the toggles' tooltip (Conventions 11).
-   * The dialog has none: its note takes the keys. */
+  /** The detail's keys, one per verdict in its order, each shown as a `Kbd` cap in its own toggle's tooltip
+   * (Conventions 11). The dialog has none: its note takes the keys. */
   keys?: readonly string[];
 }
 
 export function VerdictControl({ value, lead, note, onNoteChange, onChoose, order = "choice-first", noteStatus, autoFocusNote = false, keys }: VerdictControlProps) {
   const id = useId();
-  // the keys' tooltip sits on a box around the group, never on the group or an item: a trigger writes its own
-  // data-slot and data-state over its child's, which would hide the pressed item's «on»
-  const group: ReactNode = (
-    <ToggleGroup
-      type="single"
-      variant="outline"
-      size="sm"
-      spacing={0}
-      aria-label={SECTION.verdict}
-      value={value ?? ""}
-      onValueChange={(v) => {
-        const chosen = (v || value) as Verdict | null;
-        if (chosen) onChoose(chosen);
-      }}
-      className="flex-wrap"
-    >
-      {VERDICTS.map((v) => (
-        <ToggleGroupItem key={v} value={v} className="data-[state=on]:bg-foreground data-[state=on]:text-background data-[state=on]:hover:bg-foreground">
-          {VERDICT[v].compact}
-        </ToggleGroupItem>
-      ))}
-    </ToggleGroup>
-  );
+  // the shared choice toggles (improve-2): the pressed verdict in ink; each toggle's own key in its own tooltip
   const choice: ReactNode = (
     <div data-slot="verdict-choice" className="flex min-w-0 flex-col gap-1.5">
       {/* one line, always there: saving never moves what follows (Strict 1) */}
       <p data-slot="verdict-line" role="status" className="m-0 h-5 truncate" title={lead}>
         {lead}
       </p>
-      {keys ? (
-        <Hint label={KEY_HINT} keys={keys}>
-          <div data-slot="verdict-keys" className="w-fit max-w-full">
-            {group}
-          </div>
-        </Hint>
-      ) : (
-        group
-      )}
+      <ChoiceToggles label={SECTION.verdict} value={value} choices={VERDICTS.map((v, i) => ({ value: v, label: VERDICT[v].compact, keyCode: keys?.[i] }))} onChoose={onChoose} keyHint={VERDICT_KEY_HINT} />
     </div>
   );
   const field: ReactNode = (

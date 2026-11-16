@@ -11,6 +11,7 @@ import {
   AddressLink,
   AddressMenu,
   AppDialog,
+  ChoiceToggles,
   Clamp,
   copyItem,
   copyLabel,
@@ -493,6 +494,21 @@ function OverlaysSection() {
   );
 }
 
+function ChoicesSection() {
+  const [verdict, setVerdict] = useState<string | null>(null);
+  const [severity, setSeverity] = useState("all");
+  return (
+    <Section id="choices" title="Переключатели выбора" rule="Нажатый — залит цветом текста; клавиша выбора — в подсказке своего переключателя, по наведению и фокусу (Conventions 11)">
+      <Case label="Оценка: клавиши 1–4 в подсказке каждого переключателя">
+        <ChoiceToggles label="Ваша оценка" value={verdict} onChoose={setVerdict} keyHint="Оценить клавишей" choices={Object.keys(VERDICT).map((v, i) => ({ value: v, label: VERDICT[v as keyof typeof VERDICT].compact, keyCode: `Digit${i + 1}` }))} />
+      </Case>
+      <Case label="Серьёзность находок отчёта: без клавиш, без подсказки">
+        <ChoiceToggles label="Серьёзность находок" value={severity} onChoose={setSeverity} choices={["all", "critical", "major", "minor"].map((s) => ({ value: s, label: s === "all" ? "все" : s }))} />
+      </Case>
+    </Section>
+  );
+}
+
 /** The kit's sections, in reading order; a unit with a shared part of its own adds one. */
 export const SECTIONS: { id: string; title: string; Body: () => ReactNode }[] = [
   { id: "dots", title: "Статусная точка", Body: StatesSection },
@@ -504,6 +520,7 @@ export const SECTIONS: { id: string; title: string; Body: () => ReactNode }[] = 
   { id: "view-states", title: "Состояния области", Body: StatesOfAViewSection },
   { id: "frames", title: "Кадры", Body: FramesSection },
   { id: "overlays", title: "Выбор, меню, диалог", Body: OverlaysSection },
+  { id: "choices", title: "Переключатели выбора", Body: ChoicesSection },
   { id: "table", title: "Таблица данных", Body: TableSection },
 ];
 

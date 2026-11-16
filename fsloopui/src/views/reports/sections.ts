@@ -240,6 +240,13 @@ export function severityCounts(findings: readonly Pick<Finding, "severity">[]): 
   return SEVERITY_ORDER.map((severity) => ({ severity, n: findings.filter((f) => (f.severity ?? "none") === severity).length })).filter((c) => c.n > 0);
 }
 
+/** A report's findings as they are reviewed (rules/ui → Conventions 2): critical, major, minor, then those with no
+ * severity — the critic's own order inside each. */
+export function bySeverity<F extends Pick<Finding, "severity">>(findings: readonly F[]): F[] {
+  const rank = (f: F) => SEVERITY_ORDER.indexOf(f.severity ?? "none");
+  return findings.map((f, i) => ({ f, i })).sort((a, b) => rank(a.f) - rank(b.f) || a.i - b.i).map((x) => x.f);
+}
+
 /** «2 critical · 5 major · 3 minor» — the severity words as the shared map writes them. */
 export const severityText = (counts: readonly SeverityCount[]): string => counts.map((c) => `${num(c.n)} ${SEVERITY[c.severity].compact}`).join(" · ");
 

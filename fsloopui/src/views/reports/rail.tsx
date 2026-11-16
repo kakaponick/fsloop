@@ -9,10 +9,10 @@
 import { Fragment, useLayoutEffect, useRef, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { Finding } from "../../../shared/model.ts";
-import { num } from "../../../shared/text.ts";
+import { count, NOUNS, num } from "../../../shared/text.ts";
 import { cn } from "@/lib/utils";
-import { copyItem, Dot, flatItem, FlatList, markProps, Menu, OutOfFilter, revealIn } from "@/ui";
-import { commonKind, groupsOf, groupTitle, itemState, type HeldItem } from "./model.ts";
+import { copyItem, Dot, flatItem, FlatList, markProps, Menu, OutOfFilter, REVEAL_GAP, revealIn } from "@/ui";
+import { commonKind, commonResult, groupsOf, groupTitle, itemState, type HeldItem } from "./model.ts";
 
 export interface RailProps {
   items: readonly HeldItem[];
@@ -34,6 +34,9 @@ export interface RailProps {
 }
 
 export const RAIL_LABEL = "Отчёты прогона";
+/** A stage heading's fixed height, sticky at the rail's top: the rail's scroller pads its top by it (`scroll-pt-7`),
+ * and a reveal passes it in its gap. */
+export const RAIL_HEADING = 28;
 export const COPY_PATH = "путь к отчёту";
 /** The rail's first item: the overview holds the surfaces' scores and the run's tokens (u6-shape cand-1); the narrow
  * view's «Отчёт» picker names the same place in lower case. */
@@ -47,11 +50,16 @@ export function Rail({ items, findings, current, outside, arrived, hrefOf, overv
   const root = useRef<HTMLDivElement>(null);
   // The open report is in view when the rail opens on it, or a link elsewhere changes it — the rail's own scroller
   // moves, and nothing above it (`@/ui` → revealIn; Strict 1, craft-1).
+  // A report above the rail's view, or one under its sticky stage heading, comes to the heading's foot, 8 px clear;
+  // one past the view's end by as little as shows it (design-6: `revealIn` sets `scrollTop` and reads no scroll
+  // padding, so the heading's height is its `gap`).
   useLayoutEffect(() => {
     if (!current) return;
     const el = [...(root.current?.querySelectorAll<HTMLElement>("[data-flat-item]") ?? [])].find((e) => e.dataset.flatItem === current);
     const scroller = root.current?.closest<HTMLElement>("[data-slot=rail-scroll]");
-    if (el && scroller) revealIn(scroller, el, { nearest: true, focus: false });
+    if (!el || !scroller) return;
+    const under = el.getBoundingClientRect().top < scroller.getBoundingClientRect().top + RAIL_HEADING;
+    revealIn(scroller, el, under ? { gap: RAIL_HEADING + REVEAL_GAP, focus: false } : { nearest: true, focus: false });
   }, [current]);
   const groups = groupsOf(items.map((h) => h.item));
   const ended = new Set(items.filter((h) => h.ended).map((h) => h.item.id));
@@ -72,15 +80,20 @@ export function Rail({ items, findings, current, outside, arrived, hrefOf, overv
           const title = groupTitle(group.stage);
           // the kind word only on a row whose kind is not the group's usual one; every row keeps it in its title
           const usual = commonKind(group.items);
+          // likewise an implementer's result: «итог» only where it differs from the one its group shares
+          const result = commonResult(group.items);
           return (
             <section key={`${group.stage}-${g}`} aria-label={[title.word, title.pass].filter(Boolean).join(", ")} className="flex flex-col">
               <h3 data-slot="rail-heading" className="sticky top-0 z-10 m-0 flex h-7 items-center gap-1.5 bg-background px-2 text-xs font-normal text-muted-foreground">
                 <span className="truncate text-foreground">{title.word}</span>
                 {title.pass && <span className="shrink-0">· {title.pass}</span>}
-                <span className="ml-auto min-w-count shrink-0 text-right tabular-nums">{num(group.items.length)}</span>
+                {/* the bare number keeps the heading short; its noun is in its title (improve-10 (3)) */}
+                <span data-slot="rail-count" title={count(group.items.length, NOUNS.report)} className="ml-auto min-w-count shrink-0 text-right tabular-nums">
+                  {num(group.items.length)}
+                </span>
               </h3>
               {group.items.map((item) => {
-                const state = itemState(item, findings, now, { ended: ended.has(item.id) });
+                const state = itemState(item, findings, now, { ended: ended.has(item.id), usual: result });
                 const path = pathOf(item.id);
                 const open = item.id === current;
                 const marks = markProps({ edge: arrived.has(item.id) && !open }, "");

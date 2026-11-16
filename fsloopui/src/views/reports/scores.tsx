@@ -6,10 +6,22 @@ import { Link } from "react-router-dom";
 import type { SurfaceScore } from "../../../shared/model.ts";
 import { stageOf } from "../../../shared/states.ts";
 import { num } from "../../../shared/text.ts";
+import type { GlossaryEntry } from "@/ui";
 import { LINK_CLASS } from "../../app/links.tsx";
 import { series } from "./model.ts";
+import { lensGlossary } from "./sections.ts";
 
 export const SCORE_WORDS = { audit: "аудит", critique: "критика" } as const;
+
+/** What the scores are (improve-12 (3), design-13; ui → Glossary): whose scale each is and where its top band starts
+ * (impeccable's own bands: audit 18–20, critique 36–40 «Excellent»), the arrow of a series, the critics who give
+ * them. One constant, read once per set — on the reader's «Оценки раздела» label and the overview lead's «Оценки». */
+export const SCORES_GLOSSARY: readonly GlossaryEntry[] = [
+  { value: SCORE_WORDS.audit, meaning: "техническая проверка impeccable audit, из 20; от 18 — отлично" },
+  { value: SCORE_WORDS.critique, meaning: "удобство по 10 эвристикам impeccable critique, из 40; от 36 — отлично" },
+  { value: "8 → 9", meaning: "оценка раздела на каждом этапе прогона, в порядке этапов" },
+  ...lensGlossary("craft"),
+];
 
 /** «аудит 16 → 17 → 16 из 20» in words, for a title and the tests. */
 export function seriesText(scores: readonly SurfaceScore[], which: "audit" | "critique"): string {
