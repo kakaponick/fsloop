@@ -73,14 +73,15 @@ describe("the card's words, built once", () => {
   });
 
   test("the activity: how long it goes, every agent launch, commits; craft-17 · the card's compact form", () => {
-    const facts = { closed: false, startedAt: iso(NOW - 125 * MIN), launches: 33, running: 1, commits: 2 };
+    // 33 recorded and 1 running: the model's launchCount.
+    const facts = { closed: false, startedAt: iso(NOW - 125 * MIN), launchCount: 34, commits: 2 };
     const a = activityLine(facts, NOW);
     expect(a).toBe("идёт 2 ч 05 мин · 34 запуска агента · 2 коммита");
     expect(words(a)).toBe(12);
     const c = activityLine(facts, NOW, { compact: true });
     expect(c).toBe("идёт 2 ч · 34 запуска · 2 коммита");
     expect(words(c)).toBe(9);
-    expect(activityLine({ closed: true, startedAt: iso(NOW - 125 * MIN), launches: 1, running: 0, commits: null }, NOW)).toBe("1 запуск агента");
+    expect(activityLine({ closed: true, startedAt: iso(NOW - 125 * MIN), launchCount: 1, commits: null }, NOW)).toBe("1 запуск агента");
     expect(launchesLine(98, 1)).toBe("98 запусков агента · 1 работает");
   });
 

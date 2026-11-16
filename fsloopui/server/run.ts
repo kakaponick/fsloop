@@ -3,12 +3,15 @@
 // finding, decision and status; this module adds what the interface needs on top: the finding text split,
 // frames per finding, surfaces, conventions, the user's verdicts read fresh, per-file errors.
 // A closed run is read from its run.json; an open one is parsed live, falling back to run.json when that fails.
+// Either document is read as `unknown` through the typed readers of record.ts.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { build, collect, HUMAN_VERDICTS, parseVerdict } from "../../skills/fsloop/fsl.mjs";
-import type { Convention, FileError, Finding, FindingSource, JournalEntry, Launch, LaunchVerdict, Run, VerdictResult, RunningLaunch, Surface, Unit, UnitCheck, UserVerdict } from "../shared/model.ts";
-import { agentKind, launchName, launchNames, unitStateOf, type Decision, type FindingStatus, type Verdict } from "../shared/states.ts";
+import { build, collect, HUMAN_VERDICTS, parseVerdict, summarize } from "../../skills/fsloop/fsl.mjs";
+import { RUN_FOLDER, type Convention, type FileError, type Finding, type FindingSource, type JournalEntry, type Launch, type LaunchVerdict, type Run, type RunningLaunch, type Surface, type Unit, type UserVerdict, type VerdictResult } from "../shared/model.ts";
+import { agentKind, DECISION, FINDING_STATUS, launchName, launchNames, unitStateOf, type Decision, type FindingStatus, type Verdict } from "../shared/states.ts";
+import { addSpend, spendBy, type Spend } from "../shared/text.ts";
 import { firstSentence, framesOf, headOf, splitText } from "./finding-text.ts";
+import { recordOf, runSpendOf, type FindingJson, type LaunchJson, type RecordJson, type RunningJson, type UnitJson } from "./record.ts";
 
 /** git as fsl.mjs calls it: null when git cannot answer. */
 export type Git = (start: string, args: string[]) => string | null;
@@ -16,10 +19,6 @@ export type Git = (start: string, args: string[]) => string | null;
 export interface ReadOptions {
   git?: Git;
 }
-
-// run.json is fsl.mjs's untyped shape, read field by field below into the typed model.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Json = Record<string, any>;
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const NONE = /^(—|-|none)?$/i;
@@ -32,13 +31,23 @@ function readText(path: string): string | null {
   }
 }
 
+/** A run document: as written (`raw`, for fsl.mjs's own readers of it) and read field by field (`json`). */
+interface Document {
+  raw: unknown;
+  json: RecordJson;
+}
+
+const documentOf = (raw: unknown): Document | null => {
+  const json = recordOf(raw);
+  return json ? { raw, json } : null;
+};
+
 /** run.json as fsl.mjs last wrote it; null when there is none, an error when it cannot be parsed. */
-function readRecord(runDir: string, errors: FileError[]): Json | null {
+function readRecord(runDir: string, errors: FileError[]): Document | null {
   const path = join(runDir, "run.json");
   if (!existsSync(path)) return null;
   try {
-    const json = JSON.parse(readFileSync(path, "utf8"));
-    return json && typeof json === "object" && !json.legacy ? json : null;
+    return documentOf(JSON.parse(readFileSync(path, "utf8")));
   } catch (e) {
     errors.push({ file: "run.json", cause: message(e) });
     return null;
@@ -47,20 +56,20 @@ function readRecord(runDir: string, errors: FileError[]): Json | null {
 
 /** The `projects` folder of the Claude config the orchestrator ran under, from the transcripts its record names —
  * this machine keeps several configs, and only that one holds the run's sessions. */
-export function projectsRootOf(record: Json | null): string | null {
-  const main = (record?.orchestrator?.sessions ?? []).map((s: Json) => s.transcript).find(Boolean);
+export function projectsRootOf(record: RecordJson | null): string | null {
+  const main = (record?.orchestrator ?? []).map((s) => s.transcript).find(Boolean);
   if (main) return dirname(dirname(main));
-  const sub = (record?.launches ?? []).map((l: Json) => l.transcript).find((t: unknown) => typeof t === "string" && /[\\/]subagents[\\/]/.test(t));
+  const sub = (record?.launches ?? []).map((l) => l.transcript).find((t) => typeof t === "string" && /[\\/]subagents[\\/]/.test(t));
   return sub ? dirname(dirname(dirname(dirname(sub)))) : null;
 }
 
 /** build(collect(runDir)) with fsl.mjs looking for transcripts under the run's own config. Never writes. */
-function liveJson(runDir: string, record: Json | null, git?: Git): Json {
+function liveRaw(runDir: string, record: RecordJson | null, git?: Git): unknown {
   const root = projectsRootOf(record);
   const before = process.env.FSL_PROJECTS_ROOT;
   if (root) process.env.FSL_PROJECTS_ROOT = root;
   try {
-    return build(collect(runDir, git ? { git } : {})) as Json;
+    return build(collect(runDir, git ? { git } : {}));
   } finally {
     if (before === undefined) delete process.env.FSL_PROJECTS_ROOT;
     else process.env.FSL_PROJECTS_ROOT = before;
@@ -74,17 +83,19 @@ function readHuman(runDir: string, errors: FileError[]): Map<string, UserVerdict
   if (!text) return out;
   text.split(/\r?\n/).forEach((line, i) => {
     if (!line.trim()) return;
-    let h: Json;
+    let h: unknown;
     try {
       h = JSON.parse(line);
     } catch {
       errors.push({ file: "human.jsonl", cause: `строка ${i + 1} не прочитана` });
       return;
     }
-    if (!h.finding || !HUMAN_VERDICTS.includes(h.verdict)) return;
-    const list = out.get(h.finding) ?? [];
-    list.push({ verdict: h.verdict as Verdict, note: typeof h.note === "string" && h.note ? h.note : null, at: typeof h.at === "string" ? h.at : null });
-    out.set(h.finding, list);
+    const o = typeof h === "object" && h !== null ? (h as Record<string, unknown>) : {};
+    const finding = typeof o.finding === "string" ? o.finding : null;
+    if (!finding || !HUMAN_VERDICTS.includes(o.verdict as string)) return;
+    const list = out.get(finding) ?? [];
+    list.push({ verdict: o.verdict as Verdict, note: typeof o.note === "string" && o.note ? o.note : null, at: typeof o.at === "string" ? o.at : null });
+    out.set(finding, list);
   });
   return out;
 }
@@ -99,16 +110,20 @@ function listShots(runDir: string): string[] {
   }
 }
 
-const sourceOf = (f: Json): FindingSource => (f.own ? "own" : /#open-\d+$/.test(f.id) ? "open" : /#cand-\d+$/.test(f.id) ? "candidate" : "critic");
-const craftSurface = (l: Json | undefined) => /^craft (.+)$/.exec(l?.description ?? "")?.[1] ?? null;
+const sourceOf = (f: FindingJson): FindingSource => (f.own ? "own" : /#open-\d+$/.test(f.id) ? "open" : /#cand-\d+$/.test(f.id) ? "candidate" : "critic");
+const craftSurface = (l: LaunchJson | undefined) => /^craft (.+)$/.exec(l?.description ?? "")?.[1] ?? null;
+const SEVERITIES = ["critical", "major", "minor"] as const;
+const severityOf = (s: string | null): Finding["severity"] => SEVERITIES.find((x) => x === s) ?? null;
+const decisionOf = (d: string | null): Finding["decision"] => (d && d !== "none" && d in DECISION ? (d as Exclude<Decision, "none">) : null);
+const statusOf = (s: string | null): FindingStatus => (s && s in FINDING_STATUS ? (s as FindingStatus) : "undecided");
 
-function findingOf(f: Json, launches: Map<string, Json>, names: Map<string, string>, units: Json[], shots: string[], human: Map<string, UserVerdict[]>): Finding {
+function findingOf(f: FindingJson, launches: Map<string, LaunchJson>, names: Map<string, string>, units: UnitJson[], shots: string[], human: Map<string, UserVerdict[]>): Finding {
   const source = sourceOf(f);
   const launch = f.launch ? launches.get(f.launch) : undefined;
-  let head = { lens: f.category ?? null, severity: f.severity ?? null, confidence: f.confidence ?? null, cause: f.cause && !NONE.test(f.cause) ? f.cause : null, location: f.location ?? null };
+  let head = { lens: f.category, severity: severityOf(f.severity), confidence: f.confidence, cause: f.cause && !NONE.test(f.cause) ? f.cause : null, location: f.location };
   let body: string;
   let structured = source === "critic";
-  if (f.rule !== undefined || f.action !== undefined) body = [f.rule, f.action].filter(Boolean).join(" — ");
+  if (f.split) body = [f.rule, f.action].filter(Boolean).join(" — ");
   else {
     const h = source === "critic" && f.raw ? headOf(f.raw) : null;
     if (h) {
@@ -121,74 +136,75 @@ function findingOf(f: Json, launches: Map<string, Json>, names: Map<string, stri
   }
   const text = splitText(body, { structured });
   const verdicts = human.get(f.id) ?? [];
-  const byBrief = units.filter((u) => (u.closes ?? []).includes(f.id)).map((u) => u.id as string);
-  const byRef = f.ref && /^[uf]\d+$/.test(f.ref) ? [f.ref as string] : [];
+  const byBrief = units.filter((u) => u.closes.includes(f.id)).map((u) => u.id);
+  const byRef = f.ref && /^[uf]\d+$/.test(f.ref) ? [f.ref] : [];
+  const status = statusOf(f.status);
   return {
     ...text,
     summary: firstSentence(text.observation ?? text.rule ?? text.fix ?? f.why ?? f.evidence ?? f.raw ?? f.id),
     id: f.id,
     local: f.local,
-    launch: f.launch ?? null,
+    launch: f.launch,
     launchName: (launch && names.get(launch.id)) ?? launchName(launch ? { agent: launch.agent, description: launch.description } : null),
     stage: f.stage,
-    pass: f.pass ?? null,
+    pass: f.pass,
     source,
     lens: head.lens,
     severity: head.severity,
     confidence: head.confidence,
     cause: head.cause,
     location: head.location,
-    raw: f.raw ?? null,
-    evidence: f.evidence ?? null,
+    raw: f.raw,
+    evidence: f.evidence,
     surface: craftSurface(launch),
-    decision: (f.decision as Exclude<Decision, "none">) ?? null,
-    ref: f.ref ?? null,
-    refKind: f.refKind ?? null,
-    why: f.why ?? null,
-    status: f.status as FindingStatus,
-    effectiveStatus: (f.effectiveStatus ?? f.status) as FindingStatus,
-    unit: f.unit ?? null,
+    decision: decisionOf(f.decision),
+    ref: f.ref,
+    refKind: f.refKind,
+    why: f.why,
+    status,
+    effectiveStatus: f.effectiveStatus ? statusOf(f.effectiveStatus) : status,
+    unit: f.unit,
     units: [...new Set([...byBrief, ...byRef])],
     frames: framesOf([f.raw, f.rule, f.action, f.evidence], shots),
     verdict: verdicts.at(-1) ?? null,
     verdicts,
-    journal: f.journal ?? [],
-    duplicateOf: f.duplicateOf ?? null,
-    repeatedBy: f.repeatedBy ?? null,
+    journal: f.journal,
+    duplicateOf: f.duplicateOf,
+    repeatedBy: f.repeatedBy,
   };
 }
 
-function surfacesOf(json: Json, findings: Finding[], shots: string[]): Surface[] {
-  const keys = new Set<string>([...Object.keys(json.surfaces ?? {}), ...findings.map((f) => f.surface).filter((s): s is string => Boolean(s))]);
+function surfacesOf(json: RecordJson, findings: Finding[], shots: string[]): Surface[] {
+  const keys = new Set<string>([...Object.keys(json.surfaces), ...findings.map((f) => f.surface).filter((s): s is string => Boolean(s))]);
   const labelOf = (key: string) => {
-    const lines = (json.audits ?? []).filter((a: Json) => a.surface === key).map((a: Json) => String(a.line));
+    const lines = json.audits.filter((a) => a.surface === key).map((a) => a.line);
     const labels = lines
-      .map((l: string) => l.split(/\s+(?:audit|critique)\s+\d/)[0].replace(/[«»`]/g, "").replace(/\s*\([^)]*\)\s*/g, " ").trim())
-      .filter((l: string) => l && !/[\\/]|\.(?:tsx?|jsx?|md|css|html)\b/.test(l));
+      .map((l) => l.split(/\s+(?:audit|critique)\s+\d/)[0].replace(/[«»`]/g, "").replace(/\s*\([^)]*\)\s*/g, " ").trim())
+      .filter((l) => l && !/[\\/]|\.(?:tsx?|jsx?|md|css|html)\b/.test(l));
     return labels.at(-1) ?? key;
   };
   return [...keys].sort().map((key) => ({
     key,
     label: labelOf(key),
-    scores: (json.surfaces?.[key] ?? []).map((s: Json) => ({ stage: s.stage, launch: s.launch, audit: s.audit ?? null, auditMax: s.auditMax ?? null, critique: s.critique ?? null, critiqueMax: s.critiqueMax ?? null })),
+    scores: json.surfaces[key] ?? [],
     frames: shots.filter((s) => new RegExp(`^p\\d+-[a-z]+-${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:-|\\.png$)`).test(s)),
     findings: findings.filter((f) => f.surface === key).length,
   }));
 }
 
-function conventionsOf(launches: Json[]): Convention[] {
+function conventionsOf(launches: LaunchJson[]): Convention[] {
   const out: Convention[] = [];
   for (const l of launches)
-    for (const text of l.block?.CONVENTIONS?.items ?? []) {
-      const parts = String(text).split(/\s(?:—|--)\s/);
+    for (const text of l.block.CONVENTIONS?.items ?? []) {
+      const parts = text.split(/\s(?:—|--)\s/);
       const four = parts.length >= 4;
       out.push({ n: out.length + 1, text, pattern: four ? parts[0] : null, solution: four ? parts[1] : null, example: four ? parts[2] : null, rule: four ? parts.slice(3).join(" — ") : null, launch: l.id, stage: l.stage });
     }
   return out;
 }
 
-function journalOf(json: Json, findings: Finding[], units: Unit[], launches: Launch[]): JournalEntry[] {
-  const rows = (json.journal ?? []) as Json[];
+function journalOf(json: RecordJson, findings: Finding[], units: Unit[], launches: Launch[]): JournalEntry[] {
+  const rows = json.journal;
   const found = (id: string, kind: string | null) => {
     if (kind === "finding") return findings.some((f) => f.id === id);
     if (kind === "unit") return units.some((u) => u.id === id);
@@ -197,72 +213,77 @@ function journalOf(json: Json, findings: Finding[], units: Unit[], launches: Lau
     // An id-shaped ref the folder does not hold: «не найден».
     return !/^[uf]\d+$|#/.test(id);
   };
-  return rows.map((r) => ({ n: String(r.n), stage: r.stage, question: r.question, decision: r.decision, why: r.why, refs: (r.refs ?? []).map((ref: Json) => ({ id: ref.id, kind: ref.kind ?? null, found: found(ref.id, ref.kind ?? null) })) }));
+  return rows.map((r) => ({ n: r.n, stage: r.stage, question: r.question, decision: r.decision, why: r.why, refs: r.refs.map((ref) => ({ id: ref.id, kind: ref.kind, found: found(ref.id, ref.kind) })) }));
 }
 
-/** A check line of run.json → units[].checks, field for field; what fsl.mjs did not read stays null. */
-function checkOf(c: Json): UnitCheck {
-  return { file: String(c.file ?? ""), n: c.n ?? null, label: c.label ?? null, exit: c.exit ?? null, line: c.line ?? null, seconds: c.seconds ?? null, startedAt: c.startedAt ?? null, endedAt: c.endedAt ?? null };
-}
-
-function sinceOf(u: Json, running: RunningLaunch[]): string | undefined {
+function sinceOf(u: UnitJson, running: RunningJson[]): string | undefined {
   const run = running.find((r) => new RegExp(`^${u.id}\\b`).test(r.description ?? ""));
   if (run?.startedAt) return run.startedAt;
-  const ends = (u.checks ?? []).map((c: Json) => c.endedAt).filter(Boolean).sort();
+  const ends = (u.checks ?? []).map((c) => c.endedAt).filter((e): e is string => Boolean(e)).sort();
   return ends.at(-1) ?? undefined;
 }
 
 /** A launch's VERDICT lines through fsl.mjs's own grammar — one reader of the line, never a second regex. */
-function verdictsOf(l: Json): LaunchVerdict[] {
+function verdictsOf(l: LaunchJson): LaunchVerdict[] {
   const out: LaunchVerdict[] = [];
-  for (const item of (l.block?.VERDICT?.items ?? []) as string[]) {
-    const v = parseVerdict(String(item));
+  for (const item of l.block.VERDICT?.items ?? []) {
+    const v = parseVerdict(item);
     if (v) out.push({ id: v.id, result: v.result as VerdictResult });
   }
   return out;
 }
 
+/** A launch's tokens with those of the launches it started: the run's spend counts both (fsl.mjs → summarize). */
+const withChildren = (l: LaunchJson): Spend | null => (l.spend ? (l.spend.children ? addSpend(l.spend, l.spend.children) : l.spend) : null);
+
+/** summary.json's `spend`, counted by fsl.mjs's own `summarize` over the same document; null when it cannot be. */
+function spendOf(raw: unknown): Run["spend"] {
+  try {
+    return runSpendOf((summarize(raw) as { spend?: unknown }).spend);
+  } catch {
+    return null;
+  }
+}
+
 export function readRun(runDir: string, opts: ReadOptions = {}): Run {
   const errors: FileError[] = [];
   const record = readRecord(runDir, errors);
-  let json: Json | null = null;
+  let doc: Document | null = null;
   let source: Run["source"] = "live";
-  if (record?.closed === true) {
-    json = record;
+  if (record?.json.closed === true) {
+    doc = record;
     source = "record";
   } else
     try {
-      json = liveJson(runDir, record, opts.git);
+      doc = documentOf(liveRaw(runDir, record?.json ?? null, opts.git));
     } catch (e) {
-      errors.push({ file: "папка прогона", cause: message(e) });
+      errors.push({ file: RUN_FOLDER, cause: message(e) });
       if (record) {
-        json = record;
+        doc = record;
         source = "record";
       }
     }
-  json ??= {};
+  const json = doc?.json ?? (recordOf({}) as RecordJson);
   const recorded = record !== null;
   const shots = listShots(runDir);
   const human = readHuman(runDir, errors);
 
-  const running: RunningLaunch[] = (json.running ?? []).map((r: Json) => ({ agentId: r.agentId, description: r.description ?? null, agent: r.agent ?? null, name: launchName({ agent: r.agent ?? null, description: r.description ?? null }), startedAt: r.startedAt ?? null, lastAt: r.lastAt ?? null }));
-  const rawUnits = (json.units ?? []) as Json[];
-  const units: Unit[] = rawUnits.map((u) => {
+  const running: RunningLaunch[] = json.running.map((r) => ({ agentId: r.agentId, description: r.description, agent: r.agent, name: launchName({ agent: r.agent, description: r.description }), startedAt: r.startedAt, lastAt: r.lastAt }));
+  const units: Unit[] = json.units.map((u) => {
     const state = unitStateOf(u.state);
-    const unit: Unit = { id: u.id, pass: u.pass ?? 1, state, stateText: state === "unknown" ? (u.state ?? null) : null, sha: u.sha ?? null, commits: u.commits ?? [], blockedWhy: u.blockedWhy ?? null, tree: u.tree && !NONE.test(u.tree) ? u.tree : null, title: u.title ?? "", brief: u.brief ?? null, kind: u.kind || null, blockedBy: u.blockedBy ?? [], closes: u.closes ?? [], launches: u.launches ?? [] };
-    const since = sinceOf(u, running);
+    const unit: Unit = { id: u.id, pass: u.pass ?? 1, state, stateText: state === "unknown" ? u.state : null, sha: u.sha, commits: u.commits, blockedWhy: u.blockedWhy, tree: u.tree && !NONE.test(u.tree) ? u.tree : null, title: u.title ?? "", brief: u.brief, kind: u.kind || null, blockedBy: u.blockedBy, closes: u.closes, launches: u.launches };
+    const since = sinceOf(u, json.running);
     if (since) unit.since = since;
-    if (Array.isArray(u.checks)) unit.checks = (u.checks as Json[]).map(checkOf);
+    if (u.checks) unit.checks = u.checks;
     return unit;
   });
 
-  const rawLaunches = (json.launches ?? []) as Json[];
-  const byId = new Map(rawLaunches.map((l) => [l.id as string, l]));
-  const names = launchNames(rawLaunches.map((l) => ({ id: l.id, stage: l.stage ?? null, agent: l.agent || null, description: l.description || null })));
-  const findings = ((json.findings ?? []) as Json[]).map((f) => findingOf(f, byId, names, rawUnits, shots, human));
+  const rawLaunches = json.launches;
+  const byId = new Map(rawLaunches.map((l) => [l.id, l]));
+  const names = launchNames(rawLaunches.map((l) => ({ id: l.id, stage: l.stage || null, agent: l.agent || null, description: l.description || null })));
+  const findings = json.findings.map((f) => findingOf(f, byId, names, json.units, shots, human));
   const launches: Launch[] = rawLaunches.map((l) => {
     if (l.reportMissing) errors.push({ file: l.report || l.id, cause: l.report && existsSync(join(runDir, l.report)) ? "файл пуст" : "файла нет" });
-    const sections = Object.fromEntries(Object.entries((l.block ?? {}) as Json).map(([k, v]) => [k, { value: v.value ?? "", items: v.items ?? [] }]));
     const launch: Launch = {
       id: l.id,
       stage: l.stage,
@@ -271,54 +292,55 @@ export function readRun(runDir: string, opts: ReadOptions = {}): Run {
       name: names.get(l.id) ?? launchName({ agent: l.agent || null, description: l.description || null }),
       kind: agentKind({ agent: l.agent || null, description: l.description || null }),
       model: l.model || null,
-      unit: l.unit ?? null,
-      startedAt: l.startedAt ?? null,
-      endedAt: l.endedAt ?? null,
-      seconds: l.seconds ?? null,
-      spend: l.spend ? { input: l.spend.input ?? 0, output: l.spend.output ?? 0, cacheWrite: l.spend.cacheWrite ?? 0, cacheRead: l.spend.cacheRead ?? 0 } : null,
+      unit: l.unit,
+      startedAt: l.startedAt,
+      endedAt: l.endedAt,
+      seconds: l.seconds,
+      spend: l.spend ? { input: l.spend.input, output: l.spend.output, cacheWrite: l.spend.cacheWrite, cacheRead: l.spend.cacheRead } : null,
       transcript: l.transcript && !NONE.test(l.transcript) ? l.transcript : null,
       report: l.report || null,
-      reportMissing: Boolean(l.reportMissing),
-      sections,
-      unparsed: l.unparsed ?? [],
+      reportMissing: l.reportMissing,
+      sections: l.block,
+      unparsed: l.unparsed,
       verdicts: verdictsOf(l),
       findings: findings.filter((f) => f.launch === l.id).map((f) => f.id),
     };
     // Written by the row or absent: a row saved before a column existed is unknown, never zero.
-    if (typeof l.spend?.boot === "number") launch.boot = l.spend.boot;
-    const c = l.spend?.children;
-    if (c && typeof c === "object") launch.children = { launches: c.launches ?? 0, input: c.input ?? 0, output: c.output ?? 0, cacheWrite: c.cacheWrite ?? 0, cacheRead: c.cacheRead ?? 0 };
-    if (typeof l.agentId === "string" && l.agentId && !NONE.test(l.agentId)) launch.agentId = l.agentId;
+    if (l.spend?.boot !== null && l.spend?.boot !== undefined) launch.boot = l.spend.boot;
+    if (l.spend?.children) launch.children = l.spend.children;
+    if (l.agentId && !NONE.test(l.agentId)) launch.agentId = l.agentId;
     return launch;
   });
 
   const closed = recorded ? json.closed === true : null;
-  const waiting = json.now?.waitingOn;
   return {
     id: json.id ?? runDir.split(/[\\/]/).at(-1) ?? "",
     dir: runDir,
     recorded,
     source,
-    recordVersion: typeof record?.version === "number" ? record.version : null,
-    goal: json.goal ?? null,
-    mode: json.mode ?? null,
-    N: json.N ?? null,
-    K: json.K ?? null,
-    mirror: typeof json.mirror === "boolean" ? json.mirror : null,
-    start: json.start ?? null,
-    worktree: json.worktree ?? null,
-    sessions: json.orchestrator?.sessions ? json.orchestrator.sessions.map((s: Json) => ({ id: s.id, transcript: s.transcript ?? null })) : (json.sessions ?? []).map((id: string) => ({ id, transcript: null })),
-    startedAt: json.startedAt ?? null,
-    updatedAt: json.updatedAt ?? null,
+    recordVersion: record?.json.version ?? null,
+    goal: json.goal,
+    mode: json.mode,
+    N: json.N,
+    K: json.K,
+    mirror: json.mirror,
+    start: json.start,
+    worktree: json.worktree,
+    sessions: json.orchestrator ? json.orchestrator : json.sessions.map((id) => ({ id, transcript: null })),
+    startedAt: json.startedAt,
+    updatedAt: json.updatedAt,
     closed,
-    now: recorded && !closed && json.now ? { stage: json.now.stage ?? null, step: json.now.step ?? null, since: json.now.since ?? null, running: running.length, redGate: waiting?.lastRedGate ?? null } : null,
-    outcome: closed && json.outcome ? { pushed: Boolean(json.outcome.pushed), goalMet: json.outcome.goalMet ?? null, held: json.outcome.held ?? [] } : null,
-    stages: recorded ? (json.stages ?? []).map((s: Json) => ({ stage: s.stage, green: s.green ?? null, at: s.at ?? null, startedAt: s.startedAt ?? null, problems: s.problems ?? [] })) : [],
+    now: recorded && !closed && json.now ? { stage: json.now.stage, step: json.now.step, since: json.now.since, running: running.length, redGate: json.now.redGate } : null,
+    outcome: closed && json.outcome ? json.outcome : null,
+    stages: recorded ? json.stages : [],
     units,
     launches,
     running,
     launchCount: launches.length + running.length,
-    commits: Array.isArray(json.commits) ? json.commits.length : null,
+    spend: doc ? spendOf(doc.raw) : null,
+    tokens: { stage: spendBy(rawLaunches, (l) => l.stage, withChildren), kind: spendBy(rawLaunches, (l) => agentKind({ agent: l.agent || null, description: l.description || null }), withChildren) },
+    passes: json.passes,
+    commits: json.commits,
     findings,
     surfaces: surfacesOf(json, findings, shots),
     conventions: conventionsOf(rawLaunches),

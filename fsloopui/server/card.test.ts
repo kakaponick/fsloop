@@ -92,6 +92,27 @@ describe("cardOf", () => {
     expect(c.sessions).toEqual(["5e550000-0000-4000-8000-00000000000a", "5e550000-0000-4000-8000-00000000000b"]);
   });
 
+  test("every launch counted once, the recorded and the running: the model's launchCount (code-verdict cand-1)", () => {
+    const projects = join(temp, "config-count", "projects");
+    const session = "5e550000-0000-4000-8000-0000000000c2";
+    const dir = run({ sessions: [session] });
+    writeTranscript(projects, "C--dev-app", session, NOW - 20 * MIN);
+    writeRunningLaunch(projects, "C--dev-app", session, dir, { agentId: "feed02", description: "u2 implement", agent: "fsloop-implement", startedAt: NOW - 30 * MIN, lastAt: NOW - 4 * MIN });
+    writeRecord(dir, NOW, projects);
+    expect(cardOf({ key: "k", project: "app", run: readRun(dir), lastWriteAt: null })).toMatchObject({ launches: 3, running: 1, launchCount: 4 });
+  });
+
+  test("the run's spend as summary.json counts it, for «Подробнее» (u3-shape cand-2)", () => {
+    const dir = run({
+      launches: [
+        { id: "p1-map-map", stage: "p1-map", agent: "Explore", description: "map", spend: { input: 1, output: 2, cacheWrite: 3, cacheRead: 4 }, boot: 5, children: { launches: 1, input: 10, output: 20, cacheWrite: 30, cacheRead: 40 }, report: "Map.\n" },
+        { id: "p1-units-u1-implement", stage: "p1-units", agent: "fsloop-implement", description: "u1 implement", spend: { input: 100, output: 200, cacheWrite: 300, cacheRead: 400 }, boot: 6, report: "RESULT: done\n" },
+      ],
+    });
+    // No session named: the orchestrator's tokens are unknown, never zero.
+    expect(cardOf({ key: "k", project: "app", run: readRun(dir), lastWriteAt: null }).spend).toEqual({ launches: { input: 111, output: 222, cacheWrite: 333, cacheRead: 444, boot: 11, continuations: 0 }, orchestrator: null });
+  });
+
   test("a closed run carries its outcome and no stage", () => {
     const closed = run({
       gates: ["p1-map", "p1-spike", "p1-decompose", "p1-units", "p1-review", "p1-fix", "p1-verdict", "integrate", "finish"].map((stage) => ({ stage, green: true, at: "2026-11-16T08:00:00Z" })),

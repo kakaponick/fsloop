@@ -1,7 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, inject, test } from "vitest";
+import { RUN_FOLDER } from "../shared/model.ts";
 import { briefText, criticReport, decisionTable, implementReport, ownTable, PROJECTS, runId, writeRecord, writeRun, writeRunningLaunch, writeTranscript, type RunSpec } from "../fixtures/make.ts";
 import { readRun } from "./run.ts";
 
@@ -202,8 +203,22 @@ describe("readRun — the record and its fallbacks", () => {
     expect(run.source).toBe("record");
     expect(run.findings).toHaveLength(9);
     expect(run.errors).toHaveLength(1);
-    expect(run.errors[0].file).toBe("папка прогона");
+    // The one name the server and the reading views share for the folder's own failure (verdict-7).
+    expect(RUN_FOLDER).toBe("папка прогона");
+    expect(run.errors[0].file).toBe(RUN_FOLDER);
     expect(run.errors[0].cause).toMatch(/EISDIR/);
+  });
+
+  test("run.json is read field by field: a field of the wrong type is absent, never passed on (code cand-1)", () => {
+    const dir = fixture({ gates: ["integrate", "finish"].map((stage) => ({ stage, green: true, at: "2026-11-16T09:00:00Z" })), record: true });
+    const path = join(dir, "run.json");
+    const json = JSON.parse(readFileSync(path, "utf8"));
+    const launches = json.launches.map((l: Record<string, unknown>, i: number) => (i === 0 ? { ...l, model: 7, seconds: "long" } : l));
+    writeFileSync(path, JSON.stringify({ ...json, goal: 42, N: "two", mode: ["worktree"], units: "none", launches, passes: [{ pass: "p1", taken: 3, outcome: "next", why: "three above the bar" }] }));
+    const run = readRun(dir);
+    expect(run).toMatchObject({ source: "record", closed: true, goal: null, N: null, mode: null, units: [], passes: [] });
+    expect(run.launches[0]).toMatchObject({ id: "p1-map-craft-actions-bots", model: null, seconds: null });
+    expect(run.findings).toHaveLength(9);
   });
 
   test("a launch whose report file is gone is an error of that file", () => {
@@ -315,5 +330,27 @@ describe("readRun — the fixture run at the production maximum (craft-8, craft-
     // A name no other launch carries stays as it is: «parity» reviews in pass 1 only.
     expect(name("p1-review-critic-parity#parity-1")).toBe("parity");
     expect(run.launches.find((l) => l.id === "p1-map-map")?.name).toBe("карта");
+  });
+
+  // The facts the surfaces read: each launch of the maximum spends 900 + its index of input, 40 000 of output, 250 000
+  // written to and 3 100 000 read from the cache, 38 000 + its index at boot; the map's 3 children add their own.
+  test("the run's spend as summary.json counts it: the launches with their children, and the orchestrator (u3-shape cand-2)", () => {
+    expect(run.spend).toEqual({ launches: { input: 94_356, output: 3_941_000, cacheWrite: 24_430_000, cacheRead: 302_150_000, boot: 3_690_656, continuations: 0 }, orchestrator: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 } });
+  });
+
+  test("tokens by stage and by agent kind, from the launches the run records (u6-shape cand-1)", () => {
+    // p1-verdict: the 55th and 56th launches.
+    expect(run.tokens.stage.find((r) => r.key === "p1-verdict")).toEqual({ key: "p1-verdict", launches: 2, spend: { input: 1_909, output: 80_000, cacheWrite: 500_000, cacheRead: 6_200_000 } });
+    expect(run.tokens.kind.map((r) => [r.key, r.launches])).toEqual([
+      ["карта", 1],
+      ["разведка", 1],
+      ["критик", 53],
+      ["исполнитель", 42],
+    ]);
+    expect(run.tokens.kind[0].spend).toEqual({ input: 3_300, output: 101_000, cacheWrite: 430_000, cacheRead: 4_550_000 });
+  });
+
+  test("the passes as passes.md records them (design-check cand-1)", () => {
+    expect(run.passes).toEqual([{ pass: 1, taken: 60, outcome: "next", why: "60 critical and major above the bar" }]);
   });
 });

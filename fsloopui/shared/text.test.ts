@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { ago, count, duration, mskDateTime, mskTime, NOUNS, plural, tokens } from "./text.ts";
+import { addSpend, ago, count, duration, mskDateTime, mskTime, NOUNS, plural, spendBy, tokens } from "./text.ts";
 
 // Words as a reader counts them: a no-break space binds a grouped number into one.
 const words = (s: string) => s.split(/[ \t\n]+/).filter(Boolean).length;
@@ -88,5 +88,24 @@ describe("tokens of a launch", () => {
   test("thousands and small totals", () => {
     expect(tokens({ input: 12_400, output: 0, cacheWrite: 0, cacheRead: 0 }).compact).toBe("12 тыс. токенов");
     expect(tokens({ input: 2, output: 1, cacheWrite: 0, cacheRead: 0 }).compact).toBe("3 токена");
+  });
+});
+
+describe("tokens summed (u6-shape cand-1)", () => {
+  test("two spends add field by field", () => {
+    expect(addSpend({ input: 1, output: 2, cacheWrite: 3, cacheRead: 4 }, { input: 10, output: 20, cacheWrite: 30, cacheRead: 40 })).toEqual({ input: 11, output: 22, cacheWrite: 33, cacheRead: 44 });
+  });
+
+  test("by a key, in the order the keys first appear; a launch with no spend counts with none", () => {
+    const launches = [
+      { stage: "p1-map", spend: { input: 1, output: 2, cacheWrite: 3, cacheRead: 4 } },
+      { stage: "p1-review", spend: { input: 100, output: 0, cacheWrite: 0, cacheRead: 0 } },
+      { stage: "p1-map", spend: { input: 10, output: 20, cacheWrite: 30, cacheRead: 40 } },
+      { stage: "p1-review", spend: null },
+    ];
+    expect(spendBy(launches, (l) => l.stage, (l) => l.spend)).toEqual([
+      { key: "p1-map", launches: 2, spend: { input: 11, output: 22, cacheWrite: 33, cacheRead: 44 } },
+      { key: "p1-review", launches: 2, spend: { input: 100, output: 0, cacheWrite: 0, cacheRead: 0 } },
+    ]);
   });
 });

@@ -24,6 +24,30 @@ export interface AppOptions {
 /** A frame's file name: no folder, no traversal — the run is looked up by key, never joined into a path. */
 export const FRAME_NAME = /^[A-Za-z0-9._-]+\.png$/;
 const NOTE_MAX = 4000;
+/** The largest verdict body read: a note of 4 000 characters over a selection of every finding of the largest run
+ * (723 ids) stays far under it (code-review cand-5). */
+const BODY_MAX = 256 * 1024;
+const BODY_TOO_LARGE = "Тело запроса больше 256 КБ";
+
+/** A request body as text, read up to `max` bytes; null once it passes them — whatever its content-length says. */
+async function bodyText(req: Request, max: number): Promise<string | null> {
+  if (Number(req.headers.get("content-length") ?? 0) > max) return null;
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
 
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -83,11 +107,20 @@ const isJson = (req: Request) => (req.headers.get("content-type") ?? "").split("
 
 export function createApp({ roots, distDir, intervalMs = 2000, poll = true, now = Date.now, git }: AppOptions) {
   const store = createStore({ roots, git });
-  store.refresh({ full: true });
+  // The roots read once before anything is answered; from here on every tick walks them without holding a request.
+  store.prime();
   const encoder = new TextEncoder();
   const clients = new Set<ReadableStreamDefaultController<Uint8Array>>();
   const tick = () => encoder.encode(`event: tick\ndata: ${JSON.stringify(store.versions())}\n\n`);
   let sent = JSON.stringify(store.versions());
+  /** The ticks and the writes, one after another: a write is checked against the model of the last tick, and a tick
+   * started by a test twice in a row runs twice. A read never waits here (runtime cand-1). */
+  let queue: Promise<unknown> = Promise.resolve();
+  const serial = <T>(work: () => Promise<T>): Promise<T> => {
+    const next = queue.then(work);
+    queue = next.catch(() => {});
+    return next;
+  };
   const send = (bytes: Uint8Array) => {
     for (const c of clients)
       try {
@@ -104,19 +137,29 @@ export function createApp({ roots, distDir, intervalMs = 2000, poll = true, now 
     send(tick());
   };
 
-  /** One tick: re-read what changed and tell the clients. The poller calls it; with `poll: false` the caller does —
-   * a change is read on the second tick that finds it settled (store.refresh). */
-  function pulse({ full = true }: { full?: boolean } = {}) {
-    try {
-      store.refresh({ full });
-    } catch (e) {
-      console.error("fsloopUI: refresh failed", e);
-    }
-    broadcast();
+  /** One tick: re-read what changed and tell the clients; resolves when it is done. The poller calls it; with
+   * `poll: false` the caller does — a change is read on the second tick that finds it settled (store.refresh). */
+  function pulse({ full = true }: { full?: boolean } = {}): Promise<void> {
+    return serial(async () => {
+      try {
+        await store.refresh({ full });
+      } catch (e) {
+        console.error("fsloopUI: refresh failed", e);
+      }
+      broadcast();
+    });
   }
 
   let n = 0;
-  const timer = poll ? setInterval(() => pulse({ full: ++n % 5 === 0 }), intervalMs) : null;
+  let ticking = false;
+  // A tick still walking when the next is due: the next is skipped, never stacked.
+  const timer = poll
+    ? setInterval(() => {
+        if (ticking) return;
+        ticking = true;
+        void pulse({ full: ++n % 5 === 0 }).finally(() => (ticking = false));
+      }, intervalMs)
+    : null;
   // A comment line keeps proxies from closing a quiet stream.
   const keepAlive = setInterval(() => send(encoder.encode(": ping\n\n")), 15_000);
   timer?.unref?.();
@@ -159,7 +202,9 @@ export function createApp({ roots, distDir, intervalMs = 2000, poll = true, now 
     if (!run) return notFound(key);
     const launch = run.launches.find((l) => l.report && basename(l.report) === name);
     const path = launch?.report ? resolve(run.dir, launch.report) : null;
-    if (!path || !path.startsWith(resolve(run.dir) + sep)) return json(404, { error: `Отчёт ${name} не найден в прогоне ${key}`, cause: "ни один запуск прогона не называет этот файл" });
+    if (!path) return json(404, { error: `Отчёт ${name} не найден в прогоне ${key}`, cause: "ни один запуск прогона не называет этот файл" });
+    // The containment guard: a launch names the file, and its path leaves the run folder (code-verdict cand-4).
+    if (!path.startsWith(resolve(run.dir) + sep)) return json(404, { error: `Отчёт ${name} не найден в прогоне ${key}`, cause: "путь отчёта ведёт за папку прогона" });
     try {
       return new Response(readFileSync(path, "utf8"), { headers: { "content-type": "text/markdown; charset=utf-8", "cache-control": "no-store" } });
     } catch (e) {
@@ -170,13 +215,21 @@ export function createApp({ roots, distDir, intervalMs = 2000, poll = true, now 
 
   async function verdict(req: Request): Promise<Response> {
     if (!isJson(req)) return json(415, { error: "Тело запроса — не JSON: нужен content-type application/json" });
-    let body: Record<string, unknown>;
+    const text = await bodyText(req, BODY_MAX);
+    if (text === null) return json(413, { error: BODY_TOO_LARGE });
+    let parsed: unknown;
     try {
-      body = await req.json();
+      parsed = JSON.parse(text);
     } catch {
       return json(400, { error: "Тело запроса — не JSON" });
     }
-    const key = String(body?.run ?? "");
+    const body: Record<string, unknown> = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+    return serial(() => write(body));
+  }
+
+  /** The verdict written, after the tick in flight: checked against the model that tick leaves. */
+  async function write(body: Record<string, unknown>): Promise<Response> {
+    const key = String(body.run ?? "");
     const run = store.run(key);
     if (!run) return notFound(key);
     if (!isVerdict(body.verdict)) return json(400, { error: `Оценка ${String(body.verdict)} неизвестна: ${(HUMAN_VERDICTS as Verdict[]).map((v) => VERDICT[v].compact).join(", ")}` });
@@ -191,8 +244,12 @@ export function createApp({ roots, distDir, intervalMs = 2000, poll = true, now 
     if (note !== null && (typeof note !== "string" || note.length > NOTE_MAX)) return json(400, { error: `Заметка — текст не длиннее ${NOTE_MAX} символов` });
     try {
       const saved = appendVerdicts(run.dir, { findings: [...new Set(ids)], verdict: body.verdict, note }, new Date(now()).toISOString());
-      store.touch(key);
-      broadcast();
+      // The run read again next in line, after the answer: the line is written, and every later request and tick
+      // waits behind the re-read.
+      void serial(async () => {
+        await store.touch(key);
+        broadcast();
+      }).catch((e) => console.error("fsloopUI: re-read after a verdict failed", e));
       return json(200, many ? { verdict: saved, findings: [...new Set(ids)] } : { verdict: saved });
     } catch (e) {
       return json(500, { error: `Оценка не сохранилась: ${e instanceof Error ? e.message : String(e)}` });
@@ -219,6 +276,9 @@ export function createApp({ roots, distDir, intervalMs = 2000, poll = true, now 
     if (url.pathname.startsWith("/api/")) {
       if (!method) return json(404, { error: `Нет такого адреса: ${url.pathname}` });
       if (req.method !== method) return json(405, { error: `Метод ${req.method} не поддерживается` });
+      // With no poller the caller moves the server step by step: a request sees every tick it started. The poller's
+      // own ticks never hold a request; neither does the store's walk itself (store.refresh).
+      if (!poll) await queue;
       // The roots go with the list: the empty-root and not-found texts name them.
       if (url.pathname === "/api/runs") return json(200, { ...store.list(), roots: roots.map((r) => resolve(r)) });
       if (url.pathname === "/api/run") {

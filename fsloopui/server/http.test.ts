@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, test } from "vitest";
+import { afterAll, describe, expect, inject, test } from "vitest";
 import { criticReport, writeRun } from "../fixtures/make.ts";
 import { createApp } from "./http.ts";
 
@@ -102,7 +102,8 @@ describe("handle — the API", () => {
     expect(readFileSync(join(runs, "outside.md"), "utf8")).toContain("LENS: craft assess");
     const res = await get(`/api/report?run=app/${OPEN}&file=outside.md`);
     expect(res.status).toBe(404);
-    expect(await res.json()).toEqual({ error: `Отчёт outside.md не найден в прогоне app/${OPEN}`, cause: "ни один запуск прогона не называет этот файл" });
+    // The guard answers with its own cause: a launch names the file, its path leaves the folder (code-verdict cand-4).
+    expect(await res.json()).toEqual({ error: `Отчёт outside.md не найден в прогоне app/${OPEN}`, cause: "путь отчёта ведёт за папку прогона" });
   });
 
   test("/api/report: a report of the run deleted on disk is a 404 «файла нет»", async () => {
@@ -207,6 +208,46 @@ describe("handle — only this machine's pages reach the API (code-7)", () => {
     const ok = await verdict({ "content-type": "application/json; charset=utf-8", origin: "http://127.0.0.1:4747", host: "127.0.0.1:4747" });
     expect(ok.status).toBe(200);
     rmSync(human);
+  });
+
+  test("a verdict body over 256 KB is refused before it is parsed, with or without its length (code cand-5)", async () => {
+    const big = JSON.stringify({ run: `app/${OPEN}`, finding: "p1-map-craft-shell#craft-1", verdict: "agree", note: "x".repeat(300_000) });
+    const streamed = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode(big));
+        c.close();
+      },
+    });
+    for (const body of [big, streamed]) {
+      const res = await app.handle(new Request("http://127.0.0.1:4747/api/verdict", { method: "POST", headers: { "content-type": "application/json" }, body, duplex: "half" } as RequestInit));
+      expect(res.status).toBe(413);
+      expect(await res.json()).toEqual({ error: "Тело запроса больше 256 КБ" });
+    }
+    expect(existsSync(human)).toBe(false);
+  });
+});
+
+describe("handle — a tick never holds a request (runtime cand-1)", () => {
+  test("a request is answered while a walk of the whole root is in flight", async () => {
+    const big = createApp({ roots: [inject("fixtureRoot")], distDir: dist, poll: false, git: () => null });
+    try {
+      await big.pulse();
+      let walked = false;
+      // The store's tick itself, as the poller runs it: a full walk of the 63 folders.
+      const walk = big.store.refresh({ full: true }).then(() => {
+        walked = true;
+      });
+      const answered = await new Promise<{ status: number; runs: number; walked: boolean }>((done) =>
+        setTimeout(async () => {
+          const res = await big.handle(new Request("http://127.0.0.1:4747/api/runs"));
+          done({ status: res.status, runs: ((await res.json()) as { list: unknown[] }).list.length, walked });
+        }, 0),
+      );
+      await walk;
+      expect(answered).toEqual({ status: 200, runs: 63, walked: false });
+    } finally {
+      big.close();
+    }
   });
 });
 

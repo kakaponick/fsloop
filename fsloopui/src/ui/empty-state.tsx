@@ -2,7 +2,7 @@
 // convention): not yet — what fills the view and at which stage, the stage word from the shared map, never a
 // literal; never — the run is past that stage or closed; filtered to none — the active filters and «Сбросить
 // фильтры». An empty state is never a false one: a failed load is the part-failed message, not this.
-import { STAGE_WORDS, stageOf, type Step } from "../../shared/states.ts";
+import { STAGE_WORDS, stageOf, STEPS, type Step } from "../../shared/states.ts";
 import type { Forms } from "../../shared/text.ts";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -40,8 +40,8 @@ export function emptyStateText(props: EmptyStateProps): { title: string; descrip
 
 export const RESET_FILTERS = "Сбросить фильтры";
 
-/** The stages in a pass's order: the shared map's keys, the one order every view compares stages by. */
-export const STEPS = Object.keys(STAGE_WORDS) as Step[];
+/** The stage order is shared/states.ts's (code-verdict cand-2); re-exported for the kit's index until its owner moves it. */
+export { STEPS };
 
 /** Why a list is empty before any filter: not yet (the stage that fills it, with a view's own lead) or never. */
 export type EmptyWhen = { form: "not-yet"; step: Step; lead?: string; subject?: string } | { form: "never"; description?: string };

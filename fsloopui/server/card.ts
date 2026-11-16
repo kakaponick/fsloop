@@ -42,6 +42,8 @@ export function cardOf({ key, project, run, lastWriteAt }: { key: string; projec
     blocked: run.units.filter((u) => u.state === "blocked").map((u) => ({ id: u.id, why: u.blockedWhy })),
     launches: run.launches.length,
     running: run.running.length,
+    launchCount: run.launchCount,
+    spend: run.spend,
     commits: run.commits,
     redGate: run.now?.redGate ?? null,
     startedAt: run.startedAt,
@@ -82,13 +84,14 @@ function newestUnder(dir: string, only?: RegExp, skip?: ReadonlySet<string>): nu
 
 /** Files of a run folder the run does not write: the user's verdicts, which fsloopUI itself appends. A verdict is
  * not the run working (rules/ui → Live data 4); the version stamp still sees it. */
-const NOT_THE_RUNS = new Set(["human.jsonl"]);
+export const NOT_THE_RUNS: ReadonlySet<string> = new Set(["human.jsonl"]);
 
 /** When the run last wrote anything: its folder's files at any depth but fsloopUI's own; for an open run also the
  * orchestrator's transcripts its record names with their sub-agents' transcripts, the launches' transcripts, and
- * each running launch's last write. Null when nothing is dated. */
-export function lastWriteOf(run: Run): string | null {
-  let latest = newestUnder(run.dir, undefined, NOT_THE_RUNS);
+ * each running launch's last write. Null when nothing is dated. `folderNewest` — the folder's part, when a walk of
+ * it already took it (the store's one walk per tick, runtime cand-1). */
+export function lastWriteOf(run: Run, folderNewest?: number): string | null {
+  let latest = folderNewest ?? newestUnder(run.dir, undefined, NOT_THE_RUNS);
   if (!run.closed) {
     for (const s of run.sessions) {
       if (!s.transcript) continue;

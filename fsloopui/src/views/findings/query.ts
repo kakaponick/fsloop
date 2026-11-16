@@ -2,8 +2,7 @@
 // rank functions, the «Вид» presets, the search's fields and the filters with their options. The query itself —
 // sort, filters, counts, search, pages — is the table kit's (src/table/query.ts); nothing here filters a row.
 import type { Finding, Run } from "../../../shared/model.ts";
-import { FINDING_STATUS, NOT_RECORDED, SEVERITY, stageOf, VERDICT, type FindingStatus, type Verdict } from "../../../shared/states.ts";
-import { STEPS } from "@/ui";
+import { FINDING_STATUS, NOT_RECORDED, SEVERITY, stageOf, STEPS, VERDICT, type FindingStatus, type Verdict } from "../../../shared/states.ts";
 import type { FilterDef, Preset, SearchDef } from "@/table";
 // From the file, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
 import { DONE_STATES, FACETS, FIX_STATES, MAJOR_UP, NONE, OWN } from "@/finding/facets.ts";
@@ -48,18 +47,11 @@ export const CAUSES = ["local", "component", "token", "conceptual"] as const;
 
 type FilterRun = Pick<Run, "findings" | "launches" | "units">;
 
-/** The «Отчёт» options: every launch that holds a finding, in the run's order; two launches of one compact name
- * («code» in passes 1 and 2) carry their stage. */
+/** The «Отчёт» options: every launch that holds a finding, in the run's order, by its name — the run's launch names
+ * are never alike (shared/states.ts → launchNames; craft-verdict cand-13). */
 export function reportOptions(run: FilterRun): { value: string; label: string }[] {
   const holding = new Set(run.findings.map((f) => f.launch));
-  const launches = run.launches.filter((l) => holding.has(l.id));
-  const names = new Map<string, number>();
-  const nameOf = (id: string) => run.findings.find((f) => f.launch === id)?.launchName ?? id;
-  for (const l of launches) names.set(nameOf(l.id), (names.get(nameOf(l.id)) ?? 0) + 1);
-  const out = launches.map((l) => {
-    const name = nameOf(l.id);
-    return { value: l.id, label: (names.get(name) ?? 0) > 1 ? `${name} · ${stageOf(l.stage).full}` : name };
-  });
+  const out = run.launches.filter((l) => holding.has(l.id)).map((l) => ({ value: l.id, label: l.name }));
   if (run.findings.some((f) => f.source === "own")) out.push({ value: OWN, label: "прогон" });
   if (run.findings.some((f) => !f.launch && f.source !== "own")) out.push({ value: NONE, label: NOT_RECORDED });
   return out;

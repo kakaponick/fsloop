@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { createApp } from "./http.ts";
+import { createApp, type App } from "./http.ts";
 
 export const HOST = "127.0.0.1";
 export const DEFAULT_PORT = 4747;
@@ -19,9 +19,12 @@ function requestOf(req: IncomingMessage, origin: string): Request {
 
 export async function startServer({ roots, port = DEFAULT_PORT, intervalMs }: { roots: string[]; port?: number; intervalMs?: number }): Promise<{ server: Server; url: string; runs: number; close: () => Promise<void> }> {
   const distDir = join(dirname(fileURLToPath(import.meta.url)), "..", "dist");
-  const app = createApp({ roots, distDir, intervalMs });
+  // The port listens first; a request that comes before the roots are read waits for them (runtime cand-1).
+  let made: (app: App) => void = () => {};
+  const appReady = new Promise<App>((done) => (made = done));
   const server = createServer(async (req, res) => {
     try {
+      const app = await appReady;
       const response = await app.handle(requestOf(req, `http://${HOST}:${(server.address() as AddressInfo).port}`));
       res.writeHead(response.status, Object.fromEntries(response.headers));
       if (!response.body || req.method === "HEAD") return void res.end();
@@ -44,6 +47,9 @@ export async function startServer({ roots, port = DEFAULT_PORT, intervalMs }: { 
     server.listen(port, HOST, () => done());
   });
   const url = `http://${HOST}:${(server.address() as AddressInfo).port}/`;
+  await new Promise((done) => setImmediate(done));
+  const app = createApp({ roots, distDir, intervalMs });
+  made(app);
   return {
     server,
     url,

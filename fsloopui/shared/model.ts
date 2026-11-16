@@ -2,12 +2,38 @@
 // A field the folder lacks is absent, never guessed (Conventions 4); raw ISO times travel here, formatting is
 // shared/text.ts's.
 import type { Decision, FindingStatus, Severity, UnitState, Verdict } from "./states.ts";
-import type { Spend } from "./text.ts";
+import type { Spend, SpendRow } from "./text.ts";
 
 /** A file of the run folder that could not be read: it fails in its own place, the rest is served. */
 export interface FileError {
   file: string;
   cause: string;
+}
+
+/** The `file` of the run folder's own failure — the live parse threw and no run.json stood behind it. The server
+ * names it, the reading views look for it: one name on both sides (rules/ui → Conventions 3). */
+export const RUN_FOLDER = "папка прогона";
+
+/** The run's tokens as summary.json counts them (fsl.mjs → summarize): its launches with the launches they started,
+ * their first requests and continuations; the orchestrator's own, null when no transcript of it was found. */
+export interface RunSpend {
+  launches: Spend & { boot: number; continuations: number };
+  orchestrator: Spend | null;
+}
+
+/** The tokens of the recorded launches with their children, by stage («p1-review») and by agent kind («критик»). */
+export interface RunTokens {
+  stage: SpendRow[];
+  kind: SpendRow[];
+}
+
+/** A row of passes.md as fsl.mjs reads it: the findings the pass took into the next one, its outcome and why. */
+export interface Pass {
+  pass: number;
+  taken: number;
+  /** As written: «next», «converged», «cap» (shared/states.ts → PASS_OUTCOME). */
+  outcome: string;
+  why: string;
 }
 
 export interface UserVerdict {
@@ -279,6 +305,10 @@ export interface Run {
   /** Every launch of the run — the recorded and the running — counted once here (rules/ui → Conventions 3): the
    * «Отчёты» tab, its «Агент» filter and its status bar list this many. */
   launchCount: number;
+  /** Null when the record holds no spend to count. */
+  spend: RunSpend | null;
+  tokens: RunTokens;
+  passes: Pass[];
   commits: number | null;
   findings: Finding[];
   surfaces: Surface[];
@@ -318,6 +348,10 @@ export interface RunCard {
   blocked: { id: string; why: string | null }[];
   launches: number;
   running: number;
+  /** The run model's `launchCount`: the recorded and the running, counted once (rules/ui → Conventions 3). */
+  launchCount: number;
+  /** The run's tokens, for «Подробнее» before the run is read. */
+  spend: RunSpend | null;
   commits: number | null;
   redGate: Gate | null;
   startedAt: string | null;

@@ -93,6 +93,29 @@ export interface Spend {
   cacheRead: number;
 }
 
+/** Two spends, field by field. */
+export const addSpend = (a: Spend, b: Spend): Spend => ({ input: a.input + b.input, output: a.output + b.output, cacheWrite: a.cacheWrite + b.cacheWrite, cacheRead: a.cacheRead + b.cacheRead });
+
+const NO_SPEND: Spend = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
+
+/** Tokens summed under one key — a stage, an agent kind — with the launches counted. */
+export interface SpendRow {
+  key: string;
+  launches: number;
+  spend: Spend;
+}
+
+/** Tokens by a key, in the order the keys first appear; an item with no spend counts with none. */
+export function spendBy<T>(items: readonly T[], keyOf: (x: T) => string, spendOf: (x: T) => Spend | null): SpendRow[] {
+  const rows = new Map<string, SpendRow>();
+  for (const x of items) {
+    const key = keyOf(x);
+    const row = rows.get(key) ?? { key, launches: 0, spend: NO_SPEND };
+    rows.set(key, { key, launches: row.launches + 1, spend: addSpend(row.spend, spendOf(x) ?? NO_SPEND) });
+  }
+  return [...rows.values()];
+}
+
 function compactNumber(n: number): { text: string; scaled: boolean } {
   if (n >= 1_000_000) return { text: `${(Math.round(n / 100_000) / 10).toString().replace(".", ",")} млн`, scaled: true };
   if (n >= 1_000) return { text: `${Math.round(n / 1_000)} тыс.`, scaled: true };

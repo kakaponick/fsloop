@@ -111,17 +111,14 @@ export function unitsLine(units: RunCard["units"], total: number): string {
   return busy ? `${head} · ${num(busy)} в работе` : head;
 }
 
-/** Every launch of the run, the recorded and the running, as the run model's `launchCount` counts them. */
-export const launchTotal = (card: Pick<RunCard, "launches" | "running">): number => card.launches + card.running;
-
 const LAUNCH_SHORT: Forms = ["запуск", "запуска", "запусков"];
 
 /** «идёт 2 ч 05 мин · 34 запуска агента · 2 коммита»; compact for the card — «идёт 2 ч · 34 запуска · 2 коммита»;
- * a closed run has no «идёт». */
-export function activityLine(card: Pick<RunCard, "closed" | "startedAt" | "launches" | "running" | "commits">, now: number, { compact = false } = {}): string {
+ * a closed run has no «идёт». The launches are the model's `launchCount`: the recorded and the running. */
+export function activityLine(card: Pick<RunCard, "closed" | "startedAt" | "launchCount" | "commits">, now: number, { compact = false } = {}): string {
   const parts: string[] = [];
   if (!card.closed && card.startedAt) parts.push(`идёт ${duration(now - Date.parse(card.startedAt), { compact })}`);
-  parts.push(count(launchTotal(card), compact ? LAUNCH_SHORT : NOUNS.launch));
+  parts.push(count(card.launchCount, compact ? LAUNCH_SHORT : NOUNS.launch));
   if (card.commits !== null) parts.push(count(card.commits, NOUNS.commit));
   return parts.join(" · ");
 }

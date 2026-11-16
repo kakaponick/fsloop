@@ -40,6 +40,18 @@ export const STAGE_WORDS = {
 
 export type Step = keyof typeof STAGE_WORDS;
 
+/** The stages in a pass's order: the map's keys, the one order every view compares stages by. */
+export const STEPS = Object.keys(STAGE_WORDS) as Step[];
+
+/** A pass's outcome as passes.md writes it (fsl.mjs's allowedOutcomes): what the run did after the pass. */
+export const PASS_OUTCOME = {
+  next: entry("следующий проход", "neutral", 0, "Взятые в исправление находки исправит следующий проход."),
+  converged: entry("нечего исправлять", "success", 1, "Проход не взял находок в исправление: проходов больше нет."),
+  cap: entry("предел проходов", "warning", 2, "Последний проход прогона: оставшиеся находки открыты."),
+} satisfies Record<string, StateEntry>;
+
+export type PassOutcome = keyof typeof PASS_OUTCOME;
+
 export interface StageValue {
   stage: string | null;
   pass: number | null;
@@ -184,9 +196,11 @@ export function launchName(l: LaunchLike | null): string {
   return description || l.agent || NOT_RECORDED;
 }
 
-/** The launch names of a run by launch id. A name two launches share carries what tells them apart: «code · проход 2»
- * when the pass does, «code · проход 2 · ревью» when two of them share the pass too; launches of one stage that
- * nothing tells apart keep the bare name. Every surface reads these (craft-10: one concept, one word). */
+/** The launch names of a run by launch id, no two alike. A name two launches share carries what tells them apart:
+ * «code · проход 2» when the pass does, «code · проход 2 · ревью» when two of them share the pass too; launches of
+ * one stage that nothing else tells apart carry their number among them in the run's order — «code · запуск 2», with
+ * the stage when a namesake of another stage stands beside them. Every surface reads these (craft-10: one concept,
+ * one word; craft-verdict cand-13). */
 export function launchNames(launches: readonly (LaunchLike & { id: string; stage: string | null })[]): Map<string, string> {
   const all = launches.map((l) => ({ id: l.id, name: launchName(l), stage: stageOf(l.stage) }));
   const groups = new Map<string, typeof all>();
@@ -198,7 +212,11 @@ export function launchNames(launches: readonly (LaunchLike & { id: string; stage
     if (group.length === 1) out.set(l.id, l.name);
     else if (l.stage.pass !== null && alone((o) => o.stage.pass === l.stage.pass)) out.set(l.id, `${l.name} · проход ${l.stage.pass}`);
     else if (l.stage.stage && alone((o) => o.stage.stage === l.stage.stage)) out.set(l.id, `${l.name} · ${l.stage.full}`);
-    else out.set(l.id, l.name);
+    else {
+      const twins = group.filter((o) => o.stage.stage === l.stage.stage);
+      const head = twins.length === group.length || !l.stage.stage ? l.name : `${l.name} · ${l.stage.full}`;
+      out.set(l.id, `${head} · запуск ${twins.indexOf(l) + 1}`);
+    }
   }
   return out;
 }

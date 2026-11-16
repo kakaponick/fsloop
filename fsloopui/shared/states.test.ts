@@ -1,11 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { STEPS } from "../../skills/fsloop/fsl.mjs";
+import { STEPS as FSL_STEPS } from "../../skills/fsloop/fsl.mjs";
 import { LIVENESS } from "./liveness.ts";
-import { agentKind, CHECK_OUTCOME, checkOutcome, DECISION, FINDING_STATUS, LAUNCH_STATE, launchName, launchNames, launchState, reportWord, SEVERITY, stageOf, STAGE_WORDS, UNIT_STATE, VERDICT } from "./states.ts";
+import { agentKind, CHECK_OUTCOME, checkOutcome, DECISION, FINDING_STATUS, LAUNCH_STATE, launchName, launchNames, launchState, PASS_OUTCOME, reportWord, SEVERITY, stageOf, STAGE_WORDS, STEPS, UNIT_STATE, VERDICT } from "./states.ts";
 
 describe("glossary lines (ui → Glossary → Bound)", () => {
   test("every value of every state map reads «value — meaning» in 80 characters or fewer", () => {
-    const maps = { UNIT_STATE, SEVERITY, DECISION, FINDING_STATUS, VERDICT, LAUNCH_STATE, LIVENESS, CHECK_OUTCOME };
+    const maps = { UNIT_STATE, SEVERITY, DECISION, FINDING_STATUS, VERDICT, LAUNCH_STATE, LIVENESS, CHECK_OUTCOME, PASS_OUTCOME };
     const over = Object.entries(maps).flatMap(([name, map]) =>
       Object.entries(map as Record<string, { compact: string; meaning: string }>)
         .map(([key, e]) => ({ at: `${name}.${key}`, line: `${e.compact} — ${e.meaning}` }))
@@ -18,7 +18,16 @@ describe("glossary lines (ui → Glossary → Bound)", () => {
 
 describe("the stage map (common.md → Design conventions)", () => {
   test("covers fsl.mjs's steps plus init, integrate and finish", () => {
-    expect(Object.keys(STAGE_WORDS).sort()).toEqual([...STEPS, "init", "integrate", "finish"].sort());
+    expect(Object.keys(STAGE_WORDS).sort()).toEqual([...FSL_STEPS, "init", "integrate", "finish"].sort());
+  });
+
+  test("the stage order lives beside the words: a pass's steps as fsloop runs them (code-verdict cand-2)", () => {
+    expect(STEPS).toEqual(["init", "map", "spike", "decompose", "units", "review", "fix", "verdict", "assess", "integrate", "finish"]);
+  });
+
+  test("a pass's outcome as passes.md writes it: next, converged, cap", () => {
+    expect(Object.keys(PASS_OUTCOME)).toEqual(["next", "converged", "cap"]);
+    expect(PASS_OUTCOME.next.compact).toBe("следующий проход");
   });
 
   test("a stage with a pass reads «проход k · <word>», its compact form the word", () => {
@@ -124,8 +133,10 @@ describe("launches", () => {
       "p2-review-critic-code": "code · проход 2",
       "p1-units-u1-implement": "u1 · исполнитель",
     });
-    // Nothing tells two launches of one stage apart: both keep the bare name.
-    expect([...launchNames([critic("a", "p1-review", "critic code"), critic("b", "p1-review", "critic code")]).values()]).toEqual(["code", "code"]);
+    // Nothing tells two launches of one stage apart: each carries its number among them (craft-verdict cand-13).
+    expect([...launchNames([critic("a", "p1-review", "critic code"), critic("b", "p1-review", "critic code")]).values()]).toEqual(["code · запуск 1", "code · запуск 2"]);
+    // Beside a namesake of another pass, the twins keep their stage too: no two names alike.
+    expect([...launchNames([critic("a", "p1-review", "critic code"), critic("b", "p1-review", "critic code"), critic("c", "p2-review", "critic code")]).values()]).toEqual(["code · проход 1 · ревью · запуск 1", "code · проход 1 · ревью · запуск 2", "code · проход 2"]);
   });
 });
 

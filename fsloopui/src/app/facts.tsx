@@ -17,7 +17,6 @@ import { resolverFor, routerLink } from "./links.tsx";
 import {
   dataFromText,
   launchesLine,
-  launchTotal,
   LIVENESS_TERMS,
   livenessShown,
   NO_RECORD,
@@ -219,7 +218,7 @@ export function runFacts(card: RunCard, now: number, { run = null, lost = false 
       ),
     },
     { label: "Длительность", value: card.startedAt ? text(duration((end ? Date.parse(end) : now) - Date.parse(card.startedAt))) : notRecorded },
-    { label: "Запуски агентов", value: text(launchesLine(run?.launchCount ?? launchTotal(card), card.running)) },
+    { label: "Запуски агентов", value: text(launchesLine(run?.launchCount ?? card.launchCount, card.running)) },
     { label: "Коммиты", value: card.commits === null ? notRecorded : text(count(card.commits, NOUNS.commit)) },
     { label: "Зеркало .spike", value: card.mirror === null ? notRecorded : text(card.mirror ? "да" : "нет") },
     { label: "Рабочая копия", value: card.worktree ? text(card.worktree, true) : dash },
