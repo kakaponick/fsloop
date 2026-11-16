@@ -13,7 +13,8 @@ import type { JournalEntry } from "../../../shared/model.ts";
 import { writePref } from "@/ui";
 import { runPath } from "../../app/routes.ts";
 import { fixtureApp, keyOf, loadedRun, renderOver, renderView } from "../reports/testing.tsx";
-import { entriesInView, entryHead, gotoMissText, inViewText, JournalView, LABELS, railStages, SEARCH, stageAt, stageFilter } from "./index.tsx";
+import { applyStylesheet } from "../../app/layout-testing.ts";
+import { entryHead, gotoMissText, JournalView, LABELS, railStages, SEARCH, stageAt, stageFilter } from "./index.tsx";
 import { refObject } from "./ref-link.tsx";
 
 const N = 40; // 143 entries
@@ -62,25 +63,14 @@ describe("the journal as a reading list", () => {
     expect(fact(article(6), LABELS.refs)?.querySelector("[data-slot=dash]")).not.toBeNull();
   });
 
-  test("craft-16: the status bar names the entries in view, «на экране #40–#42», in a box reserved before it is known", async () => {
-    const boxes = [
-      { n: "39", top: -200, bottom: -5 },
-      { n: "40", top: -5, bottom: 130 },
-      { n: "41", top: 130, bottom: 270 },
-      { n: "42", top: 270, bottom: 395 },
-      { n: "43", top: 395, bottom: 530 },
-    ];
-    expect(entriesInView({ top: 0, bottom: 400 }, boxes)).toEqual(["40", "42"]); // 5 px of #43 is not an entry in view
-    expect(entriesInView({ top: 0, bottom: 400 }, [])).toBeNull();
-    expect(inViewText(["40", "42"])).toBe("на экране #40–#42");
-    expect(inViewText(["7", "7"])).toBe("на экране #7");
-    expect(inViewText(null)).toBe("");
+  test("craft-16, improve-9 (1): the status bar names the entries in view through the shared in-view part, its box reserved before it is known", async () => {
+    // the words and the measure are the shared part's (src/ui/in-view.test.tsx): «на экране #40–#42»
     renderView(fx, KEY, path(), JournalView);
     await loaded();
-    const slot = bar().querySelector("[data-slot=in-view]");
-    expect(slot).toHaveClass("inline-block", "min-w-[21ch]");
-    // the widest form at the production shape (143 entries) is 19 characters: 21ch holds it at a Cyrillic letter's width
-    expect(inViewText(["142", "143"])).toHaveLength(19);
+    const slot = bar().querySelector("[data-slot=in-view]") as HTMLElement;
+    // the widest form at the production shape (143 entries), «на экране #143–#143», is 19 characters, with 2 ch of
+    // room — the box the bar's counts slot holds from the first paint
+    expect(slot.style.minWidth).toBe("21ch");
   });
 
   test("craft-30: each ref with the fact it rests on — a finding's severity and sentence, a unit's state and title, an entry's question", async () => {
@@ -367,7 +357,7 @@ describe("pass 2 (f16): volume, keyboard, the entry's address", () => {
     const rail = screen.getByRole("navigation", { name: "Этапы журнала" });
     expect(rail).toHaveClass("hidden", "@min-[52rem]/view:flex", "overflow-y-auto", "[scrollbar-gutter:stable]");
     const items = within(rail).getAllByRole("link");
-    expect(items.map((a) => a.textContent)).toEqual(["проход 1 · карта59", "проход 1 · ревью40", "проход 2 · ревью44", "Последнее решение#143"]);
+    expect(items.map((a) => a.textContent)).toEqual(["проход 1 · карта59", "проход 1 · ревью40", "проход 2 · ревью44", "Последнее решение #143"]);
     for (const a of items) expect(a).toHaveClass("h-7");
     expect(items[0]).toHaveAttribute("href", runPath(KEY, { view: "journal", entry: "1" }));
     expect(items[1]).toHaveAttribute("href", runPath(KEY, { view: "journal", entry: "60" }));
@@ -379,12 +369,12 @@ describe("pass 2 (f16): volume, keyboard, the entry's address", () => {
     expect(new URLSearchParams(view.probe.location?.search).get("entry")).toBe("100");
     await waitFor(() => expect(article(100)).toHaveAttribute("data-target"));
     expect(document.activeElement).toBe(article(100));
-    const go = within(rail).getByRole("textbox", { name: "Перейти к решению: номер" });
+    const go = within(rail).getByRole("textbox", { name: "Перейти к #: номер решения" });
     await user.type(go, "#120{Enter}");
     expect(new URLSearchParams(view.probe.location?.search).get("entry")).toBe("120");
     await waitFor(() => expect(document.activeElement).toBe(article(120)));
     // a known number clears the field
-    expect(within(rail).getByRole("textbox", { name: "Перейти к решению: номер" })).toHaveValue("");
+    expect(within(rail).getByRole("textbox", { name: "Перейти к #: номер решения" })).toHaveValue("");
   });
 
   test("p2-verdict-critic-craft-verdict-3#craft-6: an unknown number in «Перейти к #» keeps the field, marks it invalid and answers on a line reserved under it; the address stays", async () => {
@@ -395,7 +385,7 @@ describe("pass 2 (f16): volume, keyboard, the entry's address", () => {
     const view = renderView(fx, KEY, path({ entry: "40" }), JournalView);
     await loaded();
     const rail = screen.getByRole("navigation", { name: "Этапы журнала" });
-    const field = within(rail).getByRole("textbox", { name: "Перейти к решению: номер" });
+    const field = within(rail).getByRole("textbox", { name: "Перейти к #: номер решения" });
     // Strict 1: the answer's line is there, empty, from the first paint — one line high, so nothing under it moves
     const status = rail.querySelector("[data-slot=goto-status]") as HTMLElement;
     expect(status).toHaveClass("h-4", "truncate");
@@ -488,6 +478,87 @@ describe("pass 2 (f16): volume, keyboard, the entry's address", () => {
     expect(within(menu).getByText("#40 · Question 40: which way?")).toBeInTheDocument();
     await user.click(within(menu).getByRole("menuitem", { name: "Скопировать адрес решения" }));
     expect(writeText).toHaveBeenCalledWith(`${window.location.origin}${runPath(KEY, { view: "journal", entry: "40" })}`);
+  });
+
+  test("p2-assess-critic-improve#improve-7 (1), design-14: «Перейти к #» shows the numbers the journal holds before any miss, its name opens with its visible words, and G is its in-field cap", async () => {
+    renderView(fx, KEY, path(), JournalView);
+    await loaded();
+    const rail = screen.getByRole("navigation", { name: "Этапы журнала" });
+    const field = within(rail).getByRole("textbox", { name: "Перейти к #: номер решения" });
+    expect(field).toHaveAttribute("placeholder", "#1–#143");
+    const group = field.closest("[data-slot=input-group]") as HTMLElement;
+    const shown = within(group).getByText("Перейти к #");
+    expect(field).toHaveAccessibleName(expect.stringMatching(new RegExp(`^${shown.textContent}`)));
+    // the key's cap stands inside the field, at its end — no tooltip repeats the field's visible name
+    const cap = within(group).getByText("G");
+    expect(cap.tagName).toBe("KBD");
+    expect(cap.parentElement).not.toHaveAttribute("aria-hidden");
+    expect(group.closest("[data-slot=tooltip-trigger]")).toBeNull();
+    // the physical key G — the Russian layout's «п» too — focuses the field; then the cap hides, its box kept
+    fireEvent.keyDown(document.body, { code: "KeyG", key: "п" });
+    expect(document.activeElement).toBe(field);
+    expect(cap.parentElement).toHaveAttribute("aria-hidden", "true");
+    expect(within(group).getByText("G")).toBe(cap);
+  });
+
+  test("improve-7 (2): G typed into the search stays a letter of the search", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderView(fx, KEY, path(), JournalView);
+    await loaded();
+    const search = screen.getByRole("searchbox");
+    await user.click(search);
+    await user.keyboard("g");
+    expect(document.activeElement).toBe(search);
+    expect(search).toHaveValue("g");
+  });
+
+  test("improve-7 (3): «Последнее решение #143» is set apart from the stage counts by a rule, its number beside its words, not in the count column", async () => {
+    renderView(fx, KEY, path(), JournalView);
+    await loaded();
+    const rail = screen.getByRole("navigation", { name: "Этапы журнала" });
+    const latest = within(rail).getByRole("link", { name: /^Последнее решение/ });
+    expect(latest.previousElementSibling).toHaveAttribute("data-slot", "separator");
+    // one text — the words and the number — where a stage's link holds its word and its count apart
+    expect(latest.children).toHaveLength(1);
+    expect(latest.firstElementChild).toHaveTextContent(/^Последнее решение #143$/);
+    expect(within(rail).getByRole("link", { name: /^проход 1 · карта/ }).children).toHaveLength(2);
+  });
+
+  test("improve-7 (4): one caption under the toolbar, first in the list's scroller — what a decision is, what a ref's fact is, the keys ↑/↓ and G", async () => {
+    renderView(fx, KEY, path({ entry: "999" }), JournalView);
+    await loaded();
+    const list = document.querySelector("[data-slot=journal-scroll]") as HTMLElement;
+    const caption = list.firstElementChild as HTMLElement;
+    expect(caption).toHaveAttribute("data-slot", "journal-caption");
+    // before the «не найдено» line and the list, scrolled with them
+    expect(caption.nextElementSibling).toHaveAttribute("data-slot", "entry-missing");
+    const text = "Решение — что прогон решил без вас; рядом со ссылкой — что за ней. ↑↓ — по решениям, G — к номеру.";
+    expect(caption).toHaveTextContent(text);
+    expect(caption.textContent?.split(/\s+/).filter(Boolean)).toHaveLength(22);
+    // the keys are caps, never inline code
+    expect([...caption.querySelectorAll("kbd[data-slot=kbd]")].map((k) => k.textContent)).toEqual(["↑", "↓", "G"]);
+    expect(caption.querySelector("code")).toBeNull();
+    // Strict 1: its line is one cap tall from the first paint
+    await applyStylesheet();
+    expect(getComputedStyle(caption).minHeight).toBe("20px");
+    expect(getComputedStyle(caption).fontSize).toBe("12px");
+  });
+
+  test("improve-7 (5): the entries' list and each entry's refs keep their list role under `list-none`", async () => {
+    renderView(fx, KEY, path(), JournalView);
+    await loaded();
+    expect(article(1).closest("ol")).toHaveAttribute("role", "list");
+    expect(fact(article(5), LABELS.refs)?.querySelector("ul")).toHaveAttribute("role", "list");
+  });
+
+  test("design-15: Enter on a focused entry opens its address menu", async () => {
+    renderView(fx, KEY, path(), JournalView);
+    await loaded();
+    article(40).focus();
+    fireEvent.keyDown(article(40), { key: "Enter", code: "Enter" });
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByText("#40 · Question 40: which way?")).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "Скопировать адрес решения" })).toBeInTheDocument();
   });
 
   test("f9's debt: a ref's id wears the search's one mark — the ids are searched", async () => {

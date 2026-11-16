@@ -133,6 +133,33 @@ describe("p2-verdict-critic-craft-verdict-3#craft-1: the shared reveal moves the
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "1" }));
   });
 
+  test("design-3: useReveal under a sticky heading keeps its room — the object `gap` under the scroller's top, past the heading", async () => {
+    placeBoxes();
+    const user = userEvent.setup();
+    function List() {
+      const [target, setTarget] = useState<string | null>(null);
+      // a 32 px sticky heading over the list: the object stands 32 + 8 px under the scroller's top
+      const { scroller } = useReveal(target, (box, id) => box.querySelector<HTMLElement>(`[data-id="${id}"]`), { gap: 40 });
+      return (
+        <>
+          <button type="button" onClick={() => setTarget("2")}>
+            открыть 2
+          </button>
+          <div ref={scroller} data-testid="scroller" data-top="100" className={SCROLLER}>
+            <article data-id="2" data-top="900" tabIndex={-1}>
+              2
+            </article>
+          </div>
+        </>
+      );
+    }
+    render(<List />);
+    await user.click(screen.getByRole("button", { name: "открыть 2" }));
+    // (900 − 100) − 40
+    expect(screen.getByTestId("scroller").scrollTop).toBe(760);
+    expect(document.activeElement).toBe(document.querySelector('[data-id="2"]'));
+  });
+
   test("p2-verdict-critic-code-verdict-2#verdict-1: an entry held by a click on its own number while it is already the address is revealed and focused when addressed again later", async () => {
     placeBoxes();
     const user = userEvent.setup();

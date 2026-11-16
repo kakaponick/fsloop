@@ -12,6 +12,8 @@ export { baseName, fileFailure, folderFailure } from "./failure.ts";
 export { FactList, MORE, type Fact, type FactListProps } from "./fact-list.tsx";
 export { Fold, FoldTrigger, type FoldProps } from "./fact-list.tsx";
 export { flatItem, FlatList, type FlatListProps } from "./flat-list.tsx";
+export { openItemMenu } from "./flat-list.tsx";
+export { InView, inViewText, itemsInView, useInView, type InViewOptions, type InViewProps, type InViewRange } from "./in-view.tsx";
 export { FrameStrip, FrameThumb, FrameViewer, THUMB, WHEEL_GESTURE_GAP, type Frame } from "./frames.tsx";
 export { HeldStrip, heldStripText, heldVerb, type HeldCounts, type HeldLeftKind, type HeldNoun, type HeldVerb } from "./held-strip.tsx";
 export { keyLabel, Keys } from "./kbd.tsx";

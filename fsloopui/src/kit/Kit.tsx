@@ -30,6 +30,7 @@ import {
   glossaryFrom,
   HeldStrip,
   Hint,
+  InView,
   Keys,
   Loading,
   markProps,
@@ -322,6 +323,18 @@ function ListsSection() {
             </div>
           </Case>
           <AddressCase />
+          <Case label="На экране: номера, которые список показывает, — в строке состояния, в рамке самой широкой формы">
+            <div className="flex max-w-xl flex-col gap-1 text-xs text-muted-foreground tabular-nums">
+              <div className="flex items-center gap-3 rounded-md border px-3 py-1.5">
+                <InView kind="entry" range={["40", "42"]} last="143" />
+                <span>143 решения</span>
+              </div>
+              <div className="flex items-center gap-3 rounded-md border px-3 py-1.5">
+                <InView kind="convention" range={null} last="26" />
+                <span>26 соглашений</span>
+              </div>
+            </div>
+          </Case>
         </div>
       </div>
     </Section>

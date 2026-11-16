@@ -1,6 +1,7 @@
 // A list that is not a table (rules/ui → Conventions 8; ui → Keyboard): the sidebar's cards, the report rail, the
 // journal's decisions, the conventions — one flat list with one Tab stop. ↑/↓ move, Home/End jump, Enter on the item
-// opens it — Enter on a link or a button inside an item is that control's own. An item with an address is one link
+// opens it (an object with an address and a menu, not a link — a decision, a convention — opens its menu,
+// `openItemMenu`) — Enter on a link or a button inside an item is that control's own. An item with an address is one link
 // as a whole and nothing inside it takes focus; an item that holds links of its own (`gate`) lets them take Tab only
 // while focus is inside it; headings between items are not stops. The list owns the roving tabindex: every element
 // marked by `flatItem(key)` is a stop, the open one (aria-current) holds the Tab stop.
@@ -22,6 +23,15 @@ export interface FlatListProps {
    * only while focus is inside their item, so the list stays one Tab stop however much its items hold. */
   gate?: boolean;
   className?: string;
+}
+
+/** What `onOpen` does on a list whose items are objects with an address and a menu, not links (a journal's decision,
+ * a convention — DESIGN.md → Object Address): Enter opens the item's own menu, as a right click or the menu key
+ * does, at the item's top left corner; null — the item is gone. */
+export function openItemMenu(item: HTMLElement | null): void {
+  if (!item) return;
+  const r = item.getBoundingClientRect();
+  item.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.left + 16, clientY: r.top + 16 }));
 }
 
 const isCurrent = (el: HTMLElement) => {

@@ -1,19 +1,23 @@
 // «Соглашения» (surfaces/reading.md → BLOCKS «Соглашения»): which shared design solutions this run agreed for its
-// interface. One reading column: a one-line caption on what a convention is, the search, then a heading per
-// design-check launch — a link to its report — with its conventions in order. Each convention reads as the design
+// interface. One reading column: a one-line caption on what a convention is — and, once for the whole list, what
+// «Пример» and «Правило» mean (design-12) — the search, then a heading per design-check launch — a link to its
+// report, sticking to the top of the list's scroller in one fixed 32 px line while its conventions pass under it,
+// its count only where a second check would leave the status bar's total ambiguous — with its conventions in order.
+// The status bar names the conventions in view, «на экране 12–17» (`@/ui` → InView). Each convention reads as the design
 // check split it (shared/model.ts → Convention): its ordinal — a link to its own address — and the pattern lead, in a
 // hanging column on a wide view; the solution is the sentence beside it, then «Пример» — running text as written, each
 // place a copy button in place — and «Правило» as labelled rows, «не записано» where the check wrote none; a line the
 // parser could not split keeps its text whole. A report or a run folder that cannot be read fails in its own place
 // (rules/ui → Conventions 14). Read-only.
 //
-// The conventions are one flat list (ui → Keyboard; DESIGN.md → Flat List): one Tab stop, ↑/↓ between them, a
-// convention's own links and places take Tab only while focus is in it.
+// The conventions are one flat list (ui → Keyboard; DESIGN.md → Flat List): one Tab stop, ↑/↓ between them, Enter
+// on one opens its address menu, a convention's own links and places take Tab only while focus is in it.
 //
 // A convention's address is `?view=conventions&convention=<n>` (the design check: an object's address is a query
 // key), in the one form of an object on its list (`@/ui` → AddressLink, AddressMenu, useReveal): the ordinal is a
-// link to it and its menu copies it; the view brings it to the top of the list's own scroller — nothing above the
-// list moves — marks it with the target mark and moves focus to it; hidden by the search it shows anyway, «вне
+// link to it and its menu copies it; the view brings it to the top of the list's own scroller, under its group's
+// sticky heading (design-3) — nothing above the list moves — marks it with the target mark and moves focus to it;
+// hidden by the search it shows anyway, «вне
 // фильтра»; an address the run lacks reads the shared «не найдено» line with the numbers it holds and «Закрыть».
 import { CopyIcon } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
@@ -23,7 +27,7 @@ import { STAGE_WORDS, stageOf } from "../../../shared/states.ts";
 import { count, NOUNS, type Forms } from "../../../shared/text.ts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { AddressLink, AddressMenu, baseName, copyLabel, copyText, EmptyState, emptyWhen, FactList, fileFailure, flatItem, FlatList, folderFailure, Hint, markProps, MissingLine, NotRecorded, OutOfFilter, PartFailed, PLACE_WHAT, RunningText, SCROLLER, TOAST_MAX_TITLE, useReveal, type Fact, type Resolve } from "@/ui";
+import { AddressLink, AddressMenu, baseName, copyLabel, copyText, EmptyState, emptyWhen, FactList, fileFailure, flatItem, FlatList, folderFailure, Hint, InView, markProps, MissingLine, NotRecorded, openItemMenu, OutOfFilter, PartFailed, PLACE_WHAT, REVEAL_GAP, RunningText, SCROLLER, TOAST_MAX_TITLE, useInView, useReveal, type Fact, type Resolve } from "@/ui";
 import { AdaptiveToolbar, filterSummary, Highlight, pushHistory, runQuery, SearchBox, StatusBar, tokens, useRunView, useTableView, type SearchDef, type ToolbarItem } from "@/table";
 import { useNow } from "../../app/clock.tsx";
 import { LINK_CLASS, resolverFor, routerLink } from "../../app/links.tsx";
@@ -31,8 +35,14 @@ import { useUpdatedAt } from "../../app/live.tsx";
 import { runPath } from "../../app/routes.ts";
 import type { LoadedRun, ViewProps } from "../index.ts";
 
-export const INTRO = "Соглашение — одно решение на задачу, которую юниты решали бы по-разному; в конце прогона соглашения попадают в `.claude/rules/ui.md`.";
+/** The view's caption: what a convention is, what its «Пример» and «Правило» rows hold — explained once here, never
+ * on every convention's labels (design-12) — and where the conventions go. */
+export const INTRO = "Соглашение — одно решение там, где юниты решили бы по-разному; «Пример» — где оно есть, «Правило» — чему служит; оно войдёт в `.claude/rules/ui.md`.";
 export const DESIGN_CHECK = "Проверка дизайна";
+/** Where a group's heading leads, in its link's title. */
+export const GROUP_LINK_TITLE = "Открыть отчёт проверки дизайна";
+/** A group's sticky heading: one fixed line, 32 px (`h-8`), that the reveal and the in-view strip keep clear of. */
+const GROUP_HEAD = 32;
 export const NONE_WRITTEN = "Эта проверка дизайна соглашений не записала: юниты не решали одну задачу по-разному.";
 /** The never form's noun: the run had no design check, so it has no conventions. */
 export const DESIGN_CHECK_NOUN: Forms = ["проверка дизайна", "проверки дизайна", "проверки дизайна"];
@@ -154,7 +164,10 @@ export function ConventionsView({ run }: ViewProps) {
   // The convention a link names is brought to the top of the list's own scroller and takes focus, once per link —
   // nothing above the list moves; the ordinal the user clicked stays where it is (Strict 1: a click never pushes
   // what was clicked).
-  const { scroller, hold } = useReveal(target, findConvention);
+  const { scroller, hold } = useReveal(target, findConvention, { gap: GROUP_HEAD + REVEAL_GAP });
+  // the conventions in view, a line of each below the group's sticky heading (improve-9)
+  const inView = useInView(scroller, "convention", `${run.version}:${q.rows.map((c) => c.n).join(",")}`, { top: GROUP_HEAD });
+  const last = total ? String(run.conventions[total - 1].n) : null;
   const setConvention = (n: string | null) =>
     setParams(
       (prev) => {
@@ -175,7 +188,8 @@ export function ConventionsView({ run }: ViewProps) {
   return (
     <div data-slot="conventions-view" className="absolute inset-0 flex flex-col gap-2 px-5 pt-3 pb-1">
       {total > 0 && !failed && <AdaptiveToolbar items={toolbar} label="Поиск по соглашениям" />}
-      <div ref={scroller} data-slot="conventions-scroll" className={cn(SCROLLER, "flex-1")}>
+      {/* its scroll padding is the sticky heading's line, so ↑/↓ bring a convention out from under it */}
+      <div ref={scroller} data-slot="conventions-scroll" className={cn(SCROLLER, "flex-1 scroll-pt-8")}>
         {failed ? (
           <PartFailed what={CONVENTIONS_PART} cause={failed.cause} className="mt-4" />
         ) : groups.length === 0 ? (
@@ -205,7 +219,7 @@ export function ConventionsView({ run }: ViewProps) {
             {searching && q.rows.length === 0 ? (
               <EmptyState form="filtered" noun={NOUNS.convention} filters={filterSummary([], prefs.filters, prefs.search)} onReset={() => setPrefs({ filters: {}, search: "" })} className="py-16" />
             ) : (
-              <FlatList label={CONVENTIONS_PART} gate className="gap-6">
+              <FlatList label={CONVENTIONS_PART} gate onOpen={(n) => openItemMenu(scroller.current && findConvention(scroller.current, n))} className="gap-6">
                 {shownGroups.map((g) => {
                   const s = stageOf(g.stage);
                   const href = run.launches.some((l) => l.id === g.launch) ? runPath(run.key, { view: "reports", report: g.launch }) : null;
@@ -214,25 +228,26 @@ export function ConventionsView({ run }: ViewProps) {
                   const rows = g.conventions.filter((c) => kept.has(c.n));
                   return (
                     <section key={g.launch} data-launch={g.launch} aria-labelledby={`conv-${g.launch}`} className="flex flex-col gap-2">
-                      <header className="flex flex-col gap-0.5">
-                        <h2 id={`conv-${g.launch}`} className="m-0 text-base font-semibold">
-                          {href ? (
-                            <Link to={href} className={LINK_CLASS}>
-                              {title}
-                            </Link>
-                          ) : (
-                            title
-                          )}
-                        </h2>
-                        <p className="m-0 flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground tabular-nums">
-                          <span className="font-mono">{hl(g.launch)}</span>
-                          {!failure && (
-                            <>
-                              <span aria-hidden="true">·</span>
-                              <span>{count(g.conventions.length, NOUNS.convention)}</span>
-                            </>
-                          )}
-                        </p>
+                      {/* one fixed 32 px line on the page's ground, sticking while the group's conventions pass under
+                          it; it spans their -12 px rows, so no row shows past its edges (improve-9, design-3) */}
+                      <header className="sticky top-0 z-10 -mx-3 flex h-8 min-w-0 items-center bg-background px-3">
+                        <div className="flex min-w-0 items-baseline gap-2">
+                          <h2 id={`conv-${g.launch}`} className="m-0 shrink-0 text-base font-semibold">
+                            {href ? (
+                              <Link to={href} title={GROUP_LINK_TITLE} className={LINK_CLASS}>
+                                {title}
+                              </Link>
+                            ) : (
+                              title
+                            )}
+                          </h2>
+                          <p className="m-0 min-w-0 truncate text-xs text-muted-foreground tabular-nums">
+                            <span className="font-mono">{hl(g.launch)}</span>
+                            {/* the count where two checks share the status bar's total; with one, it says it there and
+                                on the tab (ux 2) */}
+                            {!failure && groups.length > 1 && ` · ${count(g.conventions.length, NOUNS.convention)}`}
+                          </p>
+                        </div>
                       </header>
                       {failure ? (
                         <PartFailed what={`Отчёт ${failure.file}`} cause={failure.cause} />
@@ -266,7 +281,7 @@ export function ConventionsView({ run }: ViewProps) {
           </div>
         )}
       </div>
-      <StatusBar shown={q.matched} total={total} noun={NOUNS.convention} updatedAt={updated === null ? null : new Date(updated).toISOString()} now={now} />
+      <StatusBar counts={<InView kind="convention" range={inView} last={last} />} shown={q.matched} total={total} noun={NOUNS.convention} updatedAt={updated === null ? null : new Date(updated).toISOString()} now={now} />
     </div>
   );
 }

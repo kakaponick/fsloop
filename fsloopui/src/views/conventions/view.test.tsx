@@ -12,6 +12,7 @@ import userEvent from "@testing-library/user-event";
 import { afterAll, describe, expect, test, vi } from "vitest";
 import type { Convention } from "../../../shared/model.ts";
 import { writePref } from "@/ui";
+import { applyStylesheet, textWidth, usedBlockSize } from "../../app/layout-testing.ts";
 import { runPath } from "../../app/routes.ts";
 import { fixtureApp, keyOf, loadedRun, renderOver, renderView } from "../reports/testing.tsx";
 import { conventionPath, ConventionsView, copiedWhat, DESIGN_CHECK, emptyFor, INTRO, LABELS, NEVER_DESCRIPTION, NONE_WRITTEN, partsOf, placesOf, SEARCH } from "./index.tsx";
@@ -37,7 +38,7 @@ describe("«Соглашения»", () => {
   test("26 conventions grouped by design-check launch, each heading a link to its report", async () => {
     renderView(fx, KEY, PATH, ConventionsView);
     await waitFor(() => expect(items()).toHaveLength(26), { timeout: 4000 });
-    expect(screen.getByText(/одно решение на задачу/)).toHaveTextContent(INTRO.replace(/`/g, ""));
+    expect(screen.getByText(/одно решение там, где/)).toHaveTextContent(INTRO.replace(/`/g, ""));
     const groups = [...document.querySelectorAll<HTMLElement>("section[data-launch]")];
     expect(groups.map((g) => g.dataset.launch)).toEqual(["p1-decompose-design-check", "p2-decompose-design-check"]);
     expect(within(groups[0]).getByRole("link", { name: `${DESIGN_CHECK}, проход 1` })).toHaveAttribute("href", runPath(KEY, { view: "reports", report: "p1-decompose-design-check" }));
@@ -166,10 +167,16 @@ describe("«Соглашения»", () => {
 });
 
 describe("f15: the list's shape, the address and search", () => {
-  test("cand-12: the intro is one short caption line, not a paragraph at the measure", () => {
+  test("cand-12, design-12: the intro is one short caption line, not a paragraph at the measure — and the one place «Пример» and «Правило» are explained", async () => {
     renderOver(fx, run, PATH, ConventionsView);
-    expect(INTRO).toBe("Соглашение — одно решение на задачу, которую юниты решали бы по-разному; в конце прогона соглашения попадают в `.claude/rules/ui.md`.");
-    expect(words(INTRO)).toBe(18);
+    expect(INTRO).toBe("Соглашение — одно решение там, где юниты решили бы по-разному; «Пример» — где оно есть, «Правило» — чему служит; оно войдёт в `.claude/rules/ui.md`.");
+    expect(words(INTRO)).toBe(23);
+    // one line at 1440 px: the text at 12 px, its path in mono, within the column's 75 ch + 26.5 rem (≈ 986 px)
+    const [prose, path] = INTRO.split("`");
+    expect(textWidth(`${prose}.`, { size: 12 }) + textWidth(path, { size: 12, mono: true })).toBeLessThanOrEqual(75 * 7.5 + 26.5 * 16);
+    // no glossary on the labels of every convention: 2 × 26 dotted triggers would repeat the caption's two meanings
+    await waitFor(() => expect(items()).toHaveLength(26), { timeout: 4000 });
+    expect(document.querySelectorAll("dt [data-slot=tooltip-trigger]")).toHaveLength(0);
     const intro = document.querySelector("[data-slot=conventions-intro] > [data-slot=running-text]") as HTMLElement;
     expect(intro).toHaveTextContent(INTRO.replace(/`/g, ""));
     expect(intro).toHaveClass("text-xs", "text-muted-foreground");
@@ -223,8 +230,8 @@ describe("f15: the list's shape, the address and search", () => {
       return { top, bottom: top + 90, left: 0, right: 0, width: 0, height: 90, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
     });
     renderOver(fx, run, at("12"), ConventionsView);
-    // #12 stands 8 px under the list's top: 12 × 90 − 8
-    await waitFor(() => expect(box().scrollTop).toBe(1072));
+    // #12 stands under the group's 32 px sticky heading, 8 px clear of it (design-3): 12 × 90 − 40
+    await waitFor(() => expect(box().scrollTop).toBe(1040));
     expect(document.activeElement).toBe(article(12));
     expect((document.querySelector("[data-slot=view-body]") as HTMLElement).scrollTop).toBe(0);
     expect(document.querySelector("[data-slot=conventions-view]")?.firstElementChild).toHaveAttribute("data-slot", "adaptive-toolbar");
@@ -308,6 +315,83 @@ describe("f15: the list's shape, the address and search", () => {
     expect(screen.getByText("Нет соглашений, подходящих под фильтры")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Сбросить фильтры" }));
     expect(items()).toHaveLength(26);
+  });
+});
+
+describe("u12: p2-assess-critic-improve#improve-9, design-3, design-15", () => {
+  const head = (launch: string) => document.querySelector(`section[data-launch="${launch}"] > header`) as HTMLElement;
+  /** jsdom lays nothing out: the list's box stands 100–640, convention n at 100 + n × 90 − its scroll, 90 px high. */
+  const placeBoxes = () => {
+    const box = () => document.querySelector("[data-slot=conventions-scroll]") as HTMLElement;
+    return vi.spyOn(window.HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const n = this.dataset.convention ?? (this.tagName === "ARTICLE" ? this.parentElement?.dataset.convention : undefined);
+      const scroller = this.dataset.slot === "conventions-scroll";
+      const top = scroller ? 100 : n ? 100 + Number(n) * 90 - box().scrollTop : 0;
+      const height = scroller ? 540 : 90;
+      return { top, bottom: top + height, left: 0, right: 0, width: 0, height, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+    });
+  };
+
+  test("improve-9 (1): the status bar names the conventions in view, «на экране 12–17», through the journal's shared in-view part", async () => {
+    const rects = placeBoxes();
+    renderOver(fx, run, at("12"), ConventionsView);
+    const slot = bar().querySelector("[data-slot=in-view]") as HTMLElement;
+    // 11 shows 8 px under the group's sticky heading — not a line; 17 shows 50 px above the box's end
+    await waitFor(() => expect(slot).toHaveTextContent(/^на экране 12–17$/));
+    // Strict 1: reserved at «на экране 26–26» with 2 ch of room, before the range is known (a flex item of the bar)
+    expect(slot.style.minWidth).toBe("17ch");
+    rects.mockRestore();
+  });
+
+  test("improve-9 (2): with one design check the group line names its launch alone — the count is the status bar's and the tab's", () => {
+    const launches = run.launches.filter((l) => l.id !== "p2-decompose-design-check");
+    renderOver(fx, { ...run, launches }, PATH, ConventionsView);
+    expect([...document.querySelectorAll<HTMLElement>("section[data-launch]")]).toHaveLength(1);
+    expect(head("p1-decompose-design-check").querySelector("p")).toHaveTextContent(/^p1-decompose-design-check$/);
+    expect(head("p1-decompose-design-check")).not.toHaveTextContent("соглашени");
+    expect(bar()).toHaveTextContent("26 соглашений");
+  });
+
+  test("improve-9 (3): the group's heading sticks inside the list's scroller in a fixed 32 px line on the page's ground; the scroller keeps its room for ↑/↓", async () => {
+    renderOver(fx, run, PATH, ConventionsView);
+    await applyStylesheet();
+    const h = head("p1-decompose-design-check");
+    const s = getComputedStyle(h);
+    expect(s.position).toBe("sticky");
+    expect(s.top).toBe("0px");
+    expect(s.zIndex).toBe("10");
+    expect(usedBlockSize(h)).toBe(32);
+    // the heading and its launch on one line: the title, then the launch muted and cut at its end
+    expect(h.querySelector("h2")?.parentElement).toBe(h.querySelector("p")?.parentElement);
+    expect(getComputedStyle(h.querySelector("p") as HTMLElement).textOverflow).toBe("ellipsis");
+    expect(getComputedStyle(document.querySelector("[data-slot=conventions-scroll]") as HTMLElement).getPropertyValue("scroll-padding-top")).toBe("32px");
+  });
+
+  test("design-3: `convention=12` lands below the sticky heading — its top past the heading's bottom, 8 px clear", async () => {
+    const rects = placeBoxes();
+    renderOver(fx, run, at("12"), ConventionsView);
+    const box = document.querySelector("[data-slot=conventions-scroll]") as HTMLElement;
+    await waitFor(() => expect(document.activeElement).toBe(article(12)));
+    await applyStylesheet();
+    const heading = usedBlockSize(head("p1-decompose-design-check"));
+    expect(heading).toBe(32);
+    const under = box.getBoundingClientRect().top + (heading as number);
+    expect(article(12).getBoundingClientRect().top).toBe(under + 8);
+    rects.mockRestore();
+  });
+
+  test("improve-9 (5): the group's link says where it leads", () => {
+    renderOver(fx, run, PATH, ConventionsView);
+    expect(within(head("p1-decompose-design-check")).getByRole("link", { name: `${DESIGN_CHECK}, проход 1` })).toHaveAttribute("title", "Открыть отчёт проверки дизайна");
+  });
+
+  test("design-15: Enter on a focused convention opens its address menu, as on a decision", async () => {
+    renderOver(fx, run, PATH, ConventionsView);
+    article(3).focus();
+    fireEvent.keyDown(article(3), { key: "Enter", code: "Enter" });
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByText("3 · Pattern 3")).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "Скопировать адрес соглашения" })).toBeInTheDocument();
   });
 });
 

@@ -35,8 +35,10 @@ export function revealIn(scroller: HTMLElement, el: HTMLElement, { gap = REVEAL_
 
 /** The reveal of the object an address names (`target`), once per address: `scroller` goes on the list's scroller,
  * `find` picks the object in it. `reveal(id)` brings an object back (a rail link to the entry already open); `hold(id)`
- * marks the next address as the user's own click on that object, which the reveal leaves in place. */
-export function useReveal(target: string | null, find: (scroller: HTMLElement, id: string) => HTMLElement | null) {
+ * marks the next address as the user's own click on that object, which the reveal leaves in place. A list whose
+ * scroller holds a sticky heading passes `gap` — the heading's height + `REVEAL_GAP` — so the object stands under it
+ * (the design check of pass 3: a sticky heading in a scroller, and a reveal into it). */
+export function useReveal(target: string | null, find: (scroller: HTMLElement, id: string) => HTMLElement | null, { gap }: Pick<RevealOptions, "gap"> = {}) {
   const scroller = useRef<HTMLDivElement>(null);
   const held = useRef<string | null>(null);
   // stable, so a memoised row may take them
@@ -44,9 +46,9 @@ export function useReveal(target: string | null, find: (scroller: HTMLElement, i
     (id: string) => {
       const box = scroller.current;
       const el = box ? find(box, id) : null;
-      if (box && el) revealIn(box, el);
+      if (box && el) revealIn(box, el, { gap });
     },
-    [find],
+    [find, gap],
   );
   const hold = useCallback((id: string) => {
     held.current = id;
