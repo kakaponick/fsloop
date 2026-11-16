@@ -13,6 +13,13 @@ Governs everything under `fsloopui/`: the React client, the server's routes as f
 
 fsloopUI is local, single-user and read-mostly: no sign-in, no roles, no money, no destructive action. Its one write is the user's verdict on a finding (Conventions 6).
 
+## Components
+
+1. **shadcn/ui is the component library** — fsloopUI is a shadcn project: `fsloopui/components.json`, Tailwind, every component of the library added as source under `fsloopui/src/components/ui/`. Work on a component goes through the `shadcn` skill (`~/.claude/skills/shadcn/SKILL.md` with its `cli.md`, `customization.md`, `registry.md`, `rules/`) and its CLI, `npx shadcn@latest` run in `fsloopui/` — `docs`, `search`, `view`, `add`, `diff`.
+2. **A library component first** — a shared part is built from the library's component for its job (table, command, dialog, dropdown and context menu, select, combobox, tabs, tooltip, sonner, scroll area, collapsible, pagination, kbd, empty, spinner, badge, skeleton …) before anything is written by hand; a hand-made part where the library has one is a defect. A product part composes library components in its own file and never edits a file under `components/ui/` for one screen's sake.
+3. **The world is the theme** — the product's look lives in the theme's variables (`DESIGN.md`): the library's semantic tokens (`background`, `foreground`, `muted`, `border`, `primary`, `destructive` …) carry the product's values, light and dark. No raw colour, radius or font in a component; no second token set beside the theme's.
+4. **The law outranks the library's defaults** — where a component's default form breaks this file or the fsloop law (a status as a filled badge instead of the dot, skeleton rows where Tables 2 asks for the framed spinner, a tooltip holding content, a side sheet holding an object), the product uses the form the rule names.
+
 ## Layout
 
 1. **The shell** — two regions: the sidebar of run cards at a fixed width, and the opened run's page in the remaining `minmax(0, 1fr)`. The shell grid owns the only viewport breakpoint: below it the sidebar becomes a band above the page with its own capped height. Every region (sidebar, run header, view body) is a size container; a component adapts by container queries to the region it sits in, never by the viewport.
