@@ -16,7 +16,7 @@ import { tableKey } from "@/table/view-state.ts";
 import { writePref } from "@/ui";
 import { applyStylesheet } from "../../app/layout-testing.ts";
 import { findingsApp, keyOf, MIN, NOW, renderFindings } from "./testing.tsx";
-import { VERDICT_KEY_HINT } from "./verdict.tsx";
+import { allRatedLine, VERDICT_KEY_HINT } from "./verdict.tsx";
 
 // A live fixture run whose second critic of the map reported 14 findings: one page holds every row, and a
 // selection of 12 fits it (the 723-finding run is view.test.tsx's).
@@ -53,6 +53,12 @@ describe("the verdict's words", () => {
     expect(failedCause("Оценка не сохранилась: EACCES: permission denied")).toBe("EACCES: permission denied");
     expect(failedCause("")).toBe("сервер не ответил");
     expect(TOTAL).toBe(18);
+  });
+
+  test("p3-review-critic-craft#craft-4: the line of the list's last finding rated by a key — its value and time first, then the list's words", () => {
+    expect(allRatedLine({ verdict: "wrong-severity", at: "2026-11-15T20:00:00Z" }, NOW)).toBe("не та серьёзность · 15.11 23:00 МСК · в этом списке всё оценено");
+    expect(allRatedLine({ verdict: "wrong-severity", at: "2026-11-15T20:00:00Z" }, NOW).split(" ")).toHaveLength(13);
+    expect(allRatedLine({ verdict: "agree", at: AT }, NOW)).toBe("согласен · 19:41 МСК · в этом списке всё оценено");
   });
 
   test("craft-9, craft-20, craft-24: the value under «Ваша оценка», the short prompt, the note's status words", () => {

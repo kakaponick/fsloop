@@ -232,13 +232,17 @@ export function VerdictControl({ value, lead, note, onNoteChange, onChoose, orde
   );
 }
 
-/** The verdict line of the finding a key rated last when no finding of the list is left without a verdict
- * (improve-14): the keys stop there, and say why. */
-export const ALL_RATED = "В этом списке всё оценено";
+/** The words the verdict line of the finding a key rated last adds when no finding of the list is left without a
+ * verdict (improve-14): the keys stop there, and say why. */
+export const ALL_RATED = "в этом списке всё оценено";
+
+/** «согласен · 19:41 МСК · в этом списке всё оценено»: the saved value and its time first, so the line's cut takes only
+ * the list's words (craft-4). */
+export const allRatedLine = (v: Pick<UserVerdict, "verdict" | "at">, now: number | string): string => `${verdictValue(v, now)} · ${ALL_RATED}`;
 
 /** The detail's verdict, under the article's heading «Ваша оценка»: the choices first, then the note — the saved
  * one, or the draft being typed, with the line that says it is not saved yet. `listRated` — this finding's key rated
- * the list's last one without a verdict: its line says so until the next choice. */
+ * the list's last one without a verdict: its line adds so after the saved value until the next choice. */
 export function FindingVerdict({ finding, verdicts, now, listRated = false }: { finding: Finding; verdicts: Verdicts; now: number; listRated?: boolean }) {
   const saved = finding.verdict;
   const draft = useDraft(verdicts, finding.id);
@@ -248,7 +252,7 @@ export function FindingVerdict({ finding, verdicts, now, listRated = false }: { 
   return (
     <VerdictControl
       value={saved?.verdict ?? null}
-      lead={saved && listRated ? ALL_RATED : saved ? verdictValue(saved, now) : VERDICT_PROMPT}
+      lead={saved && listRated ? allRatedLine(saved, now) : saved ? verdictValue(saved, now) : VERDICT_PROMPT}
       note={note}
       onNoteChange={(text) => verdicts.setDraft(finding.id, text)}
       onChoose={save}

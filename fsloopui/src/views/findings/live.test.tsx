@@ -117,7 +117,7 @@ describe("live updates of «Находки»", () => {
     expect(ids()).toEqual([x]);
     row(x).focus();
     await user.keyboard("1");
-    await waitFor(() => expect(document.querySelector(`tr[data-detail-for="${x}"] [data-slot=verdict-line]`)).toHaveTextContent(new RegExp(`^${ALL_RATED}$`)));
+    await waitFor(() => expect(document.querySelector(`tr[data-detail-for="${x}"] [data-slot=verdict-line]`)).toHaveTextContent(new RegExp(`^согласен · 19:41 МСК · ${ALL_RATED}$`)));
     expect(ids()).toEqual([x]);
   });
 });

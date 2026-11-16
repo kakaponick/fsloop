@@ -8,9 +8,9 @@
 // its page, expands, scrolls to and marks it, «вне фильтра» when the filters hide it.
 //
 // The reading pace (improve-14): keys 1–4 set the verdict of the finding in focus — its row, or anything in its
-// detail — and move on to the next finding without a verdict that the filters keep: on the page, else on the pages
+// detail; with focus elsewhere in the view, the table's current row (craft-6) — and move on to the next finding without a verdict that the filters keep: on the page, else on the pages
 // after it, else from the first page; its detail opened in place of the rated one's when that was open. With none left,
-// the rated finding's detail says so on its verdict line. «Свернуть все находки» — the table kit's part — in the
+// the rated finding's detail says so on its verdict line, after the saved value and its time. «Свернуть все находки» — the table kit's part — in the
 // toolbar's right cluster closes every detail, blocked, with its reason, while none is open.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -48,9 +48,6 @@ export function nextCriticStep(stage: string | null | undefined): Step {
 }
 
 export const EMPTY_LEAD = "Критики ещё не писали отчётов";
-
-/** «Свернуть все находки» while no row is open: the kit's one reason (`src/table/collapse-all.tsx`). */
-export { COLLAPSE_BLOCKED } from "@/table";
 
 /** The rows' noun after «Свернуть все». */
 const COLLAPSE_WHAT = "находки";
@@ -151,7 +148,6 @@ function Findings({ run }: { run: LoadedRun }) {
     return rows.filter((f) => !f.verdict && on.has(f.id)).map(rowId);
   }, [rows, shown]);
   const walk = useRef<Walk | null>(null);
-  const turnTo = (p: number) => replace({ page: p > 1 ? String(p) : null });
   /** Focus on the next finding through the kit's row reveal; its detail opened in place of the rated one's when that
    * was open. */
   const moveTo = (tr: HTMLElement, from: string, wasOpen: boolean) => {
@@ -163,7 +159,10 @@ function Findings({ run }: { run: LoadedRun }) {
     const host = root.current;
     const at = document.activeElement;
     if (!host || !(at instanceof HTMLElement) || !host.contains(at)) return;
-    const tr = at.closest<HTMLElement>("tr[data-row-id], tr[data-detail-for]");
+    // the finding in focus — its row, or anything in its detail; with focus elsewhere in the view (the toolbar, the
+    // status bar) the table's current row, its Tab stop, which the key rates and leaves as the row's own key would (craft-6)
+    const own = at.closest<HTMLElement>("tr[data-row-id], tr[data-detail-for]");
+    const tr = own ?? host.querySelector<HTMLElement>('tr[data-row-id][tabindex="0"]');
     const id = tr?.dataset.rowId ?? tr?.dataset.detailFor;
     const finding = id ? rows.find((f) => f.id === id) : undefined;
     if (!id || !finding) return;
@@ -177,6 +176,7 @@ function Findings({ run }: { run: LoadedRun }) {
       // none left in the list: the keys stop here and its detail says why
       setListRated(id);
       if (!wasOpen) onOpenChange([...open, id]);
+      if (!own && tr) revealRow(tr);
       return;
     }
     const shown = pageRows(host);
@@ -184,7 +184,7 @@ function Findings({ run }: { run: LoadedRun }) {
     if (next) return moveTo(next, id, wasOpen);
     // none after it on this page: the page turns, through the URL's page as any page turn does
     walk.current = { from: id, open: wasOpen, page: page + 1, seen: shown.map(idOf), start: page, wrapped: false };
-    turnTo(page + 1);
+    onPageChange(page + 1);
   });
   // a page the keys turned to, once the table shows it: its first finding without a verdict, else the page after it;
   // past the last page (the table kept its rows) the walk goes on from the first, and stops at the page it started on
@@ -196,7 +196,7 @@ function Findings({ run }: { run: LoadedRun }) {
     const ids = shown.map(idOf);
     if (!w.wrapped && ids.join("\n") === w.seen.join("\n")) {
       walk.current = { ...w, page: 1, seen: ids, wrapped: true };
-      turnTo(1);
+      onPageChange(1);
       return;
     }
     const rest = new Set(left.filter((x) => x !== w.from));
@@ -207,7 +207,7 @@ function Findings({ run }: { run: LoadedRun }) {
       return;
     }
     walk.current = { ...w, page: w.page + 1, seen: ids };
-    turnTo(w.page + 1);
+    onPageChange(w.page + 1);
   });
 
   // ── the row menu (table #4) and the verdict dialog ─────────────────────────────────────────────
