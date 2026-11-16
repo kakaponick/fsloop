@@ -14,7 +14,7 @@ SHAPE:
   3. **Read the list.** The typical state is the full table, sorted by severity rank. The user reads the rows, narrows them with «Вид», the search (`/` focuses it) or a filter, and gets either the narrowed rows or the filtered-to-none empty state. That state names the active filters and offers «Сбросить фильтры» (`ui` → Empty states).
   4. **Expand a finding.** A click or Enter expands the row in place (Tables 3). Several rows may be open at once, and open rows survive refreshes (Live data 3).
   5. **Look at a frame.** A thumbnail opens the frame viewer: ‹ ›, ←/→ and the wheel step through it; Escape returns focus to the thumbnail (Layout 7).
-  6. **Set a verdict.** The user sets it in the detail, or through «Оценить…» in the row menu, where it applies to one row or to a selection with one note. It shows at once («Ваша оценка: согласен · 19:41 МСК»). If the write fails, the row reverts, the note text stays in its field, and a toast «Оценка не сохранилась: <причина>» with «Повторить» stays until closed (Conventions 6).
+  6. **Set a verdict.** The user sets it in the detail, or through «Оценить…» in the row menu, where it applies to one row or to a selection with one note. It shows at once («Ваша оценка: согласен · 19:41 МСК»). In the detail, keys 1–4 set the verdict of the finding in focus and move focus to the next row of the page with no verdict, its detail opening in place of the rated one's when that was open; the caps show in the tooltip «Выбрать клавишами 1 2 3 4» over the toggles, and the dialog has no keys. If the write fails, the row reverts, the note text stays in its field, and a toast «Оценка не сохранилась: <причина>» with «Повторить» stays until closed (Conventions 6).
   7. **Live update.** A changed row updates in place with an edge mark (Conventions 9). New findings, and rows a live change moves, gather in one strip at the table's end: «12 новых находок · показать». A row that left the filter stays where it was, marked «вне фильтра», and the strip says «убрать» or «обновить список» (Live data 2).
   8. **Link to a finding.** `?finding=<id>` opens the run, goes to that finding's page, expands, scrolls to and marks the row. If the filters hide it, it shows anyway, marked «вне фильтра». An id the run does not hold reads «Находка <id> не найдена» (Conventions 5 and 12).
   9. **Shell states.** The lost-connection strip and the read errors belong to the shell and the run frame (u3: Live data 5, Conventions 13). This view adds no copy of them.
@@ -29,8 +29,8 @@ SHAPE:
   - **Other limits:** text up to 1920 characters. Across all runs, 13 status words (`statusOf`). Units per run 0/14/42. Frames per run 0/8/289, with up to 8 linked to one finding.
   - **Pagination:** 50 rows a page by default, so the volume run is 15 pages (`table #1`). The whole run's data reaches the client and is filtered there (`rules/ui` → Tables 1).
   - **Width budget at 1280 px,** taking the prototype's 316 px sidebar:
-    - fixed columns: checkbox 32, «Серьёзность» about 92, «ID» about 84, «Отчёт» 160 (resizable), «Состояние» about 136, «Оценка» about 128;
-    - that totals about 632 px, which leaves «Находка» about 300 px.
+    - fixed columns: checkbox 32, «Серьёзность» 116, «ID» 112, «Отчёт» 200 (resizable; it clears «runtime · проход 1 · приёмка», the widest launch name of the 723-finding run), «Состояние» 156 (it clears «не исправлена · f10»), «Оценка» 136 (it clears «не та серьёзность»);
+    - «Находка» keeps a floor of 154 px, so 1280 px holds the table whole (924 of 924 px); at 1440 it gets about 322 px.
     - «Место» (location) is therefore off by default, but searchable and shown in the detail (`table #10`, Tables 5).
 - LEADS:
   - Before any filter, the user first reads the critical and major rows that still need someone, in this sort order:
@@ -42,10 +42,11 @@ SHAPE:
 - ACTIONS:
   - **Toolbar:** no main action. The view's object is a read-only list, and its one write is per finding (`table` → Contract vs. chrome: no dead chrome; no Refresh, because the data is live).
   - **Toolbar controls, in this order (`table #14`):**
-    1. «Вид» select with counts (Conventions 16);
+    1. «Вид» select with counts (Conventions 16): Все · Без оценки · С возражением (every verdict but «согласен») · В исправление · Кандидаты · Закоммичены;
     2. search with history, pinned. Identifier tokens (id, location, unit ids, report) are OR-matched; free-text tokens (rule, action, why, raw) are AND-matched. Placeholder «Текст, файл, id, юнит» (`table #12`);
-    3. filters, each with counts over the unfiltered set (`table #11`): «Серьёзность» select · «Состояние» select · «Отчёт» combobox (up to 32 reports) · «Юнит» combobox (up to 42) · «Оценка» select · «Охват» select · «Правка» select (the `/impeccable` verb; keeps map row 33). The last two collapse first into `…`;
-    4. the columns menu (`table #3`).
+    3. filters, each with counts over the unfiltered set (`table #11`): «Серьёзность» select · «Состояние» select · «Отчёт» combobox (up to 32 reports) · «Юнит» combobox (up to 42) · «Оценка» select (its first option «с возражением», explained in the header's glossary) · «Охват» select · «Правка» select (the `/impeccable` verb; keeps map row 33). The last two collapse first into `…`;
+    4. «Свернуть все находки» — an icon-only 28 px button in the right cluster, its box always held, invisible while no row is open; a click closes every open detail;
+    5. the columns menu (`table #3`).
   - **Row context menu (`table #4`):**
     - «Открыть» (expand/collapse; the default pin, Tables 3);
     - «Оценить…» — single and multi; a dialog with the four verdicts and one note; on a selection its title is «Оценка для 12 находок» (Conventions 6, `ux 6`);
@@ -87,8 +88,8 @@ SHAPE:
     - **`FindingRow` cells:**
       - «Серьёзность»: dot + word, with a glossary;
       - «ID»: mono;
-      - «Находка»: the first sentence as written, width-free; for a loose finding, its `raw`;
-      - «Отчёт»: compact launch name such as «craft · notifications» or «u2 · реализация»;
+      - «Находка»: the first sentence as written, width-free; for a loose finding, its `raw`; on a row with frames, a picture icon and their number after the sentence («2 кадра» in its title);
+      - «Отчёт»: compact launch name such as «craft · notifications» or «u2 · реализация»; sorting by it reads the run's reports in order (the stage's rank, then the run's order);
       - «Состояние»: the compact form from Conventions 1, e.g. «в работе · u3» or «кандидат»; with a glossary of at most 8 entries for the values that leave a question;
       - «Оценка»: the compact verdict or «—»;
       - hidden by default: «Место», «Уверенность», «Охват» (each with a glossary), «Этап».
@@ -98,7 +99,7 @@ SHAPE:
       - «Решение прогона»: the full status form, each unit as «u3 «title» — закоммичен» linked to `?view=units&unit=u3`, then the why;
       - «Оценка», using `VerdictControl`;
       - «Кадры».
-    - **`VerdictControl`:** four options and a note, with the saved line. One component, used by both the detail and the dialog.
+    - **`VerdictControl`:** four options and a note, with the saved line. One component, used by both the detail (the choices first, keys 1–4) and the dialog (the note first, no keys).
 - OPTIONS:
   - **A. One flat findings table** under the full table contract, rows expanding in place. It serves `table #1–15`, `rules/ui` → Tables 1/3/5, Conventions 16 and `ux 6`. It strains one prototype function: map row 35, the group header by surface with its scores. That function moves to the «Отчёт» column and filter plus the «Открыть отчёт» item; the scores live on the «Отчёты» rail (`ux 2`).
   - **B. The same table grouped by report,** with group header rows showing count and scores (the prototype's «Лента»). It serves reading by critic. It strains `table #2`, because sorting crosses groups; `#1`, because pages split groups; `#5`, because a group row is not selectable; and `ux 2`, because the scores repeat «Отчёты».
@@ -127,7 +128,7 @@ ASSUMPTIONS:
 - "Who builds the data table, the running-text renderer, the frame viewer and the held-order strip?" — u2, as shared components, because u4, u5 and u6 run in parallel and each needs them. Otherwise two units build them twice — assumed (journal j10 makes u2 the design system); the design check should confirm it
 
 CANDIDATES:
-- «Свернуть все» in the toolbar's right cluster, for when many details are open
-- A «Сортировать по отчёту» preset that brings back the prototype's reading order without group rows
+- (Built in pass 2: «Свернуть все находки» in the toolbar's right cluster.)
+- (Built in pass 2 as a sort, not a preset: sorting by «Отчёт» brings back the prototype's reading order without group rows — Conventions 16 leaves the sort alone when a «Вид» is chosen.)
 - Withdrawing a verdict («снять оценку»), which would need a new verdict value in `fsl.mjs`'s `HUMAN_VERDICTS`
-- A per-row count of frames in the «Находка» cell, so rows with frames are visible before expanding
+- (Built in pass 2: a per-row count of frames in the «Находка» cell.)

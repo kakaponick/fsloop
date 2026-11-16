@@ -45,12 +45,12 @@ One word per concept on every surface (`rules/ui` → Copy 2). State words come 
 | этап | A stage of a pass: настройка проекта, карта, разведка, декомпозиция, юниты в работе, ревью, исправление, проверка исправлений, приёмка, интеграция, завершение |
 | юнит | One piece of work a run cuts from its goal, with a brief, an implementer and a commit |
 | находка | One defect a critic or an implementer reported, with its rule, observation and fix |
-| отчёт критика | What a critic launch wrote: its findings, scores and sections |
+| отчёт критика | What a critic launch wrote: its findings, scores and the other parts of the report («части отчёта»: «Не проверено», «Идеи», «План правок», «Допущения» …) |
 | отчёт запуска | What any other agent launch wrote: the map, an implementer's result, research |
 | запуск агента | One agent the run started: a critic, an implementer, the map, research |
 | кадр | A screenshot of a surface the run took for its critics (`shots/*.png`) |
 | соглашение прогона | A design decision the run's design check fixed once for every unit |
-| журнал решений | The run's own decisions taken without the operator, with why (`journal.md`) |
+| журнал решений | The run's own decisions taken without the operator, with why (`journal.md`); each entry is one «решение», by its number («решение #12») |
 | оценка | The operator's verdict on a finding: согласен, не согласен, не та серьёзность, ложная находка |
 | решение прогона | What the run decided about a finding: в исправление, кандидат, открыта, дубликат, отклонена, отброшена, без решения |
 | critical | A finding that breaks work or data: read first |

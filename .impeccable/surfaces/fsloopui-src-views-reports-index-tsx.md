@@ -12,7 +12,7 @@ SHAPE:
   1. The user arrives from the tab strip, the «N запусков агентов» fact in the header, a finding's «Отчёт» link (u4) or a journal ref. The view opens on the rail of launches and the overview: no report chosen, the surfaces ranked by critical + major.
   2. The user narrows the rail by search, «Агент», «Линза» and «Раздел». Filtered to none, the view names the active filters and offers «Сбросить».
   3. The user picks a report (click, or ↑/↓ then Enter). This pushes `?view=reports&report=<launch id>`.
-  4. The user reads the facts, then switches section tabs. Each tab has a count, and the tab is in the URL (`&tab=`).
+  4. The user reads the facts, then switches the report's parts — the tabs «Части отчёта». Each tab has a count, and the tab is in the URL (`&tab=`); a strip too wide for the reader folds its tabs from the right into «Ещё N». ‹ › beside the title, or K / J, open the previous and the next report of the rail.
   5. The user follows a finding to «Находки» (`finding=`), a unit to «Юниты», or a frame to the viewer.
   6. Back returns to the same report, tab and scroll position (`rules/ui` → Layout 2, Conventions 12).
 - WALK states, «Отчёты»:
@@ -21,20 +21,23 @@ SHAPE:
   - filtered to none;
   - launch still running (`run.json` → `running[]`): neutral «пишет отчёт · 4 мин», and the reader shows its facts plus «Отчёт появится, когда запуск закончит»;
   - report file missing or unreadable: «Отчёт <file> не прочитан: <причина>» in the reader's place, with the rest of the run shown (Conventions 14);
-  - report partly parsed (`unparsed` lines): one line «N строк не разобраны — они на вкладке «Файл отчёта»»;
-  - a report with no sections (the map, a free-form report): only «Файл отчёта»;
+  - report partly parsed (`unparsed` lines): one line «N строк не разобраны — они на вкладке «Файл отчёта»», or «… — они в тексте отчёта ниже» when the file is the report's only part;
+  - a report with no parts of its own (the map, a free-form report): the file alone, with no tab strip; a file with three or more top-level headings opens with «Содержание отчёта»;
+  - the report file could not be read: «Повторить» reads it again;
   - an unknown id in the URL: «Отчёт <id> не найден» (Conventions 5);
   - live, a new launch arrives: it waits in the rail's strip;
   - live, the open report is rewritten: the reader updates in place and keeps scroll and tab (Live data 3);
   - connection lost: u3's strip.
 - WALK, «Соглашения»:
-  - the user arrives from the tab, or from the CONVENTIONS tab of a design-check report;
+  - the user arrives from the tab, or from a line of a design-check report's «Соглашения» part, whose ordinal links to `?view=conventions&convention=<n>`: the view scrolls to that convention, marks it and moves focus to it; an unknown n reads «Соглашение 99 не найдено: в этом прогоне его нет — проверьте ссылку»;
+  - the user narrows the list by the search over task, solution, example and rule; a group with no match is hidden, no match at all is the filtered empty state;
   - conventions are grouped by design-check launch, with a link to its report;
   - not yet: before decompose, «появятся на этапе «декомпозиция»»;
   - never: past decompose, or the run closed, with no design check: «В этом прогоне проверки дизайна не было», plus one sentence on when it runs (ux 0).
 - WALK, «Журнал»:
-  - the user arrives from the tab, or from a ref on another surface (`#j<n>`: the page scrolls to the entry and marks it);
-  - the user filters by search and «Этап»; filtered to none offers «Сбросить»;
+  - the user arrives from the tab, or from a ref on another surface (`?view=journal&entry=<n>`: the view scrolls to the entry, marks it and moves focus to it); an unknown number reads «Решение 999 не найдено: в этом прогоне решения #1–#143.» with «Закрыть»;
+  - from 52 rem of the view, the stage rail beside the list: each stage of the entries shown with its count opens its first entry, «Последнее решение» the last one shown, «Перейти к #» an entry by its number;
+  - the user filters by search and «Этап»; filtered to none offers «Сбросить фильтры»;
   - a ref goes to a finding, unit, launch, another entry, judge or pass;
   - a ref whose object is gone reads «не найден»; a `—` ref shows nothing;
   - live: new entries wait in a strip at the list's end.
@@ -70,28 +73,31 @@ SHAPE:
   - Neither «Соглашения» nor «Журнал» is in the run page's first viewport (Layout 3.6).
 - BLOCKS, «Отчёты» region by region:
   1. View toolbar: the adaptive toolbar role holding search plus «Агент», «Линза» and «Раздел» (`table #14`, `ui` → Widths).
-  2. Rail: one flat list with one Tab stop (`rules/ui` → Conventions 8). The keyboard part is shared with u3's sidebar card list, not re-written. The rail is height-bounded and scrolls inside. It has non-focusable stage headings (stage word from the shared stage map, «проход k», a count) and launches in run order. Each item shows the description (truncates; full text in its title) and a kind word from one agent-kind map (Conventions 1). Each item also shows either the status dot + «2 major · 5 minor» or a neutral state («пишет отчёт · 4 мин»). A held-order strip at the bottom reads «2 новых отчёта · показать» (Live data 1, `ui` → Live data). The edge mark for a fresh item follows Conventions 9.
-  3. Reader header: identity is the description as title, the launch id in mono, and the report path as a copy button. Then the fact-list role (`ux 9`):
+  2. Rail: one flat list with one Tab stop (`rules/ui` → Conventions 8). The keyboard part is shared with u3's sidebar card list, not re-written. The rail is height-bounded and scrolls inside. It has non-focusable stage headings (stage word from the shared stage map, «проход k», a count) and launches in run order. Its first item is «Обзор: оценки и токены». Each item shows the description (truncates; full text in its title) and, where its kind differs from the group's most common one, a kind word from one agent-kind map (Conventions 1; the kind is always in the title). Each item also shows either the status dot + «2 major · 5 minor» or a neutral state («пишет отчёт · 4 мин»). A held-order strip at the bottom reads «2 новых отчёта · показать» (Live data 1, `ui` → Live data). The edge mark for a fresh item follows Conventions 9.
+  3. Reader header: identity is the description as title with ‹ › to the previous and the next report (K / J; at an end the control stays, its reason in the tooltip), the launch id in mono, and the report path as a copy button. Then the fact-list role (`ux 9`):
      - Outcome: finished or running with its age, then findings by severity or the RESULT.
      - Verdict, craft reports only: «аудит 17/20 · критика 28/40» per surface the report scores, with the series across stages from `run.json` → `surfaces[key]`. Each stage's score links to that stage's report.
      - Facts: agent, model, stage · pass, unit (a link), start time in МСК, duration through the shared duration function, and spend in tokens (input / output).
      - «Подробнее», open state persisted (Layout 3.4): cache read/write, boot, child launches, agent id, and the transcript path or «удалён».
-  4. Frames of the report's surface: thumbnails (up to 16, then «ещё N») with boxes reserved before load. They open in the shared frame viewer (Layout 7). This keeps Map 46.
-  5. Section tabs: the tabs primitive, content width. The set is fixed per agent kind, so two reports of one kind never shift the strip. Each tab has a count; a zero is a muted «0», and its body reads «Критик ничего сюда не записал.» (Map 55).
-     - Critic: Находки · Не проверено · Идеи вне прогона · Порядок правок · Допущения, then the sections its lens adds (JUDGED, VERDICT, ROWS, CONVENTIONS, SHAPE).
-     - Implementer: its RESULT … VERIFY sections.
-     - Every kind ends with «Файл отчёта», the whole `.md` rendered. This is the debug view `ux 9` keeps, so no fact is lost.
+  4. Frames of the report's surface, or those its findings cite: the «Кадры» part, only where the report has frames, for every kind — «Кадры раздела <key>» (or «Кадры из находок отчёта») then thumbnails (up to 16, then «ещё N») with boxes reserved before load. They open in the shared frame viewer (Layout 7). This keeps Map 46.
+  5. The report's parts, «Части отчёта»: the shared sticky `CountTabs`, content width, pinned to the top of the reader while the report scrolls; what does not fit folds from the right into a 64 px «Ещё N» menu («Другие части отчёта»), the open tab and «Файл отчёта» never folding. The set is fixed per agent kind (and lens), so two reports of one kind never shift the strip. Each tab has a count; a zero is a muted «0», and its body reads «Критик ничего сюда не записал.» (Map 55).
+     - Critic: Находки · Не проверено · Идеи · План правок · Допущения, then the parts its lens adds (JUDGED «Решённые вопросы», VERDICT «Вердикты», ROWS «Строки паритета», CONVENTIONS «Соглашения», SHAPE «Форма раздела»), then «Сравнение» where an earlier report scored the same surface, then «Кадры». Each critic part opens with one muted line on what it holds.
+     - Implementer: Итог · Файлы · Тесты · Заметки · Находки · Паритет · Проверка кода, then «Кадры».
+     - Every kind ends with «Файл отчёта», the whole `.md` rendered. This is the debug view `ux 9` keeps, so no fact is lost. A report whose only part is its file draws no tab strip.
   6. Section bodies, at a capped reading measure of about 75 characters (Layout 5; impeccable `mode-read`):
-     - «Находки»: a severity segmented filter (Map 54), then the shared finding article. It is the same component as u4's expanded detail (rule, observation, fix, operator's question, decision, frames), plus «Открыть в находках».
-     - Other sections: numbered running-text items. Finding ids, unit ids and launch ids become links.
+     - «Находки»: a severity toggle in words (Map 54; the choice kept per view in the browser), then the shared `ExpandingFindings` list: u4's compact rows, one Tab stop, ↑/↓ and Enter, each expanding in place into «Открыть в находках» and the same finding article as u4's expanded detail (rule, observation, fix, operator's question, decision, frames).
+     - «Сравнение»: the parts counted in the earlier report and now, then «Новые», «Повторились», «Не повторились» as finding rows — matched only by the run's own `duplicateOf` / `repeatedBy` links.
+     - «Соглашения»: each line leads with its convention's run-wide number, a link to it in «Соглашения».
+     - Other parts: numbered running-text items. Finding ids, unit ids and launch ids become links.
      - Markdown tables in «Файл отчёта» (the map has eight) scroll sideways in their own bounded container.
-  7. Overview (no report chosen): the surfaces ranked by critical + major. Each is one running-text line: the key in mono, then «аудит 16 → 17 → 16 из 20 · критика 27 → 27 → 29 из 40», each number a link to its stage's report.
+  7. Overview (no report chosen, the rail's «Обзор: оценки и токены»): the surfaces ranked by critical + major. Each is one running-text line: the key in mono, then «аудит 16 → 17 → 16 из 20 · критика 27 → 27 → 29 из 40», each number a link to its stage's report. Then «Расход токенов»: «По этапам» and «По агентам», a fact list each, «N запусков агента · X токенов» with the split in the title; «не записано: в записях запусков прогона нет токенов» when the launches recorded none.
   8. Status bar role: «97 запусков · показано 12 · данные от 19:41 МСК».
-- BLOCKS, «Соглашения»: one reading column. An intro line: «Одно решение на задачу, которую юниты решали бы по-разному; в конце прогона попадают в `.claude/rules/ui.md`». Then a heading per design-check launch, linking to its report, followed by an ordered list of conventions as written (Copy 1; the shared markdown renderer, Map 65); the empty state; the status bar.
+- BLOCKS, «Соглашения»: one reading column. A one-line caption, small and muted: «Соглашение — одно решение на задачу, которую юниты решали бы по-разному; в конце прогона соглашения попадают в `.claude/rules/ui.md`.» Then the adaptive toolbar with the pinned search (placeholder «Задача, решение, пример, правило»), shown when the run has conventions and its folder was read. Then a heading per design-check launch, linking to its report, followed by its conventions in order, each an article at its own address: its run-wide number in a 3ch box (a link to that address) and the pattern, the solution beside them from 56 rem of the view (a 17 rem pattern column) and under them below it, then «Пример» — running text as written, each place a copy button where it stands («Скопировано: <место>») — and «Правило», «не записано» where the check wrote none (Copy 1; the shared markdown renderer, Map 65); the empty state; the status bar («1 из 26 соглашений»).
 - BLOCKS, «Журнал»:
-  - Toolbar: search plus a «Этап» combobox.
-  - One reading column of entries in `#` order. Each entry is an article with an anchor `#j<n>`: a header «#n · <stage word>», the question as its heading, labelled blocks «Решение» and «Почему» as running text (Layout 5), and «Ссылки».
-  - Each ref is rendered by one shared ref-link part. It resolves the kind to an address (finding → `?view=findings&finding=`, unit → `?view=units&unit=`, launch or judge → `?view=reports&report=`, journal → `#j<n>`, pass, text → plain). A missing object gets the «не найден» part (Conventions 5).
+  - Toolbar: search (placeholder «Вопрос, решение, почему, этап, id») plus «Этап».
+  - One reading column of entries in `#` order, a flat list with one Tab stop (↑/↓, Home/End; an entry's links take Tab only while focus is inside it). Each entry is an article at `?view=journal&entry=<n>`: a header «#n · <stage word>», the question as its heading, then «Решение», «Почему» as running text (Layout 5) and «Ссылки» («—» when it has none). Its context menu copies its address: «Скопировать адрес решения».
+  - From 52 rem of the view, a 14 rem stage rail «Этапы журнала» beside the list, each column scrolling on its own: the stages of the entries shown with their counts, the stage in view marked, then «Последнее решение #n» and «Перейти к #». Below 52 rem it is hidden.
+  - Each ref is rendered by one shared ref-link part. It resolves the kind to an address (finding → `?view=findings&finding=`, unit → `?view=units&unit=`, launch or judge → `?view=reports&report=`, journal → `?view=journal&entry=`, pass, text → plain); its fact reads on up to two lines. A missing object gets the «не найден» part — «решение 12 не найдено» for an entry (Conventions 5).
   - A held-order strip: «3 новых решения · показать».
   - The status bar.
 - BLOCKS, new components (none of these exists in the repo; shared with u4 or u3, never one-offs, recorded in `DESIGN.md`):
@@ -130,7 +136,7 @@ ASSUMPTIONS:
 - Who owns the finding article, the frame viewer, the markdown renderer and the ref link when u4 and u6 run in parallel. Assumed: u2 or the design check assigns one owner. Two copies would break `code` → No duplication and Consistency (impeccable critique heuristic 4).
 - Whether the overview of surface scores is a data table under `law/table.md`. Assumed: no, a running-text list (at most 28 lines), so it takes no table contract.
 CANDIDATES:
-- Spend totals per stage and per agent kind in the «Отчёты» status bar or overview: tokens by stage, which the run already records (`spend`).
+- (Built in pass 2: «Расход токенов» by stage and by agent kind in the overview.)
 - Verdicts on journal entries and launches through `human.jsonl`, which `fsl.mjs` already reads; it needs a rules change (Conventions 6).
-- Compare a surface's two craft reports (p1-map against p2-assess) section by section: findings that disappeared or appeared.
+- (Built in pass 2 as «Сравнение», against the report that scored the surface before; findings matched by the run's own links only.)
 - Sort the rail by spend or duration, to find the costly launches; it needs option 2's table, so it waits for evidence of the need.

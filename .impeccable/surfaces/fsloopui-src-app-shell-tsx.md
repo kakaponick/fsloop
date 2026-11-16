@@ -16,7 +16,7 @@ SHAPE:
   (7) The open run's folder vanishes: the page frame turns to not-found, «Прогон <id> не найден: его папки больше нет в <корень>», and the card stays marked until the strip is clicked.
   (8) Read error: «Прогон <id> не прочитан: <причина>» with «Повторить». A single unreadable file fails in its own place. `rules/ui` → Conventions 13, 14.
   (9) A run folder without `run.json`: it opens. Identity shows, the outcome row reads «не записано: в папке нет run.json» with a neutral dot, and the views show «empty because not yet». `rules/ui` → Conventions 4, 15.
-  (10) Narrow viewport: below the shell's one breakpoint the sidebar becomes a band above the page with a capped height. `rules/ui` → Layout 1.
+  (10) Narrow viewport: below the shell's one breakpoint the sidebar becomes a band above the page; its run list is a fixed 128 px from the first paint, four whole 32 px rows (a fold's header is one). `rules/ui` → Layout 1, Strict 1.
   (11) No runs under the root: «В <корень> нет прогонов fsloop. Новый появится здесь сам, когда fsloop создаст его папку». `rules/ui` → Conventions 15.
 - RANGES: production has 5 projects and 63 run folders: 3 live (full cards), 4 open and silent for 6–25 days, 53 closed, 3 without `run.json`. Empty: 0 runs (the root empty state) and 0 running (one muted line in the running group, the folds still below).
   Volume: the closed group shows all 53 mini rows (the prototype's first-40 cap is dropped, `ux 6`) and scrolls inside the sidebar.
@@ -25,23 +25,23 @@ SHAPE:
   Same-named projects: no collision today, but the key is made unique by construction (see ASSUMPTIONS).
 - LEADS: on the sidebar, the running group's cards first; per card: project · id · liveness, then the state row (stage · проход k из N · step, a red gate or blocked unit as an amber outcome line). On the run page: identity (project · id, goal), then the outcome rows of the fact list (stage, liveness, a gate or blocked unit), then the Находки tab. State, next step and product all sit in the first viewport. `ux 9` (Done when); `rules/ui` → Layout 3.
 - ACTIONS: none destructive (`rules/ui` → Scope: read-mostly). There is no page-level toolbar action for a run, and a card has no row actions: the card is one link (`rules/ui` → Conventions 8).
-  Controls: open a run (card or mini row; ↑/↓ and Enter, one Tab stop); fold and unfold «Не закрыты и давно молчат» and «Закрытые» (state kept in browser storage); the strip's verb «показать» (held order); «Подробнее» in the facts (open or closed as last left); expand the goal; the view tabs (←/→ inside the tab strip); «Повторить» on a read error.
+  Controls: the sidebar's search over project, id and goal (placeholder «Проект, id, цель», every word AND-matched, its terms in a history; no `/` cap — `/` is the view's search); open a run (card or mini row; ↑/↓ and Enter, one Tab stop); fold and unfold «Не закрыты и давно молчат» and «Закрытые» (state kept in browser storage); the strip's verb «показать» (held order); «Подробнее» in the facts (open or closed as last left); expand the goal; the view tabs (←/→ inside the tab strip); «Повторить» on a read error.
   Consciously dropped: the variant switcher and its ←/→ (Map #22, #58; they become the tabs); the snapshot auto-refresh (#60); the footer hint (#61).
 - ENTRY: the app root `/` at 127.0.0.1:4747. The sidebar is the navigation; its head reads «fsloopUI», then «Прогоны» with «3 прогона идут» (`rules/ui` → Copy 3). The run page is at `/r/<project>/<id>?view=<view>` (plus `tab`, `unit`, `finding`, page from u4–u6). It is entered from a card, a mini row, a pasted URL, or a link to a finding. Its tab counts are the counts that link into the views (`rules/ui` → Conventions 7, 12). The tab title is `fsloopUI · <project> · <id> · <stage>`, with «● » prefixed on a hidden change.
 - BLOCKS:
   - Shell: a grid of a fixed sidebar column (316 px, the prototype's) and `minmax(0,1fr)`. The one viewport breakpoint is 980 px. Sidebar, header and view body are each a size container, and each region scrolls on its own (replaces Map #64).
-  - Sidebar head: the product name and the running count.
+  - Sidebar head: the product name and the running count, then the search; no match reads the filtered empty state «Нет прогонов, подходящих под фильтры» with «Сбросить фильтры».
   - Running group: full cards. Card (prototype `.card`) layout:
     - Top line: project bold · id mono · «новое» (neutral) · liveness status dot + label.
     - Goal: a 2-line clamp with no tooltip and no trigger; the full goal is on the page it opens (`ui` → Truncation, Tooltip).
     - «Настройки» row: mode · проходы · до K юнитов сразу · models · зеркало .spike.
     - «Состояние» row: stage · проход k из N · step, «с 19:41 МСК»; the unit distribution bar plus «2 из 20 юнитов закоммичено · 3 в работе»; «идёт 2 ч 05 мин · 34 запуска агентов · 2 коммита».
     - Outcome lines: «красный гейт: …» and «заблокирован u7 — …», read from `now.waitingOn.lastRedGate` (fixes Map gap 3.11).
-  - Folds «Не закрыты и давно молчат · 4» and «Закрытые · 53»: mini rows (prototype `.mini`) of project · id · date МСК · outcome or «молчит · 23 д».
+  - Folds «Не закрыты и давно молчат · 4», «Закрытые · 53» and «Без записи о прогоне · 3», each header one 32 px row with its hairline on the trigger: mini rows (prototype `.mini`) of project · id · outcome or «молчит · 23 д», the project cut first, no clock time on the face (it is in the row's title, named: «последняя запись 12:41 МСК», «закрыт 15.11 23:40 МСК»). A closed run's mini row has a second reserved line, «закрыт <МСК> · <goal>». A run changed since it was last opened wears the edge mark, «новое» in its name and title.
   - Held-order strip: one shared component with u4's «вне фильтра» strip (`ui` → Live data). It is new; no component exists.
   - Run page frame:
     - Page header role: identity only, «project · id».
-    - Then a head band: the goal (clamped) and the fact list side by side above the narrowest supported width, stacked below it. The fact list is a new shared component for an empty role (`ui` → Roles: fact list): outcome rows (Этап, Активность, a gate or blocked row, Юниты), the verdict row for closed runs only («цель достигнута · отправлен»), then facts (Режим, Модели, Начат, Длительность, Запуски агентов, Коммиты), then «Подробнее» (зеркало, рабочая копия, сессии, папка прогона, версия).
+    - Then a head band: the goal (clamped) and the fact list side by side above the narrowest supported width, stacked below it. The fact list is a new shared component for an empty role (`ui` → Roles: fact list): outcome rows (Этап, Активность, a gate or blocked row, Юниты), the verdict row for closed runs only («цель достигнута · отправлен»), then facts (Настройки), then «Подробнее» (Начат, Длительность, Запуски агентов, Токены, Проходы — only where the run has N passes, «Загрузка…» in its one line until the run is read — Коммиты, Зеркало .spike, Рабочая копия, Сессии, Папка прогона, Версия run.json). «Ждёт вас» holds two to six lines; causes past its last line read «ещё N · показать». A run that closes while open keeps the header's running height.
     - Then the tab strip (primitives tabs, content-width, a count on each, a muted «0»).
     - Then the view body (u4–u6), the lost-connection strip above it, and the status bar (data age).
   - Shared blocks: tokens `--f-*` (template.html:8–9), the status dot with tones from one state map (`rules/ui` → Conventions 1), the empty-state role, the framed spinner, and the one duration and time function (`rules/ui` → Conventions 10).
@@ -83,4 +83,4 @@ ASSUMPTIONS:
 
 CANDIDATES:
 - Group or filter the 53 closed runs by project in the sidebar once the count passes about 100.
-- Show each run's spend (`summary.json` → `spend`) as a «Подробнее» fact.
+- (Built in pass 2: «Токены» in «Подробнее», the run's spend from its launches and sessions.)
