@@ -4,7 +4,6 @@
 import type { Finding, UserVerdict } from "../../shared/model.ts";
 import { NOT_RECORDED, VERDICT } from "../../shared/states.ts";
 import { count, mskTime } from "../../shared/text.ts";
-import { notFoundText } from "@/ui";
 
 /** The detail's sections, in reading order (surfaces/findings.md → BLOCKS → FindingDetail). */
 export const SECTION = {
@@ -87,11 +86,6 @@ export const verdictTitle = (ids: readonly string[]): string => (ids.length === 
 
 /** The row menu's item that opens the dialog. */
 export const RATE_ACTION = "Оценить…";
-/** The toolbar's icon control that closes every open detail: its name and tooltip (cand-1). */
-export const COLLAPSE_ALL = "Свернуть все находки";
-/** The verdict toggles' tooltip in the detail, before the four keys' caps in the toggles' order: «Выбрать клавишами
- * 1 2 3 4». */
-export const KEY_HINT = "Выбрать клавишами";
 
 /** The failed write's toast: its title, and the cause under it without the server's own copy of the title. */
 export const SAVE_FAILED = "Оценка не сохранилась";
@@ -101,10 +95,8 @@ export const failedCause = (cause: string): string => cause.replace(/^Оценк
 export const findingToggle = (local: string, open: boolean): string => `${open ? "Свернуть" : "Развернуть"} находку ${local}`;
 export const OPEN_IN_FINDINGS = "Открыть в находках";
 
-/** «Находка p1-review-critic-code#code-99 не найдена» — a link to an id the run does not hold. */
-export const findingNotFound = (id: string): string => `${notFoundText("finding", id, { start: true })}${NOT_FOUND_NEXT}`;
-/** What follows «Находка <id> не найдена»: why, and what to do. */
-export const NOT_FOUND_NEXT = ": в этом прогоне её нет — проверьте ссылку";
+// A link to a finding the run does not hold reads the one not-found line, `MissingLine` of `@/ui`, with the run's count
+// of findings (improve-13): «Находка … не найдена: в этом прогоне 723 находки.»
 
 /** The «Отчёт» cell and fact: the compact launch name; the run's own finding is «прогон»; a critic's finding whose
  * launch the record lacks reads «не записано» (Conventions 4). */

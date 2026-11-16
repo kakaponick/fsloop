@@ -135,6 +135,8 @@ function AbsentSection() {
             <MissingLine kind="entry" id="999" range={["1", "143"]} slot="kit-entry-missing" onClose={() => {}} />
             <MissingLine kind="convention" id="99" range={["1", "26"]} slot="kit-convention-missing" onClose={() => {}} />
             <MissingLine kind="convention" id="3" range={null} slot="kit-convention-none" onClose={() => {}} />
+            <MissingLine kind="finding" id="x#none-1" count={723} slot="kit-finding-missing" onClose={() => {}} />
+            <MissingLine kind="unit" id="u99" ids={["u1", "u32", "f1", "f10"]} slot="kit-unit-missing" onClose={() => {}} />
           </div>
         </Case>
         <Case label="Поле не записано">

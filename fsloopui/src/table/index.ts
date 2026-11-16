@@ -4,7 +4,7 @@
 export { assertLayout, clampWidth, defaultColumns, fitsRegion, FRAME, headerWidth, mergeWidths, moveColumn, placeColumns, SELECT_WIDTH, SLACK_MIN, tableMinWidth, toggleColumn, type ColumnLayout, type ColumnsState } from "./columns.ts";
 export { CollapseAll, COLLAPSE_BLOCKED, collapseAllLabel, type CollapseAllProps } from "./collapse-all.tsx";
 export { ColumnsMenu, COLUMNS_LABEL, type ColumnsMenuProps } from "./columns-menu.tsx";
-export { CLOSE_LABEL, DataTable, OPEN_LABEL, type CellContext, type DataTableProps, type EmptyWhen, type PartFailure, type TableColumn } from "./data-table.tsx";
+export { CLOSE_LABEL, DataTable, OPEN_LABEL, revealRow, type CellContext, type DataTableProps, type EmptyWhen, type PartFailure, type TableColumn } from "./data-table.tsx";
 export { ANY, ANY_LABEL, CUSTOM_LABEL, FilterControl, filterSummary, isSelectFilter, PRESET_LABEL, presetFills, PresetSelect } from "./filters.tsx";
 export { pack, type PackItem, type PackKind } from "./pack.ts";
 export {

@@ -5,6 +5,7 @@
 // (`highlight`, table #12).
 import type { ReactNode } from "react";
 import { NOT_RECORDED } from "../../shared/states.ts";
+import { count, NOUNS } from "../../shared/text.ts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Gender } from "./part-failed.tsx";
@@ -75,27 +76,68 @@ export function NotFound({ kind, id, start = false, highlight, className }: { ki
   );
 }
 
-/** What the run holds, after a «не найдено»: «: в этом прогоне решения #1–#43», «: в этом прогоне соглашение 1». */
-const holdsText = (kind: NumberedKind, [first, last]: readonly [string, string]): string => `: в этом прогоне ${first === last ? OBJECT_WORDS[kind].word : NUMBERED[kind].many} ${numberRange(kind, first, last)}`;
+/** What a list holds, in the form its kind is counted by — one builder per kind: a numbered list its first and last
+ * number (null when it holds none), the findings their count, the units their ids. */
+export type Holds = { kind: NumberedKind; range: readonly [string, string] | null } | { kind: "finding"; count: number } | { kind: "unit"; ids: readonly string[] };
 
-/** The one line for an address its list does not hold: «Решение #99 не найдено: в этом прогоне решения #1–#43.»;
- * `range` — the first and the last number the list holds, null when it holds none. */
-export const missingText = (kind: NumberedKind, id: string, range: readonly [string, string] | null): string => `${notFoundText(kind, id, { start: true })}${range ? holdsText(kind, range) : ""}.`;
+/** The plural a list of units takes before its ids. */
+const UNITS_WORD = "юниты";
+
+/** A run's unit ids as ranges, one per prefix in the run's order: «u1–u32, f1–f10»; an id with no number stands alone. */
+function idRanges(ids: readonly string[]): string {
+  const groups = new Map<string, { min: number; max: number } | null>();
+  for (const id of ids) {
+    const m = /^(\D*)(\d+)$/.exec(id);
+    if (!m) {
+      groups.set(id, null);
+      continue;
+    }
+    const n = Number(m[2]);
+    const g = groups.get(m[1]);
+    if (g) groups.set(m[1], { min: Math.min(g.min, n), max: Math.max(g.max, n) });
+    else groups.set(m[1], { min: n, max: n });
+  }
+  return [...groups].map(([prefix, g]) => (!g ? prefix : g.min === g.max ? `${prefix}${g.min}` : `${prefix}${g.min}–${prefix}${g.max}`)).join(", ");
+}
+
+/** What the run holds, after a «не найдено»: «: в этом прогоне решения #1–#43», «: в этом прогоне соглашение 1»,
+ * «: в этом прогоне 723 находки», «: в этом прогоне юниты u1–u32, f1–f10»; nothing when it holds none. */
+function heldText(holds: Holds): string {
+  const lead = ": в этом прогоне ";
+  if (holds.kind === "finding") return holds.count > 0 ? `${lead}${count(holds.count, NOUNS.finding)}` : "";
+  if (holds.kind === "unit") return holds.ids.length ? `${lead}${holds.ids.length === 1 ? OBJECT_WORDS.unit.word : UNITS_WORD} ${idRanges(holds.ids)}` : "";
+  if (!holds.range) return "";
+  const [first, last] = holds.range;
+  return `${lead}${first === last ? OBJECT_WORDS[holds.kind].word : NUMBERED[holds.kind].many} ${numberRange(holds.kind, first, last)}`;
+}
+
+/** The one line for an address its list does not hold: «Решение #99 не найдено: в этом прогоне решения #1–#43.»,
+ * «Находка … не найдена: в этом прогоне 723 находки.», «Юнит u99 не найден: в этом прогоне юниты u1–u32, f1–f10.» */
+export function missingText(kind: NumberedKind, id: string, range: readonly [string, string] | null): string;
+export function missingText(holds: Holds, id: string): string;
+export function missingText(of: NumberedKind | Holds, id: string, range: readonly [string, string] | null = null): string {
+  const holds: Holds = typeof of === "string" ? { kind: of, range } : of;
+  return `${notFoundText(holds.kind, id, { start: true })}${heldText(holds)}.`;
+}
 
 /** The word of the way out of a «не найдено» line. */
 export const CLOSE = "Закрыть";
 
+export type MissingLineProps = Holds & { id: string; onClose: () => void; slot: string; className?: string };
+
 /** An address that names an object its list does not hold (ux 1: what went wrong, what the run holds, the way out):
  * «Решение #99 не найдено: в этом прогоне решения #1–#43.» and «Закрыть», which the caller turns into dropping the
- * address and focusing its list. A polite status, so a screen reader hears it once. */
-export function MissingLine({ kind, id, range, onClose, slot, className }: { kind: NumberedKind; id: string; range: readonly [string, string] | null; onClose: () => void; slot: string; className?: string }) {
+ * address and focusing its list. One line, so it sits in a reserved one: the sentence truncates, whole in its title,
+ * and «Закрыть» keeps its box. A polite status, so a screen reader hears it once. */
+export function MissingLine({ id, onClose, slot, className, ...holds }: MissingLineProps) {
+  const of = holds as Holds;
   return (
-    <p role="status" data-slot={slot} className={cn("m-0 flex max-w-measure flex-wrap items-baseline gap-x-2", className)}>
-      <span>
-        <NotFound kind={kind} id={id} start />
-        {range ? holdsText(kind, range) : ""}.
+    <p role="status" data-slot={slot} className={cn("m-0 flex max-w-measure min-w-0 items-baseline gap-x-2", className)}>
+      <span data-slot="missing-sentence" className="min-w-0 truncate" title={missingText(of, id)}>
+        <NotFound kind={of.kind} id={id} start />
+        {heldText(of)}.
       </span>
-      <Button variant="ghost" size="xs" onClick={onClose}>
+      <Button variant="ghost" size="xs" className="shrink-0" onClick={onClose}>
         {CLOSE}
       </Button>
     </p>

@@ -7,22 +7,23 @@
 // search and sort are the table's view state in the browser (rules/ui → Conventions 12). A link to a finding opens
 // its page, expands, scrolls to and marks it, «вне фильтра» when the filters hide it.
 //
-// The reading pace: keys 1–4 set the verdict of the finding in focus — its row, or anything in its detail — and move
-// on to the next row of the page without a verdict, its detail opened in place of the rated one's when that was
-// open; «Свернуть все находки» — the table kit's part — in the toolbar's right cluster closes every detail, blocked,
-// with its reason, while none is open.
-import { useMemo, useRef, useState } from "react";
+// The reading pace (improve-14): keys 1–4 set the verdict of the finding in focus — its row, or anything in its
+// detail — and move on to the next finding without a verdict that the filters keep: on the page, else on the pages
+// after it, else from the first page; its detail opened in place of the rated one's when that was open. With none left,
+// the rated finding's detail says so on its verdict line. «Свернуть все находки» — the table kit's part — in the
+// toolbar's right cluster closes every detail, blocked, with its reason, while none is open.
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import type { Finding, Run } from "../../../shared/model.ts";
 import { stageOf, STEPS, type Step, type Verdict } from "../../../shared/states.ts";
 import { NOUNS } from "../../../shared/text.ts";
-import { emptyWhen, NotFound, PLACE_WHAT, type HeldNoun } from "@/ui";
-import { copyAction, DataTable, type EmptyWhen, type RowAction } from "@/table";
+import { emptyWhen, MissingLine, PLACE_WHAT, type HeldNoun } from "@/ui";
+import { copyAction, DataTable, revealRow, runQuery, useRunView, type EmptyWhen, type RowAction } from "@/table";
 // From the files, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
 import { FindingArticle } from "@/finding/article.tsx";
 import { stateUnit } from "@/finding/cells.tsx";
 import { FINDINGS_TABLE } from "@/finding/facets.ts";
-import { NOT_FOUND_NEXT, RATE_ACTION } from "@/finding/words.ts";
+import { RATE_ACTION } from "@/finding/words.ts";
 import { useNow } from "../../app/clock.tsx";
 import { objectHref } from "../../app/links.tsx";
 import { useUpdatedAt } from "../../app/live.tsx";
@@ -60,6 +61,22 @@ export function emptyFor(run: Pick<Run, "closed" | "mode" | "now">): EmptyWhen {
   return when.form === "never" ? when : { ...when, lead: EMPTY_LEAD, subject: "находки" };
 }
 
+/** The rows of the table's current page, first to last. */
+const pageRows = (host: HTMLElement): HTMLElement[] => [...host.querySelectorAll<HTMLElement>("tr[data-row-id]")];
+const idOf = (tr: HTMLElement): string => tr.dataset.rowId ?? "";
+
+/** A page turn the keys asked for, settled once the table shows the asked page: the rated finding and whether its
+ * detail was open, the page asked, the rows of the page before it, the page the key was pressed on, and whether the
+ * walk went past the last page and on from the first. */
+interface Walk {
+  from: string;
+  open: boolean;
+  page: number;
+  seen: readonly string[];
+  start: number;
+  wrapped: boolean;
+}
+
 export function FindingsView({ run }: ViewProps) {
   // a run of its own: the open rows, the verdicts on their way and the held order never cross to another run
   return <Findings key={run.key} run={run} />;
@@ -94,6 +111,8 @@ function Findings({ run }: { run: LoadedRun }) {
   const [link, setLink] = useState(() => ({ param, target: holds(param) ? param : null }));
   const [written, setWritten] = useState<string | null>(null);
   const [open, setOpen] = useState<string[]>(() => (holds(param) ? [param] : []));
+  /** The finding a key rated when none was left without a verdict: its line says the list is rated (improve-14). */
+  const [listRated, setListRated] = useState<string | null>(null);
   if (param !== link.param) {
     // a link from elsewhere opens its finding; the param this view wrote on an expand is only remembered
     if (param !== written) {
@@ -115,6 +134,7 @@ function Findings({ run }: { run: LoadedRun }) {
     );
   const onOpenChange = (ids: string[]) => {
     setOpen(ids);
+    if (listRated && !ids.includes(listRated)) setListRated(null);
     const last = ids.at(-1) ?? null;
     setWritten(last);
     replace({ finding: last });
@@ -122,7 +142,26 @@ function Findings({ run }: { run: LoadedRun }) {
   const page = Number(params.get("page")) || 1;
   const onPageChange = (p: number) => replace({ page: p > 1 ? String(p) : null });
 
-  // ── the reading pace: a verdict by its key, then the next finding without one (craft-review cand-4) ──────
+  // ── the reading pace: a verdict by its key, then the next finding without one (cand-4, improve-14) ──────
+  // the findings the filters and the search keep that have no verdict yet — through the kit's one query, so «none
+  // left» means none in the list the user reads, on any page
+  const [query] = useRunView(FINDINGS_TABLE, run.key);
+  const queryKey = JSON.stringify([query.filters, query.search]);
+  const left = useMemo(
+    () => runQuery({ rows, rowId, columns: [], filters, search: SEARCH, state: { sort: null, filters: query.filters, search: query.search } }).rows.filter((f) => !f.verdict).map(rowId),
+    // the stored view is re-read every render; its JSON is the key
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, filters, queryKey],
+  );
+  const walk = useRef<Walk | null>(null);
+  const turnTo = (p: number) => replace({ page: p > 1 ? String(p) : null });
+  /** Focus on the next finding through the kit's row reveal; its detail opened in place of the rated one's when that
+   * was open. */
+  const moveTo = (tr: HTMLElement, from: string, wasOpen: boolean) => {
+    const nextId = idOf(tr);
+    if (wasOpen) onOpenChange([...open.filter((x) => x !== from && x !== nextId), nextId]);
+    revealRow(tr);
+  };
   useVerdictKeys((verdict: Verdict) => {
     const host = root.current;
     const at = document.activeElement;
@@ -133,13 +172,45 @@ function Findings({ run }: { run: LoadedRun }) {
     if (!id || !finding) return;
     // the note goes with it, as a choice in the detail takes it: the draft, else the saved one
     verdicts.save([id], verdict, verdicts.draft(id) ?? finding.verdict?.note ?? "");
-    const unrated = new Set(rows.filter((f) => !f.verdict && f.id !== id).map((f) => f.id));
-    const shown = [...host.querySelectorAll<HTMLElement>("tr[data-row-id]")];
-    const next = shown.slice(shown.findIndex((el) => el.dataset.rowId === id) + 1).find((el) => unrated.has(el.dataset.rowId ?? ""));
-    const nextId = next?.dataset.rowId;
-    if (!next || !nextId) return;
-    if (open.includes(id)) onOpenChange([...open.filter((x) => x !== id && x !== nextId), nextId]);
-    next.focus();
+    setListRated(null);
+    walk.current = null;
+    const rest = new Set(left.filter((x) => x !== id));
+    const wasOpen = open.includes(id);
+    if (!rest.size) {
+      // none left in the list: the keys stop here and its detail says why
+      setListRated(id);
+      if (!wasOpen) onOpenChange([...open, id]);
+      return;
+    }
+    const shown = pageRows(host);
+    const next = shown.slice(shown.findIndex((el) => idOf(el) === id) + 1).find((el) => rest.has(idOf(el)));
+    if (next) return moveTo(next, id, wasOpen);
+    // none after it on this page: the page turns, through the URL's page as any page turn does
+    walk.current = { from: id, open: wasOpen, page: page + 1, seen: shown.map(idOf), start: page, wrapped: false };
+    turnTo(page + 1);
+  });
+  // a page the keys turned to, once the table shows it: its first finding without a verdict, else the page after it;
+  // past the last page (the table kept its rows) the walk goes on from the first, and stops at the page it started on
+  useEffect(() => {
+    const w = walk.current;
+    const host = root.current;
+    if (!w || !host || page !== w.page) return;
+    const shown = pageRows(host);
+    const ids = shown.map(idOf);
+    if (!w.wrapped && ids.join("\n") === w.seen.join("\n")) {
+      walk.current = { ...w, page: 1, seen: ids, wrapped: true };
+      turnTo(1);
+      return;
+    }
+    const rest = new Set(left.filter((x) => x !== w.from));
+    const next = shown.find((el) => rest.has(idOf(el)));
+    if (next || (w.wrapped && w.page >= w.start)) {
+      walk.current = null;
+      if (next) moveTo(next, w.from, w.open);
+      return;
+    }
+    walk.current = { ...w, page: w.page + 1, seen: ids };
+    turnTo(w.page + 1);
   });
 
   // ── the row menu (table #4) and the verdict dialog ─────────────────────────────────────────────
@@ -178,17 +249,33 @@ function Findings({ run }: { run: LoadedRun }) {
     [run, navigate],
   );
   const ratingRows = useMemo(() => (rating ? rows.filter((r) => rating.includes(r.id)) : null), [rating, rows]);
+  /** The verdicts as the detail and the dialog write them: a choice there ends the line that says the list is rated. */
+  const writes: Verdicts = {
+    ...verdicts,
+    save: (ids, verdict, note) => {
+      setListRated(null);
+      verdicts.save(ids, verdict, note);
+    },
+  };
 
+  // an address the run does not hold: the one not-found line in the table's notice slot under its toolbar, with the
+  // run's count of findings (improve-13, design-17); «Закрыть» drops `finding=` and puts focus on the table's Tab stop
   const missing = param !== null && !holds(param) ? param : null;
+  const notice = missing ? (
+    <MissingLine
+      kind="finding"
+      id={missing}
+      count={run.findings.length}
+      slot="finding-missing"
+      onClose={() => {
+        replace({ finding: null });
+        root.current?.querySelector<HTMLElement>('tr[data-row-id][tabindex="0"]')?.focus({ preventScroll: true });
+      }}
+    />
+  ) : undefined;
 
   return (
     <div ref={root} data-slot="findings-view" className="absolute inset-0 flex flex-col gap-2 px-5 pt-3 pb-1">
-      {missing && (
-        <p role="status" data-slot="finding-missing" className="m-0 shrink-0">
-          <NotFound kind="finding" id={missing} start />
-          {NOT_FOUND_NEXT}
-        </p>
-      )}
       <DataTable<Finding>
         id={FINDINGS_TABLE}
         runKey={run.key}
@@ -203,7 +290,8 @@ function Findings({ run }: { run: LoadedRun }) {
         search={SEARCH}
         actions={actions}
         collapseAll={COLLAPSE_WHAT}
-        detail={(f) => <FindingDetail run={run} finding={f} verdicts={verdicts} now={now} />}
+        notice={notice}
+        detail={(f) => <FindingDetail run={run} finding={f} verdicts={writes} now={now} listRated={f.id === listRated && left.length === 0} />}
         defaultSort={DEFAULT_SORT}
         empty={empty}
         page={page}
@@ -216,11 +304,11 @@ function Findings({ run }: { run: LoadedRun }) {
         now={now}
         className="min-h-0 flex-1"
       />
-      <VerdictDialog rows={ratingRows} verdicts={verdicts} now={now} onClose={() => setRating(null)} />
+      <VerdictDialog rows={ratingRows} verdicts={writes} now={now} onClose={() => setRating(null)} />
     </div>
   );
 }
 
-function FindingDetail({ run, finding, verdicts, now }: { run: LoadedRun; finding: Finding; verdicts: Verdicts; now: number }) {
-  return <FindingArticle run={run} finding={finding} now={now} inRow verdict={<FindingVerdict finding={finding} verdicts={verdicts} now={now} />} />;
+function FindingDetail({ run, finding, verdicts, now, listRated }: { run: LoadedRun; finding: Finding; verdicts: Verdicts; now: number; listRated: boolean }) {
+  return <FindingArticle run={run} finding={finding} now={now} inRow verdict={<FindingVerdict finding={finding} verdicts={verdicts} now={now} listRated={listRated} />} />;
 }

@@ -8,6 +8,8 @@ import { describe, expect, test, vi } from "vitest";
 import { RUN_FOLDER } from "../../shared/model.ts";
 import { STEPS } from "../../shared/states.ts";
 import { NOUNS } from "../../shared/text.ts";
+import { applyStylesheet } from "../app/layout-testing.ts";
+import { MissingLine, missingText } from "./absent.tsx";
 import { EmptyState, emptyStateText, emptyWhen } from "./empty-state.tsx";
 import { baseName, fileFailure, folderFailure } from "./failure.ts";
 import { Loading } from "./loading.tsx";
@@ -146,5 +148,56 @@ describe("gap 13 (f8, f10, f14): no re-export kept for an importer that has move
     expect("STEPS" in (await import("./empty-state.tsx"))).toBe(false);
     expect("frameSrc" in (await import("../finding/article.tsx"))).toBe(false);
     expect("frameSrc" in (await import("../finding/index.ts"))).toBe(false);
+  });
+
+  test("u14 (the leftovers of u4, u9, u11): a finding's words keep no key hint and no «Свернуть все» of their own — the toggle's tooltip and the kit hold them", async () => {
+    const words = await import("../finding/words.ts");
+    expect("KEY_HINT" in words).toBe(false);
+    expect("COLLAPSE_ALL" in words).toBe(false);
+    expect("findingNotFound" in words).toBe(false);
+    expect("NOT_FOUND_NEXT" in words).toBe(false);
+  });
+});
+
+/** Words as a reader counts them: split on spaces. */
+const wordCount = (s: string) => s.split(" ").length;
+
+describe("p2-assess-critic-improve#improve-13: one not-found line on all four surfaces — what the run holds, by the kind's own form", () => {
+  test("a finding the run lacks: the run's count of findings, agreed", () => {
+    expect(missingText({ kind: "finding", count: 723 }, "x#none-1")).toBe("Находка x#none-1 не найдена: в этом прогоне 723 находки.");
+    expect(wordCount(missingText({ kind: "finding", count: 723 }, "x#none-1"))).toBe(9);
+    expect(missingText({ kind: "finding", count: 1 }, "p1-review-critic-code#code-999")).toBe("Находка p1-review-critic-code#code-999 не найдена: в этом прогоне 1 находка.");
+    expect(missingText({ kind: "finding", count: 130 }, "a#b")).toBe("Находка a#b не найдена: в этом прогоне 130 находок.");
+    expect(missingText({ kind: "finding", count: 0 }, "a#b")).toBe("Находка a#b не найдена.");
+  });
+
+  test("a unit the run lacks: a range per prefix, in the run's order", () => {
+    const ids = [...Array.from({ length: 32 }, (_, k) => `u${k + 1}`), ...Array.from({ length: 10 }, (_, k) => `f${k + 1}`)];
+    expect(missingText({ kind: "unit", ids }, "u99")).toBe("Юнит u99 не найден: в этом прогоне юниты u1–u32, f1–f10.");
+    expect(wordCount(missingText({ kind: "unit", ids }, "u99"))).toBe(10);
+    expect(missingText({ kind: "unit", ids: ["u1"] }, "u99")).toBe("Юнит u99 не найден: в этом прогоне юнит u1.");
+    expect(missingText({ kind: "unit", ids: ["u3", "u1", "f2", "fix-a"] }, "u9")).toBe("Юнит u9 не найден: в этом прогоне юниты u1–u3, f2, fix-a.");
+    expect(missingText({ kind: "unit", ids: [] }, "u9")).toBe("Юнит u9 не найден.");
+    // the numbered lists keep their range: one builder per kind
+    expect(missingText({ kind: "entry", range: ["1", "143"] }, "999")).toBe("Решение #999 не найдено: в этом прогоне решения #1–#143.");
+  });
+
+  test("MissingLine: one line — the sentence truncates with the whole in its title, «Закрыть» keeps its box", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<MissingLine kind="finding" id="x#none-1" count={723} onClose={onClose} slot="finding-missing" />);
+    const line = document.querySelector("[data-slot=finding-missing]") as HTMLElement;
+    expect(line).toHaveAttribute("role", "status");
+    expect(line).toHaveTextContent(/^Находка x#none-1 не найдена: в этом прогоне 723 находки\.\s*Закрыть$/);
+    const sentence = line.querySelector("[data-slot=missing-sentence]") as HTMLElement;
+    expect(sentence).toHaveAttribute("title", "Находка x#none-1 не найдена: в этом прогоне 723 находки.");
+    await applyStylesheet();
+    expect(getComputedStyle(line).flexWrap).not.toBe("wrap");
+    expect(getComputedStyle(sentence).textOverflow).toBe("ellipsis");
+    expect(getComputedStyle(sentence).minWidth).toBe("0px");
+    const close = screen.getByRole("button", { name: "Закрыть" });
+    expect(getComputedStyle(close).flexShrink).toBe("0");
+    await user.click(close);
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });

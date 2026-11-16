@@ -136,6 +136,18 @@ const OVERFLOW_CUE = "pointer-events-none absolute inset-0 rounded-lg shadow-[in
  * end. */
 const pastEnd = (el: HTMLElement | null): boolean => el !== null && el.scrollHeight - el.scrollTop - el.clientHeight > 1;
 
+/** Focus on a table row, brought into the table's own box (improve-3): only that box scrolls, through `revealIn` — a
+ * row under the sticky header to just under it, a row past the box's end by as little as brings it in, a row in view
+ * not at all — never `scrollIntoView`, which also scrolls the page around the table. The table's arrows use it, and so
+ * does a view that moves focus to a row of its own accord (the verdict keys of «Находки»). */
+export function revealRow(tr: HTMLElement): void {
+  const box = tr.closest<HTMLElement>("[data-slot=table-scroll]");
+  if (!box) return tr.focus({ preventScroll: true });
+  const head = box.querySelector("thead")?.getBoundingClientRect().height || ROW_HEIGHT;
+  if (tr.getBoundingClientRect().top < box.getBoundingClientRect().top + head) revealIn(box, tr, { gap: head + REVEAL_GAP });
+  else revealIn(box, tr, { nearest: true });
+}
+
 /** An element inside a row that handles its own click. */
 const ownClick = (target: EventTarget | null, row: HTMLElement): boolean => {
   const el = target instanceof Element ? target.closest("a, button, input, textarea, select, label, [role='checkbox'], [role='separator'], [data-no-row-click]") : null;
@@ -312,23 +324,16 @@ export function DataTable<R>(props: DataTableProps<R>) {
   }, [fillMode, tableShown]);
   const pageIds = pg.rows;
   const tabRow = focusId && pageIds.includes(focusId) ? focusId : (pageIds[0] ?? null);
-  /** Focus moved to a row by the keyboard (improve-3): only the table's own box scrolls, through `revealIn` — a row
-   * under the sticky header to just under it, a row past the box's end by as little as brings it in, a row in view
-   * not at all — never `scrollIntoView`, which also scrolls the page around the table. */
-  const revealRow = (rid: string) => {
+  /** Focus moved to a row by the keyboard: the kit's one row reveal (`revealRow`). */
+  const revealRowId = (rid: string) => {
     const el = rowEls.current.get(rid);
-    const box = scroller.current;
-    if (!el) return;
-    if (!box) return el.focus({ preventScroll: true });
-    const head = box.querySelector("thead")?.getBoundingClientRect().height || ROW_HEIGHT;
-    if (el.getBoundingClientRect().top < box.getBoundingClientRect().top + head) revealIn(box, el, { gap: head + REVEAL_GAP });
-    else revealIn(box, el, { nearest: true });
+    if (el) revealRow(el);
   };
   useEffect(() => {
     if (!pendingFocus.current) return;
     const rid = pendingFocus.current === "first" ? pageIds[0] : pageIds[pageIds.length - 1];
     pendingFocus.current = null;
-    if (rid) revealRow(rid);
+    if (rid) revealRowId(rid);
   });
   const goPage = (p: number, focus: "first" | "last" | null = null) => {
     const next = Math.min(Math.max(1, p), pg.pageCount);
@@ -340,7 +345,7 @@ export function DataTable<R>(props: DataTableProps<R>) {
   };
   const focusRow = (rid: string) => {
     setFocusId(rid);
-    revealRow(rid);
+    revealRowId(rid);
   };
 
   // ── the cue of rows or a detail past the box's bottom edge (improve-3; the design check's convention) ────

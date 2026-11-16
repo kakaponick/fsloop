@@ -232,9 +232,14 @@ export function VerdictControl({ value, lead, note, onNoteChange, onChoose, orde
   );
 }
 
+/** The verdict line of the finding a key rated last when no finding of the list is left without a verdict
+ * (improve-14): the keys stop there, and say why. */
+export const ALL_RATED = "В этом списке всё оценено";
+
 /** The detail's verdict, under the article's heading «Ваша оценка»: the choices first, then the note — the saved
- * one, or the draft being typed, with the line that says it is not saved yet. */
-export function FindingVerdict({ finding, verdicts, now }: { finding: Finding; verdicts: Verdicts; now: number }) {
+ * one, or the draft being typed, with the line that says it is not saved yet. `listRated` — this finding's key rated
+ * the list's last one without a verdict: its line says so until the next choice. */
+export function FindingVerdict({ finding, verdicts, now, listRated = false }: { finding: Finding; verdicts: Verdicts; now: number; listRated?: boolean }) {
   const saved = finding.verdict;
   const draft = useDraft(verdicts, finding.id);
   const note = draft ?? saved?.note ?? "";
@@ -243,7 +248,7 @@ export function FindingVerdict({ finding, verdicts, now }: { finding: Finding; v
   return (
     <VerdictControl
       value={saved?.verdict ?? null}
-      lead={saved ? verdictValue(saved, now) : VERDICT_PROMPT}
+      lead={saved && listRated ? ALL_RATED : saved ? verdictValue(saved, now) : VERDICT_PROMPT}
       note={note}
       onNoteChange={(text) => verdicts.setDraft(finding.id, text)}
       onChoose={save}

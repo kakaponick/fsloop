@@ -9,13 +9,13 @@ import { afterAll, describe, expect, test } from "vitest";
 import type { Finding } from "../../../shared/model.ts";
 import { FINDING_STATUS, SEVERITY, VERDICT, type Verdict } from "../../../shared/states.ts";
 import { readRun } from "../../../server/run.ts";
-import { emptyStateText, glossaryLines, UiProvider, writePref } from "@/ui";
+import { emptyStateText, glossaryLines, missingText, UiProvider, writePref } from "@/ui";
 import { tableKey } from "@/table/view-state.ts";
 import { ANY_LABEL, assertLayout, CUSTOM_LABEL, fitsRegion, FRAME, headerWidth, isSelectFilter, mergeWidths, pack, PRESET_LABEL, runQuery, SELECT_WIDTH, type FilterDef, type PackItem } from "@/table";
 import { FLEX_FLOOR, GAP, OVERFLOW_WIDTH } from "@/table/toolbar.tsx";
-import { CAUSE, CONFIDENCE, countFindings, enumFact, FACT, FindingArticle, findingNotFound, openFindings, reportWord, SECTION, stateText, textSections } from "@/finding";
+import { CAUSE, CONFIDENCE, countFindings, enumFact, FACT, FindingArticle, openFindings, reportWord, SECTION, stateText, textSections } from "@/finding";
 import { FINDINGS_TABLE, OBJECTED } from "@/finding/facets.ts";
-import { textWidth as measure } from "../../app/layout-testing.ts";
+import { applyStylesheet, textWidth as measure, usedBlockSize } from "../../app/layout-testing.ts";
 import { renderShell } from "../../app/testing.tsx";
 import { runPath } from "../../app/routes.ts";
 import { COLUMNS } from "./columns.tsx";
@@ -411,13 +411,26 @@ describe("the task walk over u1's handler (surfaces/findings.md → WALK)", () =
     expect(screen.getByRole("combobox", { name: "Вид" })).toHaveTextContent("Вид:Свой набор");
   });
 
-  test("8: an id the run does not hold reads «Находка <id> не найдена»", async () => {
-    const id = "p1-review-critic-code#code-999";
-    renderFindings(app, KEY, runPath(KEY, { view: "findings", finding: id }));
+  test("8, improve-13: an id the run does not hold reads the shared not-found line under the toolbar, in its reserved line, with the run's count; «Закрыть» drops `finding=`", async () => {
+    const user = userEvent.setup({ delay: null });
+    const id = "x#none-1";
+    const view = renderFindings(app, KEY, runPath(KEY, { view: "findings", finding: id }));
     await loaded();
-    expect(document.querySelector("[data-slot=finding-missing]")).toHaveTextContent(findingNotFound(id));
-    expect(findingNotFound(id)).toBe("Находка p1-review-critic-code#code-999 не найдена: в этом прогоне её нет — проверьте ссылку");
-    expect(findingNotFound(id).split(" ")).toHaveLength(12);
+    const line = document.querySelector("[data-slot=finding-missing]") as HTMLElement;
+    expect(line).toHaveTextContent(/^Находка x#none-1 не найдена: в этом прогоне 723 находки\.\s*Закрыть$/);
+    expect(missingText({ kind: "finding", count: run.findings.length }, id).split(" ")).toHaveLength(9);
+    // the table kit's notice slot, under the toolbar as «Журнал» and «Соглашения» put theirs at the list's top
+    // (design-17), there from the first paint at its reserved 28 px (Strict 1)
+    const notice = line.closest("[data-slot=table-notice]") as HTMLElement;
+    expect(notice.previousElementSibling).toHaveAttribute("data-slot", "adaptive-toolbar");
+    await applyStylesheet();
+    expect(usedBlockSize(notice)).toBe(28);
+    await user.click(within(line).getByRole("button", { name: "Закрыть" }));
+    await waitFor(() => expect(new URLSearchParams(view.probe.location?.search).get("finding")).toBeNull());
+    expect(document.querySelector("[data-slot=finding-missing]")).toBeNull();
+    // the button goes with the line: focus lands on the table's Tab stop
+    expect(document.activeElement).toBe(bodyRows()[0]);
+    view.unmount();
   });
 
   test("2: a run with no findings that is over says so, with no table", async () => {

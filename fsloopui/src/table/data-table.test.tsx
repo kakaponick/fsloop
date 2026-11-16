@@ -11,7 +11,7 @@ import { applyStylesheet, usedBlockSize } from "../app/layout-testing.ts";
 import { OPEN_FRAME } from "../ui/marks.tsx";
 import { UiProvider } from "../ui/provider.tsx";
 import { COLLAPSE_BLOCKED, collapseAllLabel } from "./collapse-all.tsx";
-import { DataTable, type DataTableProps, type TableColumn } from "./data-table.tsx";
+import { DataTable, revealRow, type DataTableProps, type TableColumn } from "./data-table.tsx";
 import type { FilterDef, Preset, SearchDef } from "./query.ts";
 import { copyAction, type RowAction } from "./row-menu.tsx";
 import { SearchBox } from "./search.tsx";
@@ -1178,6 +1178,16 @@ describe("p2-assess-critic-improve#improve-3: the table kit, read at a glance", 
       expect(row("f-010")).toHaveFocus();
       expect(box().scrollTop).toBe(280);
       expect(row("f-010").getBoundingClientRect().top).toBe(140);
+      // u14: the same reveal is the kit's export, `revealRow`, which a view calls for a row it moves focus to (the
+      // verdict keys) — one rule, never a copy at the view
+      box().scrollTop = 0;
+      act(() => revealRow(row("f-014")));
+      expect(row("f-014")).toHaveFocus();
+      expect(box().scrollTop).toBe(38);
+      box().scrollTop = 320;
+      act(() => revealRow(row("f-010")));
+      expect(row("f-010")).toHaveFocus();
+      expect(box().scrollTop).toBe(280);
       expect(into).not.toHaveBeenCalled();
     } finally {
       proto.scrollIntoView = before;

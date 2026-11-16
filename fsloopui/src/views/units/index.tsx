@@ -7,10 +7,10 @@
 // The URL holds the open unit (`unit=`), replaced on expand; filters, search and sort are the table's view state in
 // the browser (rules/ui → Conventions 12). A link to a unit expands, scrolls to and marks it, «вне фильтра» when the
 // filters hide it.
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { NOUNS } from "../../../shared/text.ts";
-import { CountLink, Dot, NotFound, type HeldNoun } from "@/ui";
+import { CountLink, Dot, MissingLine, type HeldNoun } from "@/ui";
 import { copyAction, DataTable, type BarOrder, type RowAction } from "@/table";
 // From the files, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
 import { countFindings, type FindingFilter } from "@/finding/facets.ts";
@@ -27,7 +27,6 @@ import {
   CANDIDATES,
   CANDIDATES_TITLE,
   CANDIDATES_WIDEST,
-  NOT_FOUND_NEXT,
   OPEN_FINDINGS,
   tableLabel,
   UNDECIDED,
@@ -91,6 +90,7 @@ function Units({ run }: { run: LoadedRun }) {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const edge = useUnitMarks(run.version, run.units, now);
+  const root = useRef<HTMLDivElement | null>(null);
 
   const rows = useMemo(() => unitRows(run), [run]);
   const filters = useMemo(() => filtersFor(run), [run]);
@@ -151,16 +151,32 @@ function Units({ run }: { run: LoadedRun }) {
     [run, navigate],
   );
 
+  // an address the run does not hold: the one not-found line in the table's notice slot under its toolbar, with the
+  // run's units (improve-13, design-17); «Закрыть» drops `unit=` and puts focus on the table's Tab stop
   const missing = param !== null && !holds(param) ? param : null;
+  const unitIds = useMemo(() => run.units.map((u) => u.id), [run.units]);
+  const notice = missing ? (
+    <MissingLine
+      kind="unit"
+      id={missing}
+      ids={unitIds}
+      slot="unit-missing"
+      onClose={() => {
+        setParams(
+          (prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete("unit");
+            return next;
+          },
+          { replace: true },
+        );
+        root.current?.querySelector<HTMLElement>('tr[data-row-id][tabindex="0"]')?.focus({ preventScroll: true });
+      }}
+    />
+  ) : undefined;
 
   return (
-    <div data-slot="units-view" className="absolute inset-0 flex flex-col gap-2 px-5 pt-3 pb-1">
-      {missing && (
-        <p role="status" data-slot="unit-missing" className="m-0 shrink-0">
-          <NotFound kind="unit" id={missing} start />
-          {NOT_FOUND_NEXT}
-        </p>
-      )}
+    <div ref={root} data-slot="units-view" className="absolute inset-0 flex flex-col gap-2 px-5 pt-3 pb-1">
       <DataTable<UnitRow>
         id={UNITS_TABLE}
         runKey={run.key}
@@ -187,6 +203,7 @@ function Units({ run }: { run: LoadedRun }) {
         toolbarEnd={<ToolbarFacts run={run} />}
         // the kit's «Свернуть все юниты», blocked with the same reason as in «Находки» (improve-4; design-11)
         collapseAll="юниты"
+        notice={notice}
         open={open}
         onOpenChange={onOpenChange}
         target={link.target}

@@ -7,17 +7,17 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, describe, expect, test, vi } from "vitest";
 import { NOUNS } from "../../../shared/text.ts";
-import { emptyStateText, glossaryLines, readPref } from "@/ui";
+import { emptyStateText, glossaryLines, missingText, readPref } from "@/ui";
 import { assertLayout, fitsRegion, FRAME, headerWidth, isSelectFilter, mergeWidths, pack, runQuery, StatusBar, tableMinWidth, type FilterDef, type PackItem } from "@/table";
 import { GAP, OVERFLOW_WIDTH } from "../../table/toolbar.tsx";
 import { runKey as viewKey, type RunPrefs } from "../../table/view-state.ts";
-import { textWidth } from "../../app/layout-testing.ts";
+import { applyStylesheet, textWidth, usedBlockSize } from "../../app/layout-testing.ts";
 import { runPath } from "../../app/routes.ts";
 import { COLUMNS, STATE_GLOSSARY } from "./columns.tsx";
 import { BAR_ORDER } from "./index.tsx";
 import { closingIds, DEFAULT_SORT, emptyFor, filtersFor, PRESETS, SEARCH, stateDetail, statesOf, stripStates, unitRows, unitStrip, type UnitRow } from "./query.ts";
 import { fixtureApp, keyOf, loadedRun, NOW, renderRun, renderUnits } from "./testing.tsx";
-import { CANDIDATES_WIDEST, candidatesText, UNDECIDED_WIDEST, undecidedText, unitNotFound } from "./words.ts";
+import { CANDIDATES_WIDEST, candidatesText, UNDECIDED_WIDEST, undecidedText } from "./words.ts";
 
 const N = 40; // the production maximum: 42 units over 2 passes
 const INIT = 60; // an init run, closed with no units
@@ -271,8 +271,9 @@ describe("the view's configuration at the production shape", () => {
     expect(emptyFor({ closed: false, mode: "worktree" })).toEqual({ form: "not-yet", step: "decompose" });
     expect(emptyStateText({ form: "not-yet", step: "decompose", noun: ["юнит", "юнита", "юнитов"] }).title).toBe("Юнитов ещё нет — они появятся на этапе «декомпозиция»");
     expect(emptyStateText({ form: "never", noun: ["юнит", "юнита", "юнитов"] }).title).toBe("В этом прогоне не было юнитов");
-    expect(unitNotFound("u99")).toBe("Юнит u99 не найден: в этом прогоне его нет — проверьте ссылку");
-    expect(unitNotFound("u99").split(" ")).toHaveLength(12);
+    // improve-13: the shared not-found line, with the run's units as a range per prefix (the 42-unit run)
+    expect(missingText({ kind: "unit", ids: run.units.map((u) => u.id) }, "u99")).toBe("Юнит u99 не найден: в этом прогоне юниты u1–u32, f1–f10.");
+    expect(missingText({ kind: "unit", ids: run.units.map((u) => u.id) }, "u99").split(" ")).toHaveLength(10);
     expect(candidatesText(1)).toBe("1 кандидат");
     expect(candidatesText(3)).toBe("3 кандидата");
     expect(candidatesText(280)).toBe("280 кандидатов");
@@ -493,10 +494,22 @@ describe("the task walk over u1's handler (surfaces/units.md → WALK)", () => {
     expect(detail("f3")).toBeTruthy();
   });
 
-  test("5: «Юнит u99 не найден» stands above the table, the table shows", async () => {
-    renderUnits(fx, KEY, runPath(KEY, { view: "units", unit: "u99" }));
+  test("5, improve-13: «Юнит u99 не найден» reads the shared not-found line under the toolbar, in its reserved line; «Закрыть» drops `unit=`", async () => {
+    const user = userEvent.setup({ delay: null });
+    const view = renderUnits(fx, KEY, runPath(KEY, { view: "units", unit: "u99" }));
     await loaded();
-    expect(document.querySelector("[data-slot=unit-missing]")).toHaveTextContent(unitNotFound("u99"));
+    const line = document.querySelector("[data-slot=unit-missing]") as HTMLElement;
+    expect(line).toHaveTextContent(/^Юнит u99 не найден: в этом прогоне юниты u1–u32, f1–f10\.\s*Закрыть$/);
+    // the table kit's notice slot (design-17), there from the first paint at its reserved 28 px (Strict 1)
+    const notice = line.closest("[data-slot=table-notice]") as HTMLElement;
+    expect(notice.previousElementSibling).toHaveAttribute("data-slot", "adaptive-toolbar");
+    await applyStylesheet();
+    expect(usedBlockSize(notice)).toBe(28);
+    await user.click(within(line).getByRole("button", { name: "Закрыть" }));
+    await waitFor(() => expect(new URLSearchParams(view.probe.location?.search).get("unit")).toBeNull());
+    expect(document.querySelector("[data-slot=unit-missing]")).toBeNull();
+    expect(document.activeElement).toBe(bodyRows()[0]);
+    view.unmount();
   });
 });
 

@@ -3,7 +3,7 @@
 // cell's cause. State words come from shared/states.ts; the plural, durations and Moscow time from shared/text.ts.
 import { launchState } from "../../../shared/states.ts";
 import { count, NOUNS, type Forms } from "../../../shared/text.ts";
-import { notFoundText, type GlossaryEntry, type HeldNoun } from "@/ui";
+import type { GlossaryEntry, HeldNoun } from "@/ui";
 
 /** The detail's sections, in reading order (surfaces/units.md → BLOCKS → expanded detail). */
 export const SECTION = {
@@ -64,9 +64,8 @@ export const LOG_LINE_GLOSSARY: readonly GlossaryEntry[] = [{ value: "Строк
 /** The cause of a waiting unit: «ждёт u2, u23». */
 export const waitsText = (ids: readonly string[]): string | null => (ids.length ? `ждёт ${ids.join(", ")}` : null);
 
-/** «Юнит u99 не найден: в этом прогоне его нет — проверьте ссылку» — a link to an id the run does not hold. */
-export const unitNotFound = (id: string): string => `${notFoundText("unit", id, { start: true })}${NOT_FOUND_NEXT}`;
-export const NOT_FOUND_NEXT = ": в этом прогоне его нет — проверьте ссылку";
+// A link to a unit the run does not hold reads the one not-found line, `MissingLine` of `@/ui`, with the run's units as a
+// range per prefix (improve-13): «Юнит u99 не найден: в этом прогоне юниты u1–u32, f1–f10.»
 
 /** What a part of the run folder failed as: «Список юнитов не прочитан: …», «Бриф units/u3/brief.md не прочитан: …». */
 export const UNITS_PART = "Список юнитов";
