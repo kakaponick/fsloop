@@ -37,7 +37,8 @@ export const COLUMNS: readonly TableColumn<Finding>[] = [
   {
     id: "summary",
     label: "Находка",
-    min: 160,
+    // the room «Оценка» takes to clear «не та серьёзность» (gap 6) comes from here, so 1280 px holds the table whole
+    min: 154,
     cell: (f, c) =>
       f.frames.length ? (
         <span className="flex min-w-0 items-center gap-2">
@@ -54,7 +55,7 @@ export const COLUMNS: readonly TableColumn<Finding>[] = [
   // a stage the run's own order, which the stable sort keeps
   { id: "report", label: "Отчёт", width: 200, resizable: true, min: 112, max: 320, rank: stageRank, cell: (f, c) => c.hl(reportWord(f)), text: (f) => (f.launch ? `${f.launchName} — ${f.launch}` : reportWord(f)) },
   { id: "state", label: "Состояние", width: 156, rank: stateRank, glossary: STATE_GLOSSARY, cell: (f) => <StateCell finding={f} />, text: stateText },
-  { id: "verdict", label: "Оценка", width: 128, rank: verdictRank, glossary: VERDICT_GLOSSARY, cell: (f) => <VerdictCell finding={f} />, text: (f) => (f.verdict ? VERDICT[f.verdict.verdict].compact : undefined) },
+  { id: "verdict", label: "Оценка", width: 136, rank: verdictRank, glossary: VERDICT_GLOSSARY, cell: (f) => <VerdictCell finding={f} />, text: (f) => (f.verdict ? VERDICT[f.verdict.verdict].compact : undefined) },
   { id: "location", label: "Место", width: 220, resizable: true, min: 120, max: 480, hidden: true, rank: (f) => f.location, cell: (f, c) => (f.location ? <span className="font-mono text-xs">{c.hl(f.location)}</span> : <NotRecorded />), text: (f) => f.location },
   { id: "confidence", label: "Уверенность", width: 116, hidden: true, rank: confidenceRank, glossary: CONFIDENCE_GLOSSARY, cell: (f) => f.confidence ?? <Dash />, text: (f) => f.confidence },
   { id: "cause", label: "Охват", width: 108, hidden: true, rank: (f) => f.cause, glossary: CAUSE_GLOSSARY, cell: (f) => f.cause ?? <Dash />, text: (f) => f.cause },

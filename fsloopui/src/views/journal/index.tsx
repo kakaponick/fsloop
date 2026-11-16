@@ -13,7 +13,7 @@
 // An entry's address is `?view=journal&entry=<n>` (the design check): the view scrolls to it, marks it with the
 // target mark and moves focus to it; hidden by the filters it shows anyway, «вне фильтра»; still held in the strip,
 // it is placed at once.
-import { memo, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode, type RefObject } from "react";
+import { memo, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type ReactNode, type RefObject } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { JournalEntry } from "../../../shared/model.ts";
 import { stageOf, type Step } from "../../../shared/states.ts";
@@ -21,14 +21,13 @@ import { count, NOUNS, num } from "../../../shared/text.ts";
 import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@/components/ui/input-group";
 import { cn } from "@/lib/utils";
-import { copyItem, Dash, EmptyState, emptyWhen, FactList, flatItem, FlatList, HeldStrip, markProps, Menu, NotFound, OutOfFilter, PartFailed, RunningText, type Fact, type HeldNoun } from "@/ui";
+import { copyItem, Dash, EmptyState, emptyWhen, FactList, fileFailure, flatItem, FlatList, folderFailure, HeldStrip, markProps, Menu, NotFound, OutOfFilter, PartFailed, RunningText, type Fact, type HeldNoun } from "@/ui";
 import { AdaptiveToolbar, filterSummary, FilterControl, Highlight, pushHistory, runQuery, SearchBox, StatusBar, tokens, useRunView, useTableView, type FilterDef, type SearchDef, type ToolbarItem } from "@/table";
 import { useNow } from "../../app/clock.tsx";
 import { resolverFor, routerLink } from "../../app/links.tsx";
 import { useUpdatedAt } from "../../app/live.tsx";
 import { runPath } from "../../app/routes.ts";
 import type { LoadedRun, ViewProps } from "../index.ts";
-import { fileFailure, folderFailure } from "./failure.ts";
 import { isRef, RefLink } from "./ref-link.tsx";
 
 /** The journal's noun: an entry is one decision of the run (PRODUCT.md → Glossary: журнал решений). */
@@ -246,13 +245,7 @@ function Journal({ run }: { run: LoadedRun }) {
                 <EmptyState form="filtered" noun={DECISION_NOUN} filters={filterSummary([filter], prefs.filters, prefs.search)} onReset={() => setPrefs({ filters: {}, search: "" })} className="py-16" />
               ) : (
                 <FlatList label={JOURNAL_PART}>
-                  {/* Enter on a link inside an entry follows it; the list's own Enter is for the entry itself */}
-                  <ol
-                    className="m-0 flex max-w-[calc(var(--container-measure)+8.5rem)] list-none flex-col p-0 py-2"
-                    onKeyDown={(event: KeyboardEvent<HTMLOListElement>) => {
-                      if (event.key === "Enter" && !(event.target as HTMLElement).hasAttribute("data-flat-item")) event.stopPropagation();
-                    }}
-                  >
+                  <ol className="m-0 flex max-w-[calc(var(--container-measure)+8.5rem)] list-none flex-col p-0 py-2">
                     {q.rows.map((e) => (
                       <li key={e.n} className="border-b last:border-b-0">
                         <Entry entry={e} run={run} resolve={resolve} toks={toks} target={e.n === target} edge={arrived.has(e.n)} outside={q.outside.has(e.n)} />

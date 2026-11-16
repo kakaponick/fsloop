@@ -14,7 +14,7 @@ import type { Convention } from "../../../shared/model.ts";
 import { writePref } from "@/ui";
 import { runPath } from "../../app/routes.ts";
 import { fixtureApp, keyOf, loadedRun, renderOver, renderView } from "../reports/testing.tsx";
-import { ConventionsView, copiedWhat, DESIGN_CHECK, emptyFor, INTRO, LABELS, NEVER_DESCRIPTION, NONE_WRITTEN, partsOf, placesOf, SEARCH } from "./index.tsx";
+import { conventionPath, ConventionsView, copiedWhat, DESIGN_CHECK, emptyFor, INTRO, LABELS, NEVER_DESCRIPTION, NONE_WRITTEN, partsOf, placesOf, SEARCH } from "./index.tsx";
 
 const N = 40;
 const SMALL = 24;
@@ -213,7 +213,11 @@ describe("f15: the list's shape, the address and search", () => {
     expect(article(3)).toHaveAttribute("data-target");
     view.unmount();
     renderOver(fx, run, at("99"), ConventionsView);
-    expect(document.querySelector("[data-slot=convention-missing]")).toHaveTextContent(/^Соглашения 99 в этом прогоне нет — проверьте ссылку$/);
+    // gap 8 (f15): the shared «не найден» with the convention's own word, and the address through the app's key
+    const missing = document.querySelector("[data-slot=convention-missing]") as HTMLElement;
+    expect(missing).toHaveTextContent(/^Соглашение 99 не найдено: в этом прогоне его нет — проверьте ссылку$/);
+    expect(missing.querySelector("[data-slot=not-found]")).toHaveTextContent(/^Соглашение 99 не найдено$/);
+    expect(conventionPath(KEY, 12)).toBe(runPath(KEY, { view: "conventions", convention: "12" }));
     expect(items()).toHaveLength(26);
     scroll.mockRestore();
   });

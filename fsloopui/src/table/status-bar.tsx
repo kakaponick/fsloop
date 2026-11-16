@@ -27,8 +27,14 @@ const SELECTED_ONE = { m: "Выбран", f: "Выбрана", n: "Выбран�
 /** «Выбрано 3 находки», «Выбрана 21 находка», «Выбран 1 юнит»: the verb agrees with the number and the noun. */
 export const selectedText = (n: number, noun: HeldNoun): string => `${n % 10 === 1 && n % 100 !== 11 ? SELECTED_ONE[noun.gender] : "Выбрано"} ${count(n, noun.forms)}`;
 
-/** The selection's reserved width: its widest three-digit form at a Cyrillic letter's width (toolbar.tsx). */
-const selectedWidth = (noun: HeldNoun): string => `${(Math.max(...[111, 222, 555].map((n) => selectedText(n, noun).length)) * 1.1).toFixed(1)}ch`;
+/** The selection's widest three-digit forms: its place is their box, measured by the browser (as the toolbar's «Вид»). */
+const SIZED = [111, 222, 555] as const;
+
+/** One form of the selection, unseen and unread: drawn as generated content, it gives the slot its width and is no
+ * text anyone reads. */
+function SelectedSizer({ text }: { text: string }) {
+  return <span aria-hidden="true" data-slot="selected-sizer" data-text={text} className="invisible after:content-[attr(data-text)]" />;
+}
 
 /** «из 723 находок», «из 61 находки»: after «из» the noun is genitive — the singular after a number ending in 1
  * (not 11), the plural otherwise; a noun's 2–4 form is its genitive singular, so the shared plural picks it. */
@@ -154,8 +160,11 @@ export function StatusBar({ pager, counts, shown, total, noun, selected, updated
         ) : null;
       case "selected":
         return selected ? (
-          <span key={name} data-slot="selected" aria-live="polite" className={cn("shrink-0 text-foreground", at)} style={{ minWidth: selectedWidth(selected.noun) }}>
-            {selected.count > 0 ? selectedText(selected.count, selected.noun) : null}
+          <span key={name} data-slot="selected" aria-live="polite" className={cn("inline-grid shrink-0 text-foreground [&>*]:[grid-area:1/1]", at)}>
+            {[...new Set(SIZED.map((n) => selectedText(n, selected.noun)))].map((text) => (
+              <SelectedSizer key={text} text={text} />
+            ))}
+            <span>{selected.count > 0 ? selectedText(selected.count, selected.noun) : null}</span>
           </span>
         ) : null;
       case "age":

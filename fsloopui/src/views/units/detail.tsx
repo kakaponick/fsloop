@@ -8,22 +8,19 @@
 // An open detail never moves under a live run (rules/ui → Strict 1): its fact rows are the ones it opened with — a
 // value that empties reads «—» in place — and each list keeps its lines, a line that arrives waiting in the held-order
 // strip of its section's heading line until the user places it. The next open derives everything again.
-import { ChevronRightIcon } from "lucide-react";
-import { useId, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { Finding, Run, Unit, UnitCheck } from "../../../shared/model.ts";
 import { agentKind, launchState, UNIT_STATE } from "../../../shared/states.ts";
 import { mskDateTime, mskTime, tokens } from "../../../shared/text.ts";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { Dash, FactList, HeldStrip, Hint, NotFound, NotRecorded, PartFailed, StatusDot, type Fact, type HeldNoun } from "@/ui";
+import { Dash, FactList, HeldStrip, NotRecorded, PartFailed, StatusDot, type Fact, type HeldNoun } from "@/ui";
 // From the files, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
-import { FindingArticle } from "@/finding/article.tsx";
-import { FindingRow } from "@/finding/row.tsx";
+import { ExpandingFindings } from "@/finding/expanding.tsx";
 import { ObjectLink } from "../../app/links.tsx";
 import { TITLE_MIN } from "./columns.tsx";
 import { useHeld } from "./held.ts";
 import { briefFailure, checkGroups, closingIds, launchRows, type CheckLine } from "./query.ts";
-import { attemptsText, briefPart, CHECK_HEAD, closesTitle, FACT, findingToggle, HELD_NOUN, LAUNCH_HEAD, OPEN_IN_FINDINGS, SECTION } from "./words.ts";
+import { attemptsText, briefPart, CHECK_HEAD, closesTitle, FACT, HELD_NOUN, LAUNCH_HEAD, SECTION } from "./words.ts";
 
 type DetailRun = Pick<Run, "id" | "units" | "findings" | "launches" | "running" | "journal" | "errors"> & { key: string };
 
@@ -136,63 +133,18 @@ export function unitFacts(run: DetailRun, u: Unit, kept?: ReadonlySet<string>): 
     .map((r) => ({ key: r.key, label: FACT[r.key], value: r.value ?? <Dash /> }));
 }
 
-/** «Закрывает N находок»: the findings the run gave the unit — the same set its row counts (Conventions 3) — as u4's
- * compact rows, each expanding in place into the shared article, read-only: the verdict is set in «Находки»
- * (Conventions 6); «Открыть в находках» leads there. */
+/** «Закрывает N находок»: the findings the run gave the unit — the same set its row counts (Conventions 3) — as the
+ * shared rows that expand in place into the article (`@/finding` → ExpandingFindings, as a report's in «Отчёты»),
+ * read-only: the verdict is set in «Находки» (Conventions 6); «Открыть в находках» leads there. The detail already
+ * sits on the muted ground, so the rows carry no rules of their own. */
 function Closes({ run, unit, id, now }: { run: DetailRun; unit: Unit; id: string; now: number }) {
   const ids = closingIds(run, unit);
   const held = useHeld(ids, (fid) => fid);
-  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
-  const base = useId();
   const byId = new Map<string, Finding>(run.findings.map((f) => [f.id, f]));
-  const toggle = (fid: string) =>
-    setOpen((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(fid)) next.add(fid);
-      return next;
-    });
+  const title = closesTitle(ids.length);
   return (
-    <Section title={closesTitle(ids.length)} id={id} strip={<SectionStrip fresh={held.fresh} noun={HELD_NOUN.finding} onApply={held.apply} />}>
-      {held.shown.length > 0 && (
-        <ul data-slot="unit-closes" className="m-0 flex list-none flex-col p-0">
-          {held.shown.map((fid) => {
-            const f = byId.get(fid);
-            if (!f)
-              return (
-                <li key={fid} className="min-w-0">
-                  <span className="flex h-8 items-center pl-7">
-                    <NotFound kind="finding" id={fid} />
-                  </span>
-                </li>
-              );
-            const isOpen = open.has(fid);
-            const panel = `${base}-${fid.replace(/[^\w-]/g, "-")}`;
-            const name = findingToggle(f.local, isOpen);
-            return (
-              <li key={fid} data-finding={fid} className="min-w-0">
-                <div data-slot="unit-finding-line" data-state={isOpen ? "open" : "closed"} className="grid grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-x-1">
-                  <Hint label={name}>
-                    <Button variant="ghost" size="icon-xs" aria-expanded={isOpen} aria-controls={isOpen ? panel : undefined} aria-label={name} onClick={() => toggle(fid)}>
-                      <ChevronRightIcon aria-hidden="true" className={cn("transition-transform motion-reduce:transition-none", isOpen && "rotate-90")} />
-                    </Button>
-                  </Hint>
-                  <FindingRow run={run} finding={f} />
-                </div>
-                {isOpen && (
-                  <div id={panel} data-slot="unit-finding-detail" className="flex flex-col gap-2 pt-1 pb-4 pl-7">
-                    <p className="m-0 flex justify-end">
-                      <ObjectLink run={run} kind="finding" id={f.id} className="text-xs">
-                        {OPEN_IN_FINDINGS}
-                      </ObjectLink>
-                    </p>
-                    <FindingArticle run={run} finding={f} now={now} inRow />
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
+    <Section title={title} id={id} strip={<SectionStrip fresh={held.fresh} noun={HELD_NOUN.finding} onApply={held.apply} />}>
+      {held.shown.length > 0 && <ExpandingFindings run={run} items={held.shown.map((fid) => byId.get(fid) ?? fid)} label={title} now={now} slot="unit-closes" ruled={false} />}
     </Section>
   );
 }

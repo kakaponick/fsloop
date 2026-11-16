@@ -115,7 +115,12 @@ function AbsentSection() {
           <div className="flex flex-col gap-1">
             <NotFound kind="unit" id="u7" />
             <NotFound kind="finding" id="p1-review-critic-craft#craft-12" />
+            <NotFound kind="entry" id="999" />
+            <NotFound kind="convention" id="99" />
           </div>
+        </Case>
+        <Case label="Id, которого нет в прогоне, — с отметкой поиска по этому id">
+          <NotFound kind="unit" id="u77" highlight={(t) => <Highlight text={t} tokens={["u77"]} />} />
         </Case>
         <Case label="Поле не записано">
           <div className="flex flex-col gap-1">
@@ -128,8 +133,20 @@ function AbsentSection() {
   );
 }
 
+/** A critic's report's parts: more than a narrow strip holds. */
+const PARTS = [
+  { value: "findings", label: "Находки", count: 18 },
+  { value: "unverified", label: "Не проверено", count: 1 },
+  { value: "candidates", label: "Идеи", count: 2 },
+  { value: "order", label: "План правок", count: 1 },
+  { value: "assumptions", label: "Допущения", count: 14 },
+  { value: "frames", label: "Кадры", count: 16 },
+  { value: "file", label: "Файл отчёта", count: null },
+];
+
 function CountsSection() {
   const [view, setView] = useState("findings");
+  const [part, setPart] = useState("findings");
   const tabs = [
     { value: "findings", label: "Находки", count: 723 },
     { value: "units", label: "Юниты", count: 42 },
@@ -149,6 +166,11 @@ function CountsSection() {
               </CountTabsContent>
             ))}
           </CountTabs>
+        </div>
+      </Case>
+      <Case label="Полоса шире своего места: не влезшие вкладки — в меню «Ещё N»; выбранная вкладка и «Файл отчёта» остаются в полосе">
+        <div className="flex max-w-md flex-wrap items-start rounded-lg border">
+          <CountTabs sticky value={part} onValueChange={setPart} tabs={PARTS} label="Части отчёта — свёрнутая полоса" overflow={{ label: "Другие части отчёта", keep: ["file"] }} className="w-auto min-w-0 flex-1 px-1" />
         </div>
       </Case>
       <div className="flex flex-wrap items-center gap-6">
@@ -213,6 +235,19 @@ function TextSection() {
       </Case>
       <Case label="Знак препинания сразу после встроенного кода — без зазора; найденное поиском отмечено той же отметкой, что в таблицах">
         <RunningText text={"Правило: `ux 1`, impeccable critique; см. `.claude/rules/ui.md`. Решение u3 принято через 40 минут."} resolve={resolve} highlight={(t) => <Highlight text={t} tokens={["40", "rules"]} />} />
+      </Case>
+      <Case label="Код в тексте, который рисует сам вид (renderCode): место в примере соглашения — кнопка «Скопировать место»">
+        <RunningText
+          text={"Пример: `src/web/shared/part-2.tsx:4` и `ux 1`."}
+          renderCode={(body, code) =>
+            body.startsWith("src/") ? (
+              <Button variant="ghost" size="xs" aria-label={`${copyLabel("место")} ${body}`} className="h-auto min-h-5 gap-1 px-0.5 align-baseline font-mono text-xs font-normal" onClick={() => void copyText(body, body)}>
+                {code}
+                <CopyIcon aria-hidden="true" data-icon="inline-end" className="text-muted-foreground" />
+              </Button>
+            ) : null
+          }
+        />
       </Case>
       <Case label="Файл отчёта с таблицей">
         <RunningText text={REPORT_TEXT} resolve={resolve} />

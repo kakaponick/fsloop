@@ -94,6 +94,6 @@ export function RefLink({ run, refItem, highlight = plain }: { run: RunLike; ref
       </span>
     );
   }
-  if (!refItem.found) return <NotFound kind={guessKind(refItem.id)} id={refItem.id} />;
+  if (!refItem.found) return <NotFound kind={guessKind(refItem.id)} id={refItem.id} highlight={highlight} />;
   return <span className="font-mono text-xs break-all">{highlight(refItem.id)}</span>;
 }

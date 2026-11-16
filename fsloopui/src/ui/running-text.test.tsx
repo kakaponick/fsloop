@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import "./test-setup.ts";
 import { render, screen, within } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { describe, expect, test } from "vitest";
 import { parseBlocks, RunningText } from "./running-text.tsx";
 import { longText } from "./test-utils.tsx";
@@ -47,6 +48,25 @@ describe("running text: inline code and the search's hits", () => {
     // without a painter the text has no marks
     const plain = render(<RunningText text="через 40 минут" />);
     expect(plain.container.querySelector("mark")).toBeNull();
+  });
+
+  test("gap 7 (f15): a code span goes through the caller's `renderCode` — its own node for a span it takes, the link or the plain code for one it leaves", () => {
+    const resolve = (t: string) => (t === "u3" ? "/r/tga/a5?view=units&unit=u3" : null);
+    const renderCode = (body: string, code: ReactNode) =>
+      body.startsWith("src/") ? (
+        <button type="button" data-slot="place">
+          {code}
+        </button>
+      ) : null;
+    const { container } = render(<RunningText text={"`src/a.tsx:12`, `u3` и `ux 1`; src/a.tsx:12 в тексте."} resolve={resolve} renderCode={renderCode} />);
+    const place = container.querySelector("[data-slot=place]") as HTMLElement;
+    expect(place.querySelector("code")).toHaveTextContent(/^src\/a\.tsx:12$/);
+    // a span the caller leaves keeps the renderer's own form: a link where the resolver knows it, plain code otherwise
+    expect(within(container).getByRole("link", { name: "u3" }).querySelector("code")).not.toBeNull();
+    expect([...container.querySelectorAll("code")].map((c) => c.textContent)).toEqual(["src/a.tsx:12", "u3", "ux 1"]);
+    // the seam takes code spans only: the same words in running text stay text
+    expect(container.querySelectorAll("[data-slot=place]")).toHaveLength(1);
+    expect(container.textContent).toBe("src/a.tsx:12, u3 и ux 1; src/a.tsx:12 в тексте.");
   });
 });
 

@@ -15,4 +15,9 @@ describe("routes", () => {
     expect(viewOf("?view=nothing")).toBe("findings");
     expect(loaded.registry).toBe(false);
   });
+
+  test("gap 8 (f15): a convention's address is a query key of its own, built as every other object's", async () => {
+    const { runPath } = await import("./routes.ts");
+    expect(runPath("tga/a098a7d4", { view: "conventions", convention: "12" })).toBe("/r/tga/a098a7d4?view=conventions&convention=12");
+  });
 });

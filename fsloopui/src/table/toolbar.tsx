@@ -49,8 +49,20 @@ function Sizer({ text }: { text: string }) {
 }
 
 export const GAP = 8;
-/** The search's floor and cap (ui → Widths: a toolbar search is flexible with a cap). */
+/** The search's least floor and its cap (ui → Widths: a toolbar search is flexible with a cap): `max-w-80`. */
 export const FLEX_FLOOR = 192;
+export const FLEX_CAP = 320;
+
+/** A flexible item's floor (table #12, #14): its chrome — the item less its field — and the text its field must show
+ * whole, measured on its sizer (the search's placeholder, `data-flex-sizer`, at the field's padding); never under
+ * `FLEX_FLOOR`, never past the cap. An item without a field counts at `FLEX_FLOOR`. */
+export function flexFloor(node: HTMLElement): number {
+  const field = node.querySelector<HTMLElement>("[data-flex-field]");
+  const sizer = node.querySelector<HTMLElement>("[data-flex-sizer]");
+  if (!field || !sizer) return FLEX_FLOOR;
+  const chrome = node.getBoundingClientRect().width - field.getBoundingClientRect().width;
+  return Math.min(FLEX_CAP, Math.max(FLEX_FLOOR, Math.ceil(chrome + sizer.getBoundingClientRect().width)));
+}
 export const OVERFLOW_WIDTH = 28;
 export const MORE_LABEL = "Ещё фильтры";
 
@@ -77,7 +89,7 @@ export function AdaptiveToolbar({ items, label, className }: AdaptiveToolbarProp
       if (available <= 0) return; // not laid out (hidden, or a test without layout): fold nothing
       for (const node of el.querySelectorAll<HTMLElement>("[data-toolbar-item]")) {
         const id = node.dataset.toolbarItem as string;
-        const w = node.dataset.flex === "" ? FLEX_FLOOR : node.getBoundingClientRect().width;
+        const w = node.dataset.flex === "" ? flexFloor(node) : node.getBoundingClientRect().width;
         if (w > 0) widths.current.set(id, w);
       }
       const next = pack(

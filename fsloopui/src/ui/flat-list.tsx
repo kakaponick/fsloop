@@ -1,5 +1,6 @@
 // A list that is not a table (rules/ui → Conventions 8; ui → Keyboard): the sidebar's cards and the report rail —
-// one flat list with one Tab stop. ↑/↓ move, Home/End jump, Enter opens. An item with an address is one link as a
+// one flat list with one Tab stop. ↑/↓ move, Home/End jump, Enter on the item opens it — Enter on a link or a
+// button inside an item is that control's own. An item with an address is one link as a
 // whole and nothing inside it takes focus; headings between items are not stops. The list owns the roving
 // tabindex: every element marked by `flatItem(key)` is a stop, the open one (aria-current) holds the Tab stop.
 import { useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
@@ -48,7 +49,9 @@ export function FlatList({ label, children, onOpen, className }: FlatListProps) 
     else if (event.key === "ArrowUp") next = Math.max(at - 1, 0);
     else if (event.key === "Home") next = 0;
     else if (event.key === "End") next = all.length - 1;
-    else if (event.key === "Enter" && !(all[at] instanceof HTMLAnchorElement)) {
+    else if (event.key === "Enter") {
+      // a link item opens by itself; a link or a button inside an item that is not one is theirs (gap 10)
+      if (all[at] instanceof HTMLAnchorElement || document.activeElement !== all[at]) return;
       event.preventDefault();
       onOpen?.(all[at].getAttribute(ITEM) ?? "");
       return;

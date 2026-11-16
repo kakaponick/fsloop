@@ -40,9 +40,6 @@ export function emptyStateText(props: EmptyStateProps): { title: string; descrip
 
 export const RESET_FILTERS = "Сбросить фильтры";
 
-/** The stage order is shared/states.ts's (code-verdict cand-2); re-exported for the kit's index until its owner moves it. */
-export { STEPS };
-
 /** Why a list is empty before any filter: not yet (the stage that fills it, with a view's own lead) or never. */
 export type EmptyWhen = { form: "not-yet"; step: Step; lead?: string; subject?: string } | { form: "never"; description?: string };
 

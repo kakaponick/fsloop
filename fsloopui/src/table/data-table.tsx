@@ -231,8 +231,13 @@ export function DataTable<R>(props: DataTableProps<R>) {
 
   const [openState, setOpenState] = useState<readonly string[]>(props.open ?? []);
   const [seenOpenProp, setSeenOpenProp] = useState(props.open);
+  /** A row the caller opened — a verdict key moving on to the next row — brought into view once, as one the user
+   * expands; a new object for each, so the same row opened again counts again. */
+  const [callerOpened, setCallerOpened] = useState<{ id: string } | null>(null);
   if (props.open !== undefined && props.open !== seenOpenProp) {
     setSeenOpenProp(props.open);
+    const added = props.open.filter((x) => !openState.includes(x)).at(-1);
+    if (added) setCallerOpened({ id: added });
     setOpenState(props.open);
   }
   const openSet = new Set(openState);
@@ -525,9 +530,14 @@ export function DataTable<R>(props: DataTableProps<R>) {
     // once per link: the row it names, on its page
     if (targetOnPage && target) scrollToTop(target);
   }, [targetOnPage, target]);
+  const handledOpen = useRef<{ id: string } | null>(null);
   useLayoutEffect(() => {
-    const rid = expanded.current;
+    let rid = expanded.current;
     expanded.current = null;
+    if (callerOpened && handledOpen.current !== callerOpened) {
+      handledOpen.current = callerOpened;
+      rid = callerOpened.id;
+    }
     const box = scroller.current;
     const detailRow = rid && box ? [...box.querySelectorAll<HTMLElement>("tr[data-detail-for]")].find((tr) => tr.dataset.detailFor === rid) : null;
     if (!rid || !box || !detailRow) return;

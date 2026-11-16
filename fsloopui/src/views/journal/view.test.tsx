@@ -221,7 +221,7 @@ describe("search, «Этап», and a link to an entry", () => {
     view.unmount();
     renderView(fx, KEY, path({ entry: "999" }), JournalView);
     await loaded(59);
-    expect(document.querySelector("[data-slot=entry-missing]")).toHaveTextContent("Запись журнала 999 не найдена: в этом прогоне решения #1–#143");
+    expect(document.querySelector("[data-slot=entry-missing]")).toHaveTextContent("Решение 999 не найдено: в этом прогоне решения #1–#143");
     scroll.mockRestore();
   });
 
@@ -234,7 +234,8 @@ describe("search, «Этап», and a link to an entry", () => {
     expect(entryRangeText(run.journal.slice(0, 1))).toBe(": в этом прогоне решение #1");
     expect(entryRangeText([])).toBe("");
     const line = document.querySelector("[data-slot=entry-missing]") as HTMLElement;
-    expect(line).toHaveTextContent(/^Запись журнала 999 не найдена: в этом прогоне решения #1–#143\.\s*Закрыть$/);
+    // gap 11 (f16; ux 1): the journal's one noun, «решение», in the shared «не найден» too
+    expect(line).toHaveTextContent(/^Решение 999 не найдено: в этом прогоне решения #1–#143\.\s*Закрыть$/);
     await user.click(within(line).getByRole("button", { name: "Закрыть" }));
     expect(document.querySelector("[data-slot=entry-missing]")).toBeNull();
     // the button it closed is gone: focus lands on the list's Tab stop, not the page's body
@@ -271,7 +272,7 @@ describe("live and empty", () => {
 
   test("craft-31: a link to an entry still held in the strip places that entry at once, marked; the others keep waiting", () => {
     const view = renderOver(fx, run, path({ entry: "146" }), JournalView);
-    expect(document.querySelector("[data-slot=entry-missing]")).toHaveTextContent("Запись журнала 146 не найдена");
+    expect(document.querySelector("[data-slot=entry-missing]")).toHaveTextContent("Решение 146 не найдено");
     const more = [144, 145, 146].map((n) => ({ n: String(n), stage: "p2-assess", question: `Question ${n}?`, decision: `way ${n}`, why: `because ${n}`, refs: [] }));
     view.again({ ...run, version: 2, journal: [...run.journal, ...more] });
     expect(articles()).toHaveLength(144);
@@ -376,6 +377,15 @@ describe("pass 2 (f16): volume, keyboard, the entry's address", () => {
     expect(document.activeElement).toBe(within(article(5)).getByRole("link", { name: "p1-review-critic-code#code-6" }));
     await user.keyboard("{Enter}");
     expect(new URLSearchParams(view.probe.location?.search).get("view")).toBe("findings");
+  });
+
+  test("gap 11 (f16): a ref the run does not hold wears the search's mark on its id, which is searched", () => {
+    writePref(`table:journal:run:${KEY}`, { filters: {}, search: "u77" });
+    const missing: JournalEntry = { n: "144", stage: "p2-assess", question: "Which unit?", decision: "u77", why: "named", refs: [{ id: "u77", kind: null, found: false }] };
+    renderOver(fx, { ...run, journal: [...run.journal, missing] }, path(), JournalView);
+    const ref = article(144).querySelector("[data-slot=not-found]") as HTMLElement;
+    expect(ref).toHaveTextContent("юнит u77 не найден");
+    expect(ref.querySelector("mark[data-slot=hit]")).toHaveTextContent(/^u77$/);
   });
 
   test("cand-7: an entry's menu copies its address — «Скопировать адрес решения»", async () => {

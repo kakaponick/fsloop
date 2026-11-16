@@ -178,7 +178,7 @@ describe("a critic's report", () => {
     expect(toggles[2]).toHaveAttribute("aria-expanded", "true");
     const panel = document.getElementById(toggles[2].getAttribute("aria-controls") as string);
     expect(panel).not.toBeNull();
-    expect(panel).toHaveAttribute("data-slot", "report-finding-detail");
+    expect(panel).toHaveAttribute("data-slot", "finding-detail");
     await user.keyboard("{Enter}");
     expect(toggles[2]).toHaveAttribute("aria-expanded", "false");
     expect(toggles[2]).not.toHaveAttribute("aria-controls");
@@ -322,6 +322,17 @@ describe("a critic's report", () => {
     const panel = within(reader()).getByRole("tabpanel");
     expect(panel.querySelectorAll("[data-slot=section-items] > li")).toHaveLength(26);
     expect(within(panel).getByRole("link", { name: "Все соглашения прогона" })).toHaveAttribute("href", runPath(KEY, { view: "conventions" }));
+    // gap 8 (f15): each line links to its own convention by the run's ordinal, the address «Соглашения» reads
+    const own = run.conventions.filter((c) => c.launch === "p1-decompose-design-check");
+    expect(own).toHaveLength(26);
+    const lines = [...panel.querySelectorAll<HTMLElement>("[data-slot=section-items] > li")];
+    lines.forEach((li, i) => {
+      const link = within(li).getByRole("link", { name: `Соглашение ${own[i].n} в «Соглашениях»` });
+      expect(link).toHaveAttribute("href", runPath(KEY, { view: "conventions", convention: String(own[i].n) }));
+      expect(link).toHaveTextContent(new RegExp(`^${own[i].n}$`));
+      // Strict 1: the ordinal's box is fixed, as in «Соглашения», so a two-digit number moves no line's text
+      expect(link.parentElement).toHaveClass("w-[3ch]", "shrink-0", "text-right", "tabular-nums");
+    });
   });
 
   test("a verdict critic: resolved / partial / unresolved as its outcome; ids in its text are links", () => {
@@ -337,9 +348,12 @@ describe("craft-1: the strip keeps every label whole — what does not fit folds
   /** A tab's box as measured on p1-verdict-reports-reader.png: «Находки 30» takes 102 px with its 4 px gap — 47 px of
    * padding, gap and the count's three-digit box, and about 7.3 px a letter. */
   const tabWidth = (label: string) => 47 + 7.3 * label.length;
+  /** gap 4: the strip folds in `CountTabs`, which measures its room as the list and its «Ещё N» box together — the
+   * list, flexible, takes what the box leaves of the reader's width. */
   const layout = (strip: number) =>
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-      const width = this.dataset.slot === "report-sections" ? strip : this.getAttribute("role") === "tab" ? tabWidth((this.textContent ?? "").replace(/\d+$/, "")) : 0;
+      const more = this.parentElement?.querySelector("[data-slot=tabs-more]") ? 64 : 0;
+      const width = this.getAttribute("role") === "tablist" ? strip - more : this.dataset.slot === "tabs-more" ? 64 : this.getAttribute("role") === "tab" ? tabWidth((this.textContent ?? "").replace(/\d+$/, "")) : 0;
       return { width, height: 0, top: 0, left: 0, right: width, bottom: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
     });
   // the widest strip of the real runs on this machine (db.ren.net 9944a718, p1-map-shape-monitor-a): a shape critic

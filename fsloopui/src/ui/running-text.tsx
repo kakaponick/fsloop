@@ -4,6 +4,8 @@
 // bounded container. Ids become links only through the resolver the caller gives. The text is parsed into React
 // elements, never into HTML: a tag in the text is shown as text. A view that searches the text passes the search's
 // hit painter (`highlight`), so its hits wear the table's one mark; punctuation right after inline code keeps to it.
+// A caller that draws a code span its own way — a convention's place as its copy button — does it through
+// `renderCode`, the renderer's seam for code; the link seam stays for links.
 import { Fragment, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
@@ -19,8 +21,14 @@ export interface RunningTextProps {
   measure?: boolean;
   /** Paints the search's hits in a run of the text: the table's `Highlight`, the one hit painter (table #12). */
   highlight?: Paint;
+  /** A code span the caller renders itself — a place as a copy button — given its text and the code element as
+   * drawn; null leaves the span to the renderer (a link when the resolver knows it, else plain code). */
+  renderCode?: RenderCode;
   className?: string;
 }
+
+/** The caller's own node for a code span, or null to leave it as it is. */
+export type RenderCode = (body: string, code: ReactNode) => ReactNode | null;
 
 /** Renders a run of plain text, its hits marked. */
 export type Paint = (text: string) => ReactNode;
@@ -112,7 +120,7 @@ const MARKS = /(`[^`]+`)|(\*\*[^*]+\*\*)/g;
 /** Punctuation that closes on the word before it: right after inline code it keeps to the code, with no gap. */
 const CLOSING = /^[.,;:!?)\]»…]+/;
 
-type InlineOpts = { resolve?: Resolve; renderLink: NonNullable<RunningTextProps["renderLink"]>; paint: Paint };
+type InlineOpts = { resolve?: Resolve; renderLink: NonNullable<RunningTextProps["renderLink"]>; paint: Paint; renderCode?: RenderCode };
 
 const defaultLink = (href: string, children: ReactNode) => (
   <a href={href} className="underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground">
@@ -120,7 +128,7 @@ const defaultLink = (href: string, children: ReactNode) => (
   </a>
 );
 
-function Inline({ text, resolve, renderLink, paint }: { text: string } & InlineOpts) {
+function Inline({ text, resolve, renderLink, paint, renderCode }: { text: string } & InlineOpts) {
   const linked = (plain: string, key: string): ReactNode => {
     if (!resolve) return paint(plain);
     const out: ReactNode[] = [];
@@ -143,7 +151,6 @@ function Inline({ text, resolve, renderLink, paint }: { text: string } & InlineO
     at = m.index + m[0].length;
     if (m[1]) {
       const body = m[1].slice(1, -1);
-      const href = resolve?.(body) ?? null;
       // punctuation that closes on the code keeps to it: no right padding, no line break between them (cand-15)
       const closing = CLOSING.exec(text.slice(at))?.[0] ?? "";
       const code = (
@@ -151,7 +158,9 @@ function Inline({ text, resolve, renderLink, paint }: { text: string } & InlineO
           {paint(body)}
         </code>
       );
-      const linkedCode = href ? renderLink(href, code, body) : code;
+      const own = renderCode?.(body, code) ?? null;
+      const href = own === null ? (resolve?.(body) ?? null) : null;
+      const linkedCode = own ?? (href ? renderLink(href, code, body) : code);
       parts.push(
         closing ? (
           <span key={`c${m.index}`} className="whitespace-nowrap">
@@ -188,9 +197,9 @@ function Lines({ lines, ...rest }: { lines: string[] } & InlineOpts) {
 
 const INDENT = ["", "ml-5", "ml-10", "ml-15"];
 
-export function RunningText({ text, resolve, renderLink = defaultLink, measure = true, highlight = plainText, className }: RunningTextProps) {
+export function RunningText({ text, resolve, renderLink = defaultLink, measure = true, highlight = plainText, renderCode, className }: RunningTextProps) {
   const blocks = parseBlocks(text ?? "");
-  const inline: InlineOpts = { resolve, renderLink, paint: highlight };
+  const inline: InlineOpts = { resolve, renderLink, paint: highlight, renderCode };
   return (
     <div data-slot="running-text" className={cn("flex min-w-0 flex-col gap-2 text-sm break-words", measure && "max-w-measure", className)}>
       {blocks.map((block, n) => {

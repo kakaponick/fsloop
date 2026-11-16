@@ -1,7 +1,7 @@
 // The section-label map of «Отчёты» (surfaces/reading.md → ASSUMPTIONS; the design check: the one map this unit
 // owns) and the words code builds for a report: the tab set of each agent kind with its counts, what each part of a
-// critic's report holds, a lens in words, a report's outcome in words, the partly-parsed line, the fold of a strip
-// too wide for its reader, and a craft report set against the surface's earlier one. The tab set is fixed per kind
+// critic's report holds, a lens in words, a report's outcome in words, the partly-parsed line, and a craft report set
+// against the surface's earlier one (the fold of a strip too wide for its reader is the shared tabs' own). The tab set is fixed per kind
 // (and per lens for a critic), so two reports of one kind never shift the strip; an empty section stays with a muted
 // «0»; «Кадры» and «Сравнение» stand only where they hold something. Agent kinds, launch states and severity words
 // come from shared/states.ts, never from here.
@@ -9,8 +9,6 @@ import type { Finding, Launch } from "../../../shared/model.ts";
 import { SEVERITY, type Severity } from "../../../shared/states.ts";
 import { count, num, plural } from "../../../shared/text.ts";
 import type { GlossaryEntry } from "@/ui";
-// the file, not the index: this module stays pure, with no component behind it
-import { pack } from "@/table/pack.ts";
 
 /** A value the report left empty: «—», «-», «none» or nothing. */
 const NONE = /^(—|-|none)?$/i;
@@ -194,22 +192,6 @@ export function emptyTabText(kind: ReportKind): string {
 
 /** A tab that carries no count: the file is one, the comparison is not a count of anything. */
 export const uncounted = (id: string): boolean => id === FILE_TAB || id === COMPARE_TAB;
-
-// ── the fold (craft-1; table #14) ────────────────────────────────────────────────────────────
-
-/** The strip's own room: its list's padding, the gap between tabs, the «Ещё N» trigger's reserved box. */
-export const FOLD = { padding: 6, gap: 4, trigger: 64 } as const;
-
-/** The tabs that fold into «Ещё N» when the strip is narrower than its tabs: from the right, in markup order — the
- * open tab and «Файл отчёта» (where an unread line sends the user) never fold. `tabs` carry their measured widths,
- * `strip` is the strip's width; every tab left in it shows its label whole. */
-export function foldTabs(tabs: readonly { id: string; width: number }[], active: string, strip: number): string[] {
-  return pack(
-    tabs.map((t) => ({ id: t.id, width: t.width, kind: t.id === active || t.id === FILE_TAB ? "pinned" : "ordinary" })),
-    strip - FOLD.padding,
-    { gap: FOLD.gap, overflow: FOLD.trigger },
-  );
-}
 
 // ── a craft report against the surface's earlier one (u6 shape, cand-3) ────────────────────────
 

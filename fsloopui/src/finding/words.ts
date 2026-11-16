@@ -95,6 +95,10 @@ export const KEY_HINT = "Выбрать клавишами";
 export const SAVE_FAILED = "Оценка не сохранилась";
 export const failedCause = (cause: string): string => cause.replace(/^Оценка не сохранилась:\s*/, "") || "сервер не ответил";
 
+/** A finding row that expands in place outside «Находки»: its chevron's name, and the step to its own place. */
+export const findingToggle = (local: string, open: boolean): string => `${open ? "Свернуть" : "Развернуть"} находку ${local}`;
+export const OPEN_IN_FINDINGS = "Открыть в находках";
+
 /** «Находка p1-review-critic-code#code-99 не найдена» — a link to an id the run does not hold. */
 export const findingNotFound = (id: string): string => `${notFoundText("finding", id, { start: true })}${NOT_FOUND_NEXT}`;
 /** What follows «Находка <id> не найдена»: why, and what to do. */

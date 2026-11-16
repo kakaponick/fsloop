@@ -9,6 +9,7 @@ import { UiProvider } from "../ui/provider.tsx";
 import { DataTable, type DataTableProps, type TableColumn } from "./data-table.tsx";
 import type { FilterDef, Preset, SearchDef } from "./query.ts";
 import { copyAction, type RowAction } from "./row-menu.tsx";
+import { SearchBox } from "./search.tsx";
 import { StatusBar, StripCount } from "./status-bar.tsx";
 
 interface F {
@@ -211,8 +212,9 @@ describe("columns (table #3, #10, #15; rules/ui → Tables 5)", () => {
   });
 
   test("a resizable column: the handle is always there, nudged by keyboard, clamped, kept per table, reset by a double click", async () => {
-    const user = userEvent.setup();
-    const { container } = renderUi(view());
+    // gap 14 (f10; tests 10): the handle's 22 steps re-render every row; three rows hold the property, not sixty
+    const user = userEvent.setup({ delay: null });
+    const { container } = renderUi(view({ rows: ROWS.slice(0, 3) }));
     const handle = screen.getByRole("separator", { name: "Ширина столбца «Отчёт»" });
     expect(screen.getAllByRole("separator")).toHaveLength(1);
     expect(handle.firstElementChild).toHaveClass("w-px", "bg-border");
@@ -487,6 +489,18 @@ describe("a row brought into view (craft-1; rules/ui → Conventions 12)", () =>
     // f-007 under f-001's detail: 132 + 32 + 240 + 5 × 32 = 564, its detail past the box's end → 432 px down
     expect(scrollBy).toHaveBeenCalledWith({ top: 432 });
   });
+
+  test("gap 5 (f12): a row the caller opens — a verdict key moving on to the next row — is brought into view as one the user expands", () => {
+    const scrollBy = layout();
+    const { rerender } = renderUi(view({ open: [] }));
+    rerender(view({ open: ["f-012"] }));
+    // f-012 is the 12th row: 132 + 11 × 32 = 484, its detail past the box's end at 550 → 352 px down
+    expect(scrollBy).toHaveBeenCalledWith({ top: 352 });
+    scrollBy.mockClear();
+    // the caller's echo of the same set opens nothing new: nothing moves
+    rerender(view({ open: ["f-012"] }));
+    expect(scrollBy).not.toHaveBeenCalled();
+  });
 });
 
 describe("keyboard (ui → Keyboard; rules/ui → Conventions 11)", () => {
@@ -583,6 +597,25 @@ describe("the adaptive toolbar (table #11, #12, #14; rules/ui → Conventions 16
     expect(screen.getByRole("searchbox")).toHaveValue("f-01");
   });
 
+  test("gap 1 (f11): a search that `/` does not focus draws no «/» key cap; one that it does keeps the cap's box", () => {
+    const props = { value: "", onChange: () => {}, placeholder: "Проект, id, цель", history: [], onCommit: () => {} };
+    const { container, rerender } = renderUi(<SearchBox {...props} shortcut={false} />);
+    expect(container.querySelector("[data-slot=table-search] kbd")).toBeNull();
+    rerender(<SearchBox {...props} />);
+    expect(container.querySelector("[data-slot=table-search] kbd")).not.toBeNull();
+  });
+
+  test("open-1 (f13): the search carries its floor — an invisible, unread copy of its placeholder at its field's padding, out of the flow — for the toolbar to measure", () => {
+    const { container } = renderUi(view());
+    const box = container.querySelector("[data-slot=table-search]") as HTMLElement;
+    const sizer = box.querySelector("[data-flex-sizer]") as HTMLElement;
+    expect(sizer).toHaveAttribute("data-text", "Текст, id, юнит");
+    expect(sizer).toHaveAttribute("aria-hidden", "true");
+    expect(sizer.textContent).toBe("");
+    expect(sizer).toHaveClass("invisible", "absolute", "px-1.5", "whitespace-nowrap");
+    expect(box.querySelector("input")).toHaveAttribute("data-flex-field");
+  });
+
   test("the last filters fold into «…» as the toolbar narrows; a folded filter with a value marks «…»", async () => {
     const callbacks: (() => void)[] = [];
     vi.stubGlobal(
@@ -642,9 +675,18 @@ describe("the status bar (table #8; the design check)", () => {
     const { container } = renderUi(view({ updatedAt: "2026-11-16T04:00:00Z", now: "2026-11-16T04:05:00Z" }));
     const bar = container.querySelector("[data-slot=status-bar]") as HTMLElement;
     const slot = () => bar.querySelector("[data-slot=selected]") as HTMLElement;
-    expect(slot()).toBeEmptyDOMElement();
-    // «Выбрано 723 находки» at a Cyrillic letter's width: the widest it gets, so a count that grows moves nothing
-    expect(slot().style.minWidth).toBe("20.9ch");
+    expect(slot()).toHaveTextContent(/^$/);
+    // gap 12 (f9): the place is the measured box of the widest three-digit forms — each an invisible sizer drawn as
+    // generated content, unread — never an estimate of letters, so a count that grows moves nothing
+    expect(slot().style.minWidth).toBe("");
+    const sizers = [...slot().querySelectorAll<HTMLElement>("[data-slot=selected-sizer]")];
+    expect(sizers.map((s) => s.dataset.text)).toEqual(["Выбрано 111 находок", "Выбрано 222 находки", "Выбрано 555 находок"]);
+    for (const s of sizers) {
+      expect(s).toHaveClass("invisible");
+      expect(s).toHaveAttribute("aria-hidden", "true");
+      expect(s.textContent).toBe("");
+    }
+    expect(slot()).toHaveClass("inline-grid", "[&>*]:[grid-area:1/1]");
     expect(slot()).toHaveAttribute("aria-live", "polite");
     const order = () => [...bar.children].map((el) => (el as HTMLElement).dataset.slot);
     expect(order()).toEqual(["pager", "shown", "selected", "age"]);

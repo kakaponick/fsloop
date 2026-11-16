@@ -192,6 +192,27 @@ describe("flat list", () => {
     await user.keyboard("{ArrowDown}{Enter}");
     expect(onOpen).toHaveBeenCalledWith("p1-review-craft");
   });
+
+  test("gap 10 (f16): Enter on a link or a button inside an item that is not a link is theirs — the item does not take it", async () => {
+    const onOpen = vi.fn();
+    const onCopy = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <FlatList label="Журнал решений" onOpen={onOpen}>
+        <article tabIndex={0} {...flatItem("12")}>
+          #12 <button type="button" onClick={onCopy}>скопировать</button> <a href="#u3">u3</a>
+        </article>
+      </FlatList>,
+    );
+    screen.getByRole("button", { name: "скопировать" }).focus();
+    await user.keyboard("{Enter}");
+    expect(onCopy).toHaveBeenCalledOnce();
+    expect(onOpen).not.toHaveBeenCalled();
+    // Enter on the item itself still opens it
+    (document.querySelector("article") as HTMLElement).focus();
+    await user.keyboard("{Enter}");
+    expect(onOpen).toHaveBeenCalledWith("12");
+  });
 });
 
 describe("tabs with counts", () => {
@@ -249,6 +270,69 @@ describe("tabs with counts", () => {
     render(<CountTabs value="findings" onValueChange={() => {}} tabs={tabs} label="Разделы отчёта" />);
     expect(screen.getByRole("tablist", { name: "Разделы отчёта" })).not.toHaveAttribute("data-sticky");
     expect(screen.getByRole("tablist", { name: "Разделы отчёта" })).not.toHaveClass("sticky");
+  });
+
+  describe("gap 4 (f14): a strip narrower than its tabs folds them from the right into «Ещё N»", () => {
+    // 17 parts of a shape critic's report; a tab's box is 47 px of padding, gap and count plus 7.3 px a letter
+    const parts = ["Находки", "Не проверено", "Идеи", "План правок", "Допущения", "Решённые вопросы", "Форма раздела", "ANSWERS", "WALK", "RANGES", "LEADS", "ACTIONS", "ENTRY", "OPTIONS", "BLOCKS", "CHOSEN", "Файл отчёта"];
+    const wide = parts.map((label, i) => ({ value: `t${i}`, label, count: label === "Файл отчёта" ? null : i }));
+    const tabWidth = (label: string) => 47 + 7.3 * label.length;
+    /** The strip's room is the list and its «Ещё N» box together: the list takes what the box leaves. */
+    const layout = (strip: number) =>
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+        const more = this.parentElement?.querySelector("[data-slot=tabs-more]") ? 64 : 0;
+        const width = this.getAttribute("role") === "tablist" ? strip - more : this.dataset.slot === "tabs-more" ? 64 : this.getAttribute("role") === "tab" ? tabWidth((this.textContent ?? "").replace(/\d+$/, "")) : 0;
+        return { width, height: 0, top: 0, left: 0, right: width, bottom: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+      });
+    const Strip = ({ initial = "t0" }: { initial?: string }) => {
+      const [value, setValue] = useState(initial);
+      return <CountTabs sticky value={value} onValueChange={setValue} tabs={wide} label="Части отчёта" className="w-auto min-w-0 flex-1" overflow={{ label: "Другие части отчёта", keep: ["t16"] }} />;
+    };
+    // by the DOM, not the accessibility tree: an open menu hides the rest of the page from it
+    const shown = () => [...document.querySelectorAll('[role=tablist][aria-label="Части отчёта"] [role=tab]')].map((t) => (t.textContent ?? "").replace(/\d+$/, ""));
+
+    test("the open tab and the kept one stay; the strip's labels fit whole beside a 64 px «Ещё N»; a folded part opens from its menu, selected", async () => {
+      const spy = layout(790);
+      try {
+        const user = userEvent.setup({ delay: null });
+        render(<Strip />);
+        expect(shown()[0]).toBe("Находки");
+        expect(shown().at(-1)).toBe("Файл отчёта");
+        const more = screen.getByRole("button", { name: /^Ещё \d+$/ });
+        expect(more.parentElement).toHaveAttribute("data-slot", "tabs-more");
+        expect(more.parentElement).toHaveClass("w-16", "shrink-0", "sticky", "top-0", "h-10", "border-b", "bg-background");
+        expect(shown().reduce((s, t) => s + tabWidth(t) + 4, 6) + 64).toBeLessThanOrEqual(790);
+        await user.click(more);
+        const menu = await screen.findByRole("menu");
+        expect(menu).toHaveAttribute("aria-label", "Другие части отчёта");
+        const folded = within(menu).getAllByRole("menuitem").map((m) => m.textContent ?? "");
+        expect(more).toHaveAccessibleName(`Ещё ${folded.length}`);
+        // in order, each with its count; together with the strip, every part once
+        expect([...shown().slice(0, -1), ...folded.map((f) => f.replace(/\s\d+$/, "")), shown().at(-1)]).toEqual(parts);
+        expect(folded.at(-1)).toBe("CHOSEN 15");
+        await user.click(within(menu).getByRole("menuitem", { name: "CHOSEN 15" }));
+        expect([...document.querySelectorAll("[role=tab]")].find((t) => t.textContent?.startsWith("CHOSEN"))).toHaveAttribute("aria-selected", "true");
+        expect(shown().reduce((s, t) => s + tabWidth(t) + 4, 6) + 64).toBeLessThanOrEqual(790);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    test("with room for every tab nothing folds and «Ещё» is not drawn; without `overflow` the strip never folds", () => {
+      const spy = layout(2400);
+      try {
+        const { unmount } = render(<Strip />);
+        expect(shown()).toEqual(parts);
+        expect(screen.queryByRole("button", { name: /^Ещё/ })).toBeNull();
+        unmount();
+        spy.mockRestore();
+        layout(400);
+        render(<CountTabs sticky value="t0" onValueChange={() => {}} tabs={wide} label="Части отчёта" />);
+        expect(shown()).toEqual(parts);
+      } finally {
+        vi.restoreAllMocks();
+      }
+    });
   });
 });
 

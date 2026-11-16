@@ -6,16 +6,14 @@
 // «Файл отчёта» last; the strip stays in view while the report scrolls, and what does not fit its width folds into
 // «Ещё N». Bodies are running text at the reading measure, each critic's part led by what it holds; ids in them are
 // links; the findings are compact rows that expand in place (craft-13: the product first, in the first viewport).
-import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, CopyIcon } from "lucide-react";
-import { useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { flushSync } from "react-dom";
+import { ChevronDownIcon, ChevronUpIcon, CopyIcon } from "lucide-react";
+import { useRef, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { Finding, Launch } from "../../../shared/model.ts";
 import { launchState, NOT_RECORDED, reportWord, SEVERITY, stageOf } from "../../../shared/states.ts";
 import { ago, count, duration, mskDateTime, mskTime, NOUNS, num, tokens } from "../../../shared/text.ts";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { cn } from "@/lib/utils";
 import { frameSrc } from "@/api";
 import {
   copyLabel,
@@ -25,12 +23,9 @@ import {
   CountTabsContent,
   Dot,
   FactList,
-  flatItem,
-  FlatList,
   FrameStrip,
   Hint,
   Loading,
-  Menu,
   NotRecorded,
   parseBlocks,
   PartFailed,
@@ -42,7 +37,7 @@ import {
   type Frame,
 } from "@/ui";
 // From the files, not the index: the index reaches the app's links, which reach this view (a cycle at load time).
-import { FindingArticle } from "@/finding/article.tsx";
+import { ExpandingFindings } from "@/finding/expanding.tsx";
 import { FindingRow } from "@/finding/row.tsx";
 import { openFindings } from "@/finding/open.ts";
 import { LINK_CLASS, ObjectLink, resolverFor, routerLink } from "../../app/links.tsx";
@@ -54,7 +49,7 @@ import { SurfaceScores } from "./scores.tsx";
 import {
   compareFindings,
   emptyTabText,
-  foldTabs,
+  FILE_TAB,
   lensGlossary,
   partCounts,
   reportKind,
@@ -74,11 +69,14 @@ import {
 } from "./sections.ts";
 
 export const COPY_PATH_WHAT = "путь к отчёту";
-export const OPEN_IN_FINDINGS = "Открыть в находках";
 export const ALL_CONVENTIONS = "Все соглашения прогона";
+/** A design check's line's ordinal: where it leads, for a screen reader. */
+export const conventionLinkLabel = (n: number): string => `Соглашение ${n} в «Соглашениях»`;
 /** A report's tabs are its parts: «раздел» is a part of the interface everywhere in fsloopUI (cand-6, ux 1). */
 export const SECTIONS_LABEL = "Части отчёта";
 export const MORE_SECTIONS = "Другие части отчёта";
+/** The strip's fold: «Файл отчёта», where an unread line sends the user, never folds (craft-1). */
+const SECTIONS_OVERFLOW = { label: MORE_SECTIONS, keep: [FILE_TAB] } as const;
 export const PREV_REPORT = "Предыдущий отчёт";
 export const NEXT_REPORT = "Следующий отчёт";
 export const NO_PREV = "Предыдущего отчёта нет: этот — первый в списке";
@@ -378,76 +376,29 @@ interface SectionsProps {
 
 /** The parts as tabs. The strip sticks to the reader's top on the page's ground while its panel scrolls under it, so
  * another part is one click away at any depth; its height is the tab list's own, fixed. A strip wider than the reader
- * folds its tabs from the right into «Ещё N» (craft-1; table #14 — the packing is the toolbar's one module): the open
- * tab and «Файл отчёта» stay, every label in the strip stays whole. The strip measures its own box and its tabs, and
- * folds before the frame paints, so nothing shows clipped and then jumps (Strict 1). A report whose only part is its
- * file draws no one-tab strip (cand-5): the file reads under the facts. */
+ * folds its tabs from the right into «Ещё N» — the shared tabs' own overflow (`CountTabs` → overflow; craft-1): the
+ * open tab and «Файл отчёта» stay, every label in the strip stays whole. A report whose only part is its file draws no
+ * one-tab strip (cand-5): the file reads under the facts. */
 function Sections({ run, launch: l, tabs, findings, earlier, frames, framesTitle, tab, onTab, now }: SectionsProps) {
   const active = tabs.find((t) => t.id === tab) ?? tabs[0];
-  const root = useRef<HTMLElement>(null);
-  const widths = useRef(new Map<string, number>());
-  const [folded, setFolded] = useState<readonly string[]>([]);
-  const hidden = new Set(folded.filter((id) => id !== active.id));
-  const shown = tabs.filter((t) => !hidden.has(t.id));
-  const ids = tabs.map((t) => t.id).join("|");
-  const single = tabs.length === 1;
-
-  useLayoutEffect(() => {
-    const el = root.current;
-    if (!el || single) return;
-    const measure = (sync: boolean) => {
-      const strip = el.getBoundingClientRect().width;
-      if (strip <= 0) return; // not laid out (hidden, or a test without layout): fold nothing
-      const triggers = el.querySelectorAll<HTMLElement>("[role=tablist] > [role=tab]");
-      shown.forEach((t, i) => {
-        const w = triggers[i]?.getBoundingClientRect().width ?? 0;
-        if (w > 0) widths.current.set(t.id, w);
-      });
-      const next = foldTabs(
-        tabs.map((t) => ({ id: t.id, width: widths.current.get(t.id) ?? 0 })),
-        active.id,
-        strip,
-      );
-      const apply = () => setFolded((prev) => (prev.join("|") === next.join("|") ? prev : next));
-      // a resize commits before paint; inside this effect React already does
-      if (sync) flushSync(apply);
-      else apply();
-    };
-    measure(false);
-    const observer = new ResizeObserver(() => measure(true));
-    observer.observe(el);
-    return () => observer.disconnect();
-    // the tab set, the fold and the open tab decide what is measured, not each render's arrays
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ids, folded, active.id, single]);
-
   const body = (t: ReportTab) => <Body run={run} launch={l} tab={t} findings={findings} earlier={earlier} frames={frames} framesTitle={framesTitle} now={now} />;
-  if (single)
+  if (tabs.length === 1)
     return (
-      <section ref={root} data-slot="report-sections" aria-label={active.label} className="flex min-w-0 flex-col">
+      <section data-slot="report-sections" aria-label={active.label} className="flex min-w-0 flex-col">
         {body(active)}
       </section>
     );
-  const folds = tabs.filter((t) => hidden.has(t.id));
   return (
-    <section ref={root} data-slot="report-sections" aria-label={SECTIONS_LABEL} className="flex min-w-0 flex-wrap items-start">
+    <section data-slot="report-sections" aria-label={SECTIONS_LABEL} className="flex min-w-0 flex-wrap items-start">
       <CountTabs
         sticky
         value={active.id}
         onValueChange={onTab}
         label={SECTIONS_LABEL}
+        overflow={SECTIONS_OVERFLOW}
         className="w-auto min-w-0 flex-1"
-        tabs={shown.map((t) => ({ value: t.id, label: t.label, count: uncounted(t.id) ? null : t.count }))}
+        tabs={tabs.map((t) => ({ value: t.id, label: t.label, count: uncounted(t.id) ? null : t.count }))}
       >
-        {folds.length > 0 && (
-          <div data-slot="report-sections-more" className="sticky top-0 z-10 flex h-10 w-16 shrink-0 items-center border-b bg-background pl-1">
-            <Menu label={MORE_SECTIONS} groups={[folds.map((t) => ({ id: t.id, label: uncounted(t.id) ? t.label : `${t.label} ${num(t.count)}`, onSelect: () => onTab(t.id) }))]}>
-              <Button variant="ghost" size="sm" className="w-full px-2 font-medium text-foreground/60 hover:text-foreground">
-                <span>Ещё</span> <span className="tabular-nums">{num(folds.length)}</span>
-              </Button>
-            </Menu>
-          </div>
-        )}
         {tabs.map((t) => (
           <CountTabsContent key={t.id} value={t.id} className="min-w-0 basis-full pt-4">
             {body(t)}
@@ -485,6 +436,8 @@ function Body({ run, launch: l, tab, findings, earlier, frames, framesTitle, now
   if (body.kind === "compare") return earlier ? <CompareBody run={run} launch={l} earlier={earlier} findings={findings} /> : null;
   // cand-7: a critic's part says what it holds before what it holds — also when the critic wrote nothing into it
   const lead = body.kind === "items" && reportKind(l) === "critic" ? SECTION_LEADS[body.section] : undefined;
+  // a design check's conventions, in the run's order: the ones its CONVENTIONS lines are
+  const conventions = body.kind === "items" && body.section === "CONVENTIONS" ? run.conventions.filter((c) => c.launch === l.id) : null;
   const leadLine = lead ? <Lead>{lead}</Lead> : null;
   if (tab.count === 0)
     return (
@@ -521,15 +474,38 @@ function Body({ run, launch: l, tab, findings, earlier, frames, framesTitle, now
     <div className="flex max-w-measure flex-col gap-3">
       {leadLine}
       {body.value && <RunningText text={body.value} resolve={resolve} renderLink={routerLink} />}
-      {body.items.length > 0 && (
-        <ol data-slot="section-items" className="m-0 flex list-decimal flex-col gap-2 pl-6 marker:text-muted-foreground marker:tabular-nums">
-          {body.items.map((x, i) => (
-            <li key={i} className="pl-1">
-              <RunningText text={x} resolve={resolve} renderLink={routerLink} measure={false} />
-            </li>
-          ))}
-        </ol>
-      )}
+      {body.items.length > 0 &&
+        (conventions ? (
+          // gap 8 (f15): a design check's line leads with its convention's ordinal in the run — a link to its address
+          // in «Соглашения», in the fixed box that view gives it
+          <ol data-slot="section-items" className="m-0 flex list-none flex-col gap-2 p-0">
+            {body.items.map((x, i) => {
+              const c = conventions.find((own) => own.text === x);
+              return (
+                <li key={i} className="flex min-w-0 items-baseline gap-2">
+                  <span className="w-[3ch] shrink-0 text-right text-muted-foreground tabular-nums">
+                    {c ? (
+                      <Link to={runPath(run.key, { view: "conventions", convention: String(c.n) })} aria-label={conventionLinkLabel(c.n)} className={LINK_CLASS}>
+                        {c.n}
+                      </Link>
+                    ) : (
+                      i + 1
+                    )}
+                  </span>
+                  <RunningText text={x} resolve={resolve} renderLink={routerLink} measure={false} className="min-w-0 flex-1" />
+                </li>
+              );
+            })}
+          </ol>
+        ) : (
+          <ol data-slot="section-items" className="m-0 flex list-decimal flex-col gap-2 pl-6 marker:text-muted-foreground marker:tabular-nums">
+            {body.items.map((x, i) => (
+              <li key={i} className="pl-1">
+                <RunningText text={x} resolve={resolve} renderLink={routerLink} measure={false} />
+              </li>
+            ))}
+          </ol>
+        ))}
       {body.section === "CONVENTIONS" && (
         <p className="m-0">
           <Link to={runPath(run.key, { view: "conventions" })} className={LINK_CLASS}>
@@ -643,34 +619,16 @@ function ReportFile({ run, file }: { run: LoadedRun; file: string }) {
 
 const ALL = "all";
 
-/** A click on a row's own text toggles it; a link or a button inside the row keeps its own action. */
-const ownClick = (e: MouseEvent<HTMLElement>) => !(e.target as HTMLElement).closest("a, button");
-
 /** «Находки»: a severity filter over the report's findings — the words alone, their counts are the outcome row's
- * (cand-1) — kept for the view in the browser (cand-3), each one 32 px `FindingRow` that expands in place into the
- * shared article — several may stay open, so the list reads like «Находки» and the whole report scans in a screen
- * (rules/ui → Tables 3). The list is one Tab stop (craft-3; ui → Keyboard): ↑/↓ move between the rows' chevrons,
- * Enter opens or closes, the id's link is the mouse's — «Открыть в находках» in the open row is the keyboard's. The
- * expansion is the user's own and opens under the row, never above it. */
+ * (cand-1) — kept for the view in the browser (cand-3), then the shared rows that expand in place into the article
+ * (`@/finding` → ExpandingFindings: one Tab stop, ↑/↓, Enter; craft-3) — several may stay open, so the list reads
+ * like «Находки» and the whole report scans in a screen (rules/ui → Tables 3). */
 function FindingsBody({ run, findings, now }: { run: LoadedRun; findings: Finding[]; now: number }) {
   const [stored, setStored] = usePref<string>(SEVERITY_PREF, ALL);
-  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
-  const list = useRef<HTMLOListElement>(null);
-  const base = useId();
   const counts = severityCounts(findings);
   // a severity this report has none of reads «все» here and stays chosen for the next report
   const severity = stored === ALL || counts.some((c) => c.severity === stored) ? stored : ALL;
   const shown = severity === ALL ? findings : findings.filter((f) => (f.severity ?? "none") === severity);
-  const toggle = (id: string) =>
-    setOpen((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
-  // the row's id link leaves the Tab order: one stop for the list
-  useLayoutEffect(() => {
-    for (const a of list.current?.querySelectorAll<HTMLElement>("[data-slot=report-finding-line] [data-slot=finding-row] a") ?? []) a.tabIndex = -1;
-  });
   return (
     <div className="flex min-w-0 flex-col gap-3">
       {counts.length > 1 && (
@@ -682,42 +640,7 @@ function FindingsBody({ run, findings, now }: { run: LoadedRun; findings: Findin
           ))}
         </ToggleGroup>
       )}
-      <FlatList label={FINDINGS_LIST_LABEL} onOpen={toggle}>
-        <ol ref={list} data-slot="report-findings" className="m-0 flex list-none flex-col border-t p-0">
-          {shown.map((f, i) => {
-            const isOpen = open.has(f.id);
-            const panel = `${base}-${i}`;
-            const name = `${isOpen ? "Свернуть" : "Развернуть"} находку ${f.local}`;
-            return (
-              <li key={f.id} data-finding={f.id} className="border-b">
-                <div
-                  data-slot="report-finding-line"
-                  data-state={isOpen ? "open" : "closed"}
-                  onClick={(e) => ownClick(e) && toggle(f.id)}
-                  className="grid cursor-default grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-x-1 pr-2 hover:bg-muted data-[state=open]:bg-muted/40"
-                >
-                  <Hint label={name}>
-                    <Button variant="ghost" size="icon-xs" {...flatItem(f.id)} aria-expanded={isOpen} aria-controls={isOpen ? panel : undefined} aria-label={name} onClick={() => toggle(f.id)}>
-                      <ChevronRightIcon aria-hidden="true" className={cn("transition-transform motion-reduce:transition-none", isOpen && "rotate-90")} />
-                    </Button>
-                  </Hint>
-                  <FindingRow run={run} finding={f} />
-                </div>
-                {isOpen && (
-                  <div id={panel} data-slot="report-finding-detail" className="flex flex-col gap-2 bg-muted/40 pt-1 pr-4 pb-4 pl-7">
-                    <p className="m-0 flex justify-end">
-                      <ObjectLink run={run} kind="finding" id={f.id} className="text-xs">
-                        {OPEN_IN_FINDINGS}
-                      </ObjectLink>
-                    </p>
-                    <FindingArticle run={run} finding={f} now={now} inRow />
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ol>
-      </FlatList>
+      <ExpandingFindings run={run} items={shown} label={FINDINGS_LIST_LABEL} now={now} slot="report-findings" />
     </div>
   );
 }

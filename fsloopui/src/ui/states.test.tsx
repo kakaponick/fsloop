@@ -5,8 +5,11 @@ import { join, relative, resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
+import { RUN_FOLDER } from "../../shared/model.ts";
+import { STEPS } from "../../shared/states.ts";
 import { NOUNS } from "../../shared/text.ts";
-import { EmptyState, emptyStateText, emptyWhen, STEPS } from "./empty-state.tsx";
+import { EmptyState, emptyStateText, emptyWhen } from "./empty-state.tsx";
+import { baseName, fileFailure, folderFailure } from "./failure.ts";
 import { Loading } from "./loading.tsx";
 import { PartFailed, partFailedText } from "./part-failed.tsx";
 
@@ -106,5 +109,27 @@ describe("a part that failed", () => {
     render(<PartFailed what="Прогон 00558d48" cause="EBUSY" onRetry={onRetry} />);
     await user.click(screen.getByRole("button", { name: "Повторить" }));
     expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  test("gap 9 (f15): what a reading view could not read — a file by the end of its path, the run folder only behind a live parse — from the shared layer", () => {
+    const errors = [
+      { file: "C:\\runs\\a5\\reports\\p1-decompose-design-check.md", cause: "EBUSY" },
+      { file: RUN_FOLDER, cause: "нет run.json" },
+    ];
+    expect(fileFailure({ errors }, "reports/p1-decompose-design-check.md")).toEqual(errors[0]);
+    expect(fileFailure({ errors }, "journal.md")).toBeNull();
+    expect(folderFailure({ errors, source: "live" })).toEqual(errors[1]);
+    expect(folderFailure({ errors, source: "record" })).toBeNull();
+    expect(baseName("reports\\p1-decompose-design-check.md")).toBe("p1-decompose-design-check.md");
+    expect(baseName("journal.md")).toBe("journal.md");
+  });
+});
+
+describe("gap 13 (f8, f10, f14): no re-export kept for an importer that has moved", () => {
+  test("the stage order comes from shared/states.ts alone; a frame's address from @/api alone", async () => {
+    expect("STEPS" in (await import("./index.ts"))).toBe(false);
+    expect("STEPS" in (await import("./empty-state.tsx"))).toBe(false);
+    expect("frameSrc" in (await import("../finding/article.tsx"))).toBe(false);
+    expect("frameSrc" in (await import("../finding/index.ts"))).toBe(false);
   });
 });

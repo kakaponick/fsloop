@@ -17,9 +17,6 @@ import { CAUSE, CONFIDENCE, enumFact, FACT, reportWord, SECTION, verdictValue } 
 
 type ArticleRun = Pick<Run, "findings" | "units" | "launches" | "journal"> & { key: string };
 
-// a frame's address is the API module's; named here too until the reports reader imports it from `@/api`
-export { frameSrc };
-
 export interface FindingArticleProps {
   run: ArticleRun;
   finding: Finding;

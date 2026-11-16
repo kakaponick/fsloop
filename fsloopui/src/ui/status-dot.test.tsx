@@ -72,10 +72,22 @@ describe("absent parts", () => {
   test("«не найден» agrees with its object", () => {
     expect(notFoundText("unit", "u7")).toBe("юнит u7 не найден");
     expect(notFoundText("finding", "p1-review-craft#craft-3", { start: true })).toBe("Находка p1-review-craft#craft-3 не найдена");
-    expect(notFoundText("entry", "12")).toBe("запись журнала 12 не найдена");
+    // gap 11 (f16; ux 1): a journal entry is «решение» everywhere; gap 8 (f15): a convention has its own word
+    expect(notFoundText("entry", "12")).toBe("решение 12 не найдено");
+    expect(notFoundText("convention", "99", { start: true })).toBe("Соглашение 99 не найдено");
     const { container } = render(<NotFound kind="report" id="p1-map-map" start />);
     expect(container).toHaveTextContent("Отчёт p1-map-map не найден");
     expect(container.querySelector(".font-mono")).toHaveTextContent("p1-map-map");
+  });
+
+  test("gap 11 (f16): «не найден» takes the search's hit painter for its id, which is searched; the words around it stay plain", () => {
+    const paint = (s: string) => s.split(/(u7)/).map((part, i) => (part === "u7" ? <mark key={i} data-slot="hit">{part}</mark> : part));
+    const { container } = render(<NotFound kind="unit" id="u7" highlight={paint} />);
+    expect(container).toHaveTextContent("юнит u7 не найден");
+    expect(container.querySelector("mark[data-slot=hit]")?.parentElement).toHaveClass("font-mono");
+    expect(container.querySelectorAll("mark")).toHaveLength(1);
+    const neuter = render(<NotFound kind="entry" id="99" start />);
+    expect(neuter.container).toHaveTextContent("Решение 99 не найдено");
   });
 
   test("«не записано» stands with a neutral dot, never a guessed value", () => {

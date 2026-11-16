@@ -18,14 +18,13 @@ import { STAGE_WORDS, stageOf } from "../../../shared/states.ts";
 import { count, NOUNS, type Forms } from "../../../shared/text.ts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { copyLabel, copyText, EmptyState, emptyWhen, FactList, Hint, markProps, NotRecorded, OutOfFilter, PartFailed, RunningText, TOAST_MAX_TITLE, type Fact, type Resolve } from "@/ui";
+import { baseName, copyLabel, copyText, EmptyState, emptyWhen, FactList, fileFailure, folderFailure, Hint, markProps, NotFound, NotRecorded, OutOfFilter, PartFailed, RunningText, TOAST_MAX_TITLE, type Fact, type Resolve } from "@/ui";
 import { AdaptiveToolbar, filterSummary, Highlight, pushHistory, runQuery, SearchBox, StatusBar, tokens, useRunView, useTableView, type SearchDef, type ToolbarItem } from "@/table";
 import { useNow } from "../../app/clock.tsx";
 import { LINK_CLASS, resolverFor, routerLink } from "../../app/links.tsx";
 import { useUpdatedAt } from "../../app/live.tsx";
 import { runPath } from "../../app/routes.ts";
 import type { LoadedRun, ViewProps } from "../index.ts";
-import { baseName, fileFailure, folderFailure } from "../journal/failure.ts";
 
 export const INTRO = "Соглашение — одно решение на задачу, которую юниты решали бы по-разному; в конце прогона соглашения попадают в `.claude/rules/ui.md`.";
 export const DESIGN_CHECK = "Проверка дизайна";
@@ -41,8 +40,8 @@ export const PLACE_WHAT = "место";
 export const CONVENTIONS_PART = "Список соглашений";
 /** The view's id for its persisted search (view state, never the URL: rules/ui → Conventions 12). */
 export const CONVENTIONS_VIEW = "conventions";
-/** A `convention=` the run does not hold. */
-export const conventionMissing = (n: string): string => `Соглашения ${n} в этом прогоне нет — проверьте ссылку`;
+/** What follows the shared «Соглашение <n> не найдено» for a `convention=` the run does not hold: why, what to do. */
+export const MISSING_NEXT = ": в этом прогоне его нет — проверьте ссылку";
 
 /** The search looks in every part of a convention; the places and the launch match as identifiers (table #12). */
 export const SEARCH: SearchDef<Convention> = {
@@ -77,8 +76,8 @@ export function copiedWhat(place: string): string {
   return `…/${tail}`;
 }
 
-/** The address of a convention: `?view=conventions&convention=<n>`. */
-export const conventionPath = (key: string, n: number): string => `${runPath(key, { view: CONVENTIONS_VIEW })}&convention=${n}`;
+/** The address of a convention: `?view=conventions&convention=<n>`, a query key as every object's. */
+export const conventionPath = (key: string, n: number): string => runPath(key, { view: CONVENTIONS_VIEW, convention: String(n) });
 
 export interface ConventionParts {
   pattern: string;
@@ -186,7 +185,8 @@ export function ConventionsView({ run }: ViewProps) {
               <RunningText text={INTRO} measure={false} className="text-xs text-muted-foreground" />
               {wanted !== null && !target && (
                 <p role="status" data-slot="convention-missing" className="m-0">
-                  {conventionMissing(wanted)}
+                  <NotFound kind="convention" id={wanted} start />
+                  {MISSING_NEXT}
                 </p>
               )}
             </div>
@@ -316,18 +316,14 @@ function ConventionItem({ convention: c, runKey, resolve, toks, target, outside,
   );
 }
 
-/** Marks a place in the resolver's answer, so the renderer hands it to the copy button instead of a link. */
-const COPY = "copy:";
-
 /** The example as the design check wrote it — running text, the words between its places kept — each place a copy
- * button where it stands; a bare one-token example is that one place. A place wraps inside its button, so its file
- * name is always on screen (craft-4). */
+ * button where it stands, through the renderer's own seam for code (`renderCode`); a bare one-token example is that
+ * one place. A place wraps inside its button, so its file name is always on screen (craft-4). */
 function Example({ text, resolve, highlight }: { text: string; resolve: Resolve; highlight: (text: string) => ReactNode }) {
   const places = new Set(placesOf(text));
   const source = /`/.test(text) || places.size === 0 ? text : `\`${text}\``;
-  const own: Resolve = (token) => (places.has(token.trim()) ? `${COPY}${token.trim()}` : resolve(token));
-  const render = (href: string, children: ReactNode) => (href.startsWith(COPY) ? <PlaceButton place={href.slice(COPY.length)}>{children}</PlaceButton> : routerLink(href, children));
-  return <RunningText text={source} resolve={own} renderLink={render} measure={false} highlight={highlight} />;
+  const renderCode = (body: string, code: ReactNode) => (places.has(body.trim()) ? <PlaceButton place={body.trim()}>{code}</PlaceButton> : null);
+  return <RunningText text={source} resolve={resolve} renderLink={routerLink} renderCode={renderCode} measure={false} highlight={highlight} />;
 }
 
 /** One place of an example: the inline code itself is the button; a click copies it, «Скопировано: <место>». */

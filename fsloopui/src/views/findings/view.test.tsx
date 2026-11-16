@@ -7,7 +7,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterAll, describe, expect, test } from "vitest";
 import type { Finding } from "../../../shared/model.ts";
-import { FINDING_STATUS, SEVERITY, type Verdict } from "../../../shared/states.ts";
+import { FINDING_STATUS, SEVERITY, VERDICT, type Verdict } from "../../../shared/states.ts";
 import { readRun } from "../../../server/run.ts";
 import { emptyStateText, glossaryLines, UiProvider } from "@/ui";
 import { ANY_LABEL, assertLayout, CUSTOM_LABEL, fitsRegion, headerWidth, isSelectFilter, mergeWidths, pack, PRESET_LABEL, runQuery, type FilterDef, type PackItem } from "@/table";
@@ -73,6 +73,18 @@ describe("the view's configuration at the production shape", () => {
     // craft-10: the cell names a launch as the «Отчёт» filter does, the pass and stage that tell launches apart kept
     const labels = new Map(reportOptions(run).map((o) => [o.value, o.label]));
     for (const f of run.findings) if (f.launch) expect(reportWord(f), f.id).toBe(labels.get(f.launch));
+    const visible = COLUMNS.filter((c) => !c.hidden);
+    expect(fitsRegion(visible, mergeWidths(COLUMNS, null), REGION)).toBe(true);
+    expect(fitsRegion(visible, mergeWidths(COLUMNS, null), REGION_1440)).toBe(true);
+  });
+
+  test("gap 6 (f12; table #10): «Оценка» clears its widest value, «не та серьёзность», by the same measure — the table still whole at 1280 and 1440", () => {
+    // the 128 px it had cut it: 120 px of text in a cell's 112
+    expect(textWidth("не та серьёзность")).toBe(120);
+    expect(textWidth("не та серьёзность") + CELL_PAD).toBeGreaterThan(128);
+    const verdicts = Object.values(VERDICT).map((v) => v.compact);
+    expect(widest(verdicts)).toBe(textWidth("не та серьёзность"));
+    expect(widest(verdicts) + CELL_PAD).toBeLessThanOrEqual(widthOf("verdict"));
     const visible = COLUMNS.filter((c) => !c.hidden);
     expect(fitsRegion(visible, mergeWidths(COLUMNS, null), REGION)).toBe(true);
     expect(fitsRegion(visible, mergeWidths(COLUMNS, null), REGION_1440)).toBe(true);

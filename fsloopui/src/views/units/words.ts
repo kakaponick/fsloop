@@ -73,10 +73,6 @@ export const HELD_NOUN: Record<"finding" | "launch" | "check", HeldNoun> = {
   check: { forms: ["проверка", "проверки", "проверок"], gender: "f" },
 };
 
-/** A finding the unit closes, expanded in place: its chevron's name and the step to its own place (as in «Отчёты»). */
-export const findingToggle = (local: string, open: boolean): string => `${open ? "Свернуть" : "Развернуть"} находку ${local}`;
-export const OPEN_IN_FINDINGS = "Открыть в находках";
-
 /** The row menu's item beyond «Открыть» and the copies; it is listed only for a unit that closes findings. */
 export const OPEN_FINDINGS = "Открыть находки юнита";
 

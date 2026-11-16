@@ -3,7 +3,7 @@
 // the view's configuration at the production shape (0 / 14 / 42 units, a 964 px region), the empty states and the
 // strict rules (no layout shift, no skeletons).
 import "../../ui/test-setup.ts";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, describe, expect, test, vi } from "vitest";
 import { emptyStateText, glossaryLines, readPref } from "@/ui";
@@ -124,6 +124,68 @@ describe("the view's configuration at the production shape", () => {
     // «Вид» in the toolbar the search's text room is about 168 px at 1440 (a 271 px field less its 103 px of icon,
     // «/», clear and history) and about 209 px at 1280 (both filters folded into «…»): 25 characters at most
     expect(SEARCH.placeholder.length).toBeLessThanOrEqual(25);
+  });
+
+  // p2-fix-f13-implement#open-1 (table #12: the placeholder names the fields searched, whole). The toolbar's real
+  // packing over the view's real items, laid out at estimates of their boxes at the body face (13 px): «Вид» at its
+  // widest «Вид: Заблокированы» 179, «Состояние: все» 144, «Проход: все» 122, the facts at their reserved
+  // «888 кандидатов» and «888 находок без решения» 305, the columns menu 28. The search's chrome — its icon, the «/»
+  // cap, the clear and history buttons — is 91 px around a field whose own padding is 12; the placeholder, 25
+  // characters at the 6.7 px p1-verdict-units-1280.png measured, needs 168 px of text.
+  describe("p2-fix-f13-implement#open-1: the search shows its placeholder whole, the toolbar's other items folding first", () => {
+    const WIDTHS: Record<string, number> = { preset: 179, search: 192, "filter-state": 144, "filter-pass": 122, facts: 305, columns: 28 };
+    const CHROME = 91;
+    const PADDING = 12;
+    const TEXT = 168;
+    const GAP = 8;
+    const MORE = 28;
+    for (const [label, width] of [
+      ["1280", REGION],
+      ["1440", 1440 - 316 - 40],
+    ] as const)
+      for (const [passes, n] of [
+        ["one-pass", ONE],
+        ["two-pass", N],
+      ] as const)
+        test(`${label} px, a ${passes} run: the room the packing leaves the search holds its chrome and the whole placeholder`, () => {
+          const callbacks: (() => void)[] = [];
+          vi.stubGlobal(
+            "ResizeObserver",
+            class {
+              constructor(cb: () => void) {
+                callbacks.push(cb);
+              }
+              observe() {}
+              disconnect() {}
+            },
+          );
+          const spy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+            const w =
+              this.dataset.slot === "adaptive-toolbar"
+                ? width
+                : this.hasAttribute("data-flex-field")
+                  ? WIDTHS.search - CHROME
+                  : this.hasAttribute("data-flex-sizer")
+                    ? TEXT + PADDING
+                    : (WIDTHS[this.dataset.toolbarItem ?? ""] ?? 0);
+            return { width: w, height: 28, x: 0, y: 0, top: 0, left: 0, right: w, bottom: 28, toJSON: () => ({}) } as DOMRect;
+          });
+          try {
+            const target = loadedRun(fx, n);
+            const { container } = renderRun(fx, target, runPath(target.key, { view: "units" }));
+            act(() => callbacks.forEach((cb) => cb()));
+            const shown = [...container.querySelectorAll<HTMLElement>("[data-toolbar-item]")].map((el) => el.dataset.toolbarItem as string);
+            expect(shown).toContain("search");
+            const folded = container.querySelector("[data-slot=toolbar-overflow]") !== null;
+            const others = shown.filter((id) => id !== "search");
+            const count = shown.length + (folded ? 1 : 0);
+            const room = width - others.reduce((s, id) => s + WIDTHS[id], 0) - (folded ? MORE : 0) - GAP * (count - 1);
+            expect(room - CHROME - PADDING).toBeGreaterThanOrEqual(TEXT);
+          } finally {
+            spy.mockRestore();
+            vi.unstubAllGlobals();
+          }
+        });
   });
 
   test("p1-review cand-1: «Вид» presets — Все · В работе · Не начаты · Заблокированы · Закоммичены — over the states, counted on the 42 units", () => {

@@ -134,10 +134,17 @@ function HeldBox({ slot, children }: { slot: string; children: ReactNode }) {
     if (ref.current) ref.current.style.height = "";
     setOpen(true);
     setHidden(0);
+    // the button goes with the click: focus lands on the box it opened, which now scrolls, never on the page's body
+    ref.current?.focus({ preventScroll: true });
   };
   const more = open ? 0 : hidden;
   return (
-    <div ref={ref} data-slot={slot} className={cn("relative max-h-[6lh] min-h-[2lh] [scrollbar-gutter:stable]", more ? "overflow-hidden" : "overflow-y-auto")}>
+    <div
+      ref={ref}
+      data-slot={slot}
+      tabIndex={-1}
+      className={cn("relative max-h-[6lh] min-h-[2lh] rounded-sm outline-none [scrollbar-gutter:stable] focus-visible:ring-3 focus-visible:ring-ring/50", more ? "overflow-hidden" : "overflow-y-auto")}
+    >
       {children}
       {more > 0 && (
         <button

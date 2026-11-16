@@ -1,7 +1,9 @@
 // Search with history (table #12; rules/ui → Conventions 11): the shared search of every table and every list view —
 // never a bare input. The placeholder names the fields searched; `/` outside a text field focuses it (the shortcut
 // hook holds the conditions); a committed term — Enter, or leaving the field — joins the table's history, which ↓ or
-// the clock button opens. The clear button and the key cap keep their box whether shown or not (Strict 1).
+// the clock button opens. The clear button and the key cap keep their box whether shown or not (Strict 1); a search
+// `/` does not focus draws no cap (ux 0: an element says only what is true of it). It carries its floor — its chrome
+// and its placeholder whole — for the adaptive toolbar to measure, so the toolbar folds before the placeholder is cut.
 import { HistoryIcon, SearchIcon, XIcon } from "lucide-react";
 import { Fragment, useRef, useState, type ReactNode } from "react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -45,6 +47,7 @@ export function SearchBox({ value, onChange, placeholder, history, onCommit, sho
       </InputGroupAddon>
       <InputGroupInput
         ref={own}
+        data-flex-field=""
         type="search"
         aria-label={`${SEARCH_LABEL}: ${placeholder}`}
         placeholder={placeholder}
@@ -67,10 +70,15 @@ export function SearchBox({ value, onChange, placeholder, history, onCommit, sho
         }}
         className="[&::-webkit-search-cancel-button]:hidden"
       />
+      {/* the field's floor for the toolbar to measure: the placeholder at the field's padding and type, unseen, unread,
+          out of the flow — so the toolbar folds its other items before the placeholder is cut (table #12) */}
+      <span aria-hidden="true" data-flex-sizer="" data-text={placeholder} className="pointer-events-none invisible absolute top-0 left-0 px-1.5 text-base whitespace-nowrap after:content-[attr(data-text)] md:text-sm" />
       <InputGroupAddon align="inline-end" className="gap-0.5">
-        <span aria-hidden={focused || value ? true : undefined} className={cn(focused || value ? "invisible" : undefined)}>
-          <Keys codes={["Slash"]} />
-        </span>
+        {shortcut && (
+          <span aria-hidden={focused || value ? true : undefined} className={cn(focused || value ? "invisible" : undefined)}>
+            <Keys codes={["Slash"]} />
+          </span>
+        )}
         <Hint label={CLEAR_LABEL} keys={["Escape"]}>
           <InputGroupButton size="icon-xs" aria-label={CLEAR_LABEL} tabIndex={value ? 0 : -1} aria-hidden={value ? undefined : true} className={cn(!value && "invisible")} onClick={() => choose("")}>
             <XIcon />
