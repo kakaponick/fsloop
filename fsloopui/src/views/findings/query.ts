@@ -65,6 +65,8 @@ export function reportOptions(run: FilterRun): { value: string; label: string }[
   return out;
 }
 
+/** The filters in toolbar order: the toolbar folds right to left, so the ones read most stay — «Оценка», the
+ * dimension of the view's own write, before «Отчёт»; «Охват» and «Правка» fold first (surfaces/findings.md → ACTIONS). */
 export function filtersFor(run: FilterRun): FilterDef<Finding>[] {
   const commands = [...new Set(run.findings.map((f) => f.fixCommand).filter((c): c is string => Boolean(c)))].sort();
   const unitIds = [...new Set([...run.units.map((u) => u.id), ...run.findings.flatMap((f) => f.units)])];
@@ -77,9 +79,9 @@ export function filtersFor(run: FilterRun): FilterDef<Finding>[] {
       options: [{ value: MAJOR_UP, label: "major и выше" }, ...(["critical", "major", "minor"] as const).map((v) => ({ value: v, label: SEVERITY[v].compact })), { value: NONE, label: NOT_RECORDED }],
     },
     { id: "state", label: "Состояние", values: FACETS.state, options: (Object.keys(FINDING_STATUS) as FindingStatus[]).map((v) => ({ value: v, label: FINDING_STATUS[v].compact })), placeholder: "Найти состояние" },
+    { id: "verdict", label: "Оценка", values: FACETS.verdict, options: [...(Object.keys(VERDICT) as Verdict[]).map((v) => ({ value: v, label: VERDICT[v].compact })), { value: NONE, label: "без оценки" }] },
     { id: "report", label: "Отчёт", values: FACETS.report, options: reportOptions(run), placeholder: "Найти отчёт" },
     { id: "unit", label: "Юнит", values: FACETS.unit, options: [...unitIds.map((id) => ({ value: id, label: title.has(id) ? `${id} «${title.get(id)}»` : id })), { value: NONE, label: "без юнита" }], placeholder: "Найти юнит" },
-    { id: "verdict", label: "Оценка", values: FACETS.verdict, options: [...(Object.keys(VERDICT) as Verdict[]).map((v) => ({ value: v, label: VERDICT[v].compact })), { value: NONE, label: "без оценки" }] },
     { id: "cause", label: "Охват", values: FACETS.cause, options: [...CAUSES.map((v) => ({ value: v, label: v })), { value: NONE, label: NOT_RECORDED }] },
     { id: "command", label: "Правка", values: FACETS.command, options: [...commands.map((v) => ({ value: v, label: v })), { value: NONE, label: "без команды" }], placeholder: "Найти команду" },
   ];

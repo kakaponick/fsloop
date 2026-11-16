@@ -10,8 +10,7 @@ import { afterAll, describe, expect, test } from "vitest";
 import { criticReport, lines } from "../../../fixtures/make.ts";
 import { readRun } from "../../../server/run.ts";
 import { runPath } from "../../app/routes.ts";
-import { verdictLine, verdictTitle, VERDICT_PROMPT, SAVE_FAILED, failedCause } from "@/finding";
-import { findingsApp, keyOf, MIN, NOW, renderFindings } from "./testing.tsx";
+import { DIALOG_PROMPT, failedCause, NOTE_SAVE, NOTE_UNSAVED, NOTE_UNSAVED_FIRST, SAVE_FAILED, SECTION, verdictLine, verdictTitle, verdictValue, VERDICT_PROMPT } from "@/finding";import { findingsApp, keyOf, MIN, NOW, renderFindings } from "./testing.tsx";
 
 // A live fixture run whose second critic of the map reported 14 findings: one page holds every row, and a
 // selection of 12 fits it (the 723-finding run is view.test.tsx's).
@@ -45,8 +44,22 @@ describe("the verdict's words", () => {
     expect(verdictTitle(["p1-review-critic-craft#craft-12"])).toBe("Оценка находки p1-review-critic-craft#craft-12");
     expect(failedCause("Оценка не сохранилась: EACCES: permission denied")).toBe("EACCES: permission denied");
     expect(failedCause("")).toBe("сервер не ответил");
-    expect(VERDICT_PROMPT.split(" ")).toHaveLength(12);
     expect(TOTAL).toBe(18);
+  });
+
+  test("craft-9, craft-20, craft-24: the value under «Ваша оценка», the short prompt, the note's status words", () => {
+    expect(verdictValue({ verdict: "agree", at: AT }, NOW)).toBe("согласен · 19:41 МСК");
+    expect(verdictValue({ verdict: "wrong-severity", at: "2026-11-15T20:00:00Z" }, NOW)).toBe("не та серьёзность · 15.11 23:00 МСК");
+    expect(verdictValue({ verdict: "false-positive", at: null }, NOW)).toBe("ложная находка");
+    expect(SECTION.verdict).toBe("Ваша оценка");
+    expect(VERDICT_PROMPT).toBe("Оценки ещё нет — выберите одну");
+    expect(VERDICT_PROMPT.split(" ")).toHaveLength(6);
+    expect(DIALOG_PROMPT).toBe("Выберите оценку — она сразу сохранится вместе с заметкой");
+    expect(DIALOG_PROMPT.split(" ")).toHaveLength(9);
+    expect(NOTE_UNSAVED).toBe("Заметка не сохранена");
+    expect(NOTE_UNSAVED_FIRST).toBe("Заметка не сохранена — она сохранится вместе с оценкой");
+    expect(NOTE_UNSAVED_FIRST.split(" ")).toHaveLength(9);
+    expect(NOTE_SAVE).toBe("Сохранить заметку");
   });
 });
 
@@ -63,7 +76,7 @@ describe("setting a verdict over u1's handler", () => {
     await writeNote(user, detail(id), "верно, проверил");
     await user.click(within(detail(id)).getByRole("radio", { name: "согласен" }));
     // at once, before the write returns
-    expect(detail(id).querySelector("[data-slot=verdict-line]")).toHaveTextContent("Ваша оценка: согласен · 19:41 МСК");
+    expect(detail(id).querySelector("[data-slot=verdict-line]")).toHaveTextContent(/^согласен · 19:41 МСК$/);
     expect(detail(id).querySelector("[data-slot=verdict-line]")).toBe(line);
     expect(line).toHaveClass("h-5");
     expect(verdictCell(id)).toHaveTextContent("согласен");
@@ -74,7 +87,7 @@ describe("setting a verdict over u1's handler", () => {
     renderFindings(app, KEY, runPath(KEY, { view: "findings", finding: id }));
     await loaded();
     await waitFor(() => expect(detail(id)).toBeTruthy());
-    expect(detail(id).querySelector("[data-slot=verdict-line]")).toHaveTextContent("Ваша оценка: согласен · 19:41 МСК");
+    expect(detail(id).querySelector("[data-slot=verdict-line]")).toHaveTextContent(/^согласен · 19:41 МСК$/);
     expect(within(detail(id)).getByLabelText("Заметка к оценке")).toHaveValue("верно, проверил");
     expect(within(detail(id)).getByRole("radio", { name: "согласен" })).toHaveAttribute("data-state", "on");
   });
@@ -135,6 +148,71 @@ describe("setting a verdict over u1's handler", () => {
     await waitFor(() => expect(linesOf(id)).toEqual([{ finding: id, verdict: "false-positive", note: "ложная: место другое", at: AT }]));
   });
 
+  test("craft-9, craft-20: «Ваша оценка» heads the block, the four choices right under its line, the note after them, no hint; every box reserved", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderFindings(app, KEY, runPath(KEY, { view: "findings" }));
+    await loaded();
+    const id = bodyRows()[14].dataset.rowId as string;
+    await user.click(row(id).querySelector("td[data-col=summary]") as HTMLElement);
+    const d = detail(id);
+    const heading = within(d).getByRole("heading", { name: SECTION.verdict });
+    const line = d.querySelector("[data-slot=verdict-line]") as HTMLElement;
+    const group = d.querySelector("[data-slot=toggle-group]") as HTMLElement;
+    const radios = within(group).getAllByRole("radio");
+    const note = within(d).getByLabelText("Заметка к оценке");
+    const status = d.querySelector("[data-slot=note-status]") as HTMLElement;
+    expect(radios.map((r) => r.textContent)).toEqual(["согласен", "не согласен", "не та серьёзность", "ложная находка"]);
+    // reading order: heading → the line → the four choices → the note → its status
+    const order = [heading, line, radios[0], radios[3], note, status];
+    for (let i = 1; i < order.length; i++) expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING, `${i}`).toBeTruthy();
+    // nothing stands between the prompt and its choices
+    expect(line).toHaveTextContent(/^Оценки ещё нет — выберите одну$/);
+    expect(line.nextElementSibling).toBe(group);
+    // the hint is gone: what it said is now the note's own status line
+    expect(d).not.toHaveTextContent("выберите оценку ещё раз");
+    // Strict 1: the line, the field and the status line keep fixed boxes
+    expect(line).toHaveClass("h-5", "truncate");
+    expect(note).toHaveClass("h-16", "min-h-16");
+    expect(status).toHaveClass("h-6");
+    expect(status).toHaveTextContent(/^$/);
+  });
+
+  test("craft-24: a typed note outlives a collapse; the reserved line says it is not saved, and saves it", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderFindings(app, KEY, runPath(KEY, { view: "findings" }));
+    await loaded();
+    const id = bodyRows()[15].dataset.rowId as string;
+    const summary = () => row(id).querySelector("td[data-col=summary]") as HTMLElement;
+    const status = () => detail(id).querySelector("[data-slot=note-status]") as HTMLElement;
+    const field = () => within(detail(id)).getByLabelText("Заметка к оценке");
+    await user.click(summary());
+    await writeNote(user, detail(id), "черновик");
+    expect(status()).toHaveTextContent(NOTE_UNSAVED_FIRST);
+    expect(within(status()).queryByRole("button")).toBeNull();
+    // collapsed and expanded again: the draft is the view's, not the row's
+    await user.click(summary());
+    expect(detail(id)).toBeUndefined();
+    await user.click(summary());
+    expect(field()).toHaveValue("черновик");
+    expect(status()).toHaveTextContent(NOTE_UNSAVED_FIRST);
+    expect(status()).toHaveClass("h-6");
+    // the choice saves the draft with it
+    await user.click(within(detail(id)).getByRole("radio", { name: "согласен" }));
+    expect(status()).toHaveTextContent(/^$/);
+    await waitFor(() => expect(linesOf(id)).toEqual([{ finding: id, verdict: "agree", note: "черновик", at: AT }]));
+    // a changed note after the choice: the line says so and its button saves it with the same verdict
+    await user.clear(field());
+    await user.paste("черновик, проверил ещё раз");
+    expect(status()).toHaveTextContent(NOTE_UNSAVED);
+    expect(status()).toHaveClass("h-6");
+    await user.click(within(status()).getByRole("button", { name: NOTE_SAVE }));
+    expect(status()).toHaveTextContent(/^$/);
+    await waitFor(() => expect(linesOf(id).map((l) => [l.verdict, l.note])).toEqual([
+      ["agree", "черновик"],
+      ["agree", "черновик, проверил ещё раз"],
+    ]));
+  });
+
   test("a later verdict replaces the earlier one; both stay in human.jsonl", async () => {
     const user = userEvent.setup({ delay: null });
     const view = renderFindings(app, KEY, runPath(KEY, { view: "findings" }));
@@ -144,7 +222,7 @@ describe("setting a verdict over u1's handler", () => {
     await user.click(within(detail(id)).getByRole("radio", { name: "согласен" }));
     await waitFor(() => expect(linesOf(id)).toHaveLength(1));
     await user.click(within(detail(id)).getByRole("radio", { name: "не та серьёзность" }));
-    expect(detail(id).querySelector("[data-slot=verdict-line]")).toHaveTextContent("Ваша оценка: не та серьёзность · 19:41 МСК");
+    expect(detail(id).querySelector("[data-slot=verdict-line]")).toHaveTextContent(/^не та серьёзность · 19:41 МСК$/);
     await waitFor(() => expect(linesOf(id).map((l) => l.verdict)).toEqual(["agree", "wrong-severity"]));
     await waitFor(() => {
       const s = view.store.getSnapshot().runs[KEY];

@@ -117,13 +117,14 @@ function Findings({ run }: { run: LoadedRun }) {
       { id: "rate", label: RATE_ACTION, scope: "both", group: 1, run: (rs) => setRating(rs.map(rowId)) },
       copyAction<Finding>("copy-link", "ссылку", (f) => `${window.location.origin}${runPath(run.key, { view: "findings", finding: f.id })}`, "single", 2),
       copyAction<Finding>("copy-id", "id", (f) => f.id, "both", 2),
-      { ...copyAction<Finding>("copy-location", "место", (f) => f.location, "both", 2), blocked: (rs) => (rs.every((f) => !f.location) ? "Место не записано: отчёт не назвал файл и строку" : undefined) },
+      // an item whose object the rows can never have is not listed (table #4; rules/ui → Scope: no disabled action)
+      { ...copyAction<Finding>("copy-location", "место", (f) => f.location, "both", 2), hidden: (rs) => rs.every((f) => !f.location) },
       {
         id: "open-report",
         label: "Открыть отчёт",
         scope: "single",
         group: 3,
-        blocked: (rs) => (rs[0]?.launch ? undefined : "У находки нет отчёта запуска: её записал сам прогон"),
+        hidden: (rs) => !rs[0]?.launch,
         run: (rs) => {
           const href = rs[0]?.launch ? objectHref(run, { kind: "report", id: rs[0].launch }) : null;
           if (href) navigate(href);
@@ -134,7 +135,7 @@ function Findings({ run }: { run: LoadedRun }) {
         label: (rs) => (rs[0] && stateUnit(rs[0]) ? `Открыть юнит ${stateUnit(rs[0])}` : "Открыть юнит"),
         scope: "single",
         group: 3,
-        blocked: (rs) => (rs[0] && stateUnit(rs[0]) ? undefined : "Находку не исправляет ни один юнит: прогон не взял её в исправление"),
+        hidden: (rs) => !rs[0] || !stateUnit(rs[0]),
         run: (rs) => {
           const unit = rs[0] ? stateUnit(rs[0]) : null;
           const href = unit ? objectHref(run, { kind: "unit", id: unit }) : null;
@@ -188,5 +189,5 @@ function Findings({ run }: { run: LoadedRun }) {
 }
 
 function FindingDetail({ run, finding, verdicts, now }: { run: LoadedRun; finding: Finding; verdicts: Verdicts; now: number }) {
-  return <FindingArticle run={run} finding={finding} now={now} verdict={<FindingVerdict finding={finding} verdicts={verdicts} now={now} />} />;
+  return <FindingArticle run={run} finding={finding} now={now} inRow verdict={<FindingVerdict finding={finding} verdicts={verdicts} now={now} />} />;
 }

@@ -11,7 +11,7 @@ import { FINDING_STATUS, SEVERITY } from "../../../shared/states.ts";
 import { readRun } from "../../../server/run.ts";
 import { emptyStateText, glossaryLines, UiProvider } from "@/ui";
 import { assertLayout, fitsRegion, headerWidth, isSelectFilter, mergeWidths, runQuery, type FilterDef } from "@/table";
-import { countFindings, FindingArticle, findingNotFound, openFindings, SECTION, textSections } from "@/finding";
+import { CAUSE, CONFIDENCE, countFindings, enumFact, FACT, FindingArticle, findingNotFound, openFindings, SECTION, textSections } from "@/finding";
 import { renderShell } from "../../app/testing.tsx";
 import { runPath } from "../../app/routes.ts";
 import { COLUMNS } from "./columns.tsx";
@@ -44,11 +44,11 @@ describe("the view's configuration at the production shape", () => {
     for (const c of COLUMNS) if (c.glossary) expect(() => glossaryLines(c.glossary ?? []), c.id).not.toThrow();
   });
 
-  test("the filters of the shape's ACTIONS, in order, «Состояние» and «Правка» comboboxes; counts over the model", () => {
+  test("craft-26: the filters in toolbar order — «Оценка» before «Отчёт», so it folds after it; «Состояние» and «Правка» comboboxes; counts over the model", () => {
     const filters = filtersFor(run);
-    expect(filters.map((f) => f.label)).toEqual(["Серьёзность", "Состояние", "Отчёт", "Юнит", "Оценка", "Охват", "Правка"]);
+    expect(filters.map((f) => f.label)).toEqual(["Серьёзность", "Состояние", "Оценка", "Отчёт", "Юнит", "Охват", "Правка"]);
     const kinds = filters.map((f) => (isSelectFilter(f as FilterDef<unknown>) ? "select" : "combobox"));
-    expect(kinds).toEqual(["select", "combobox", "combobox", "combobox", "select", "select", "combobox"]);
+    expect(kinds).toEqual(["select", "combobox", "select", "combobox", "combobox", "select", "combobox"]);
     expect(filters[0].options.map((o) => o.label)).toEqual(["major и выше", "critical", "major", "minor", "не записано"]);
     const q = runQuery({ rows: run.findings, rowId: (f) => f.id, columns: [], filters, search: SEARCH, state: { sort: null, filters: {}, search: "" }, presets: PRESETS });
     expect(q.total).toBe(723);
@@ -103,7 +103,7 @@ describe("the task walk over u1's handler (surfaces/findings.md → WALK)", () =
     await waitFor(() => expect(bodyRows()).toHaveLength(50), { timeout: 4000 });
   });
 
-  test("3: every finding of every source, 15 pages of 50, the default sort, «Вид» with its count, search, filtered to none", async () => {
+  test("3, craft-26: every finding of every source, 15 pages of 50, the default sort, «Вид» with its count, the toolbar's order, search, filtered to none", async () => {
     const user = userEvent.setup({ delay: null });
     const { container } = renderFindings(app, KEY, runPath(KEY, { view: "findings" }));
     await loaded();
@@ -117,9 +117,9 @@ describe("the task walk over u1's handler (surfaces/findings.md → WALK)", () =
       "search",
       "filter-severity",
       "filter-state",
+      "filter-verdict",
       "filter-report",
       "filter-unit",
-      "filter-verdict",
       "filter-cause",
       "filter-command",
       "columns",
@@ -160,21 +160,50 @@ describe("the task walk over u1's handler (surfaces/findings.md → WALK)", () =
       .map((h) => h.textContent);
     expect(new Set(headings).size).toBe(headings.length);
     expect(headings).toContain(SECTION.decision);
+    // craft-20: the verdict block has its own heading; the fact line leaves out the severity its row shows
+    expect(headings).toContain(SECTION.verdict);
+    const facts = detail(a).querySelector("[data-slot=finding-facts]") as HTMLElement;
+    expect(facts.querySelector("[data-slot=status-dot]")).toBeNull();
+    expect(facts).not.toHaveTextContent(new RegExp(`^${f.severity}`));
     for (const unit of f.units) expect(within(detail(a)).getByRole("link", { name: new RegExp(`^${unit}`) })).toHaveAttribute("href", runPath(KEY, { view: "units", unit }));
 
-    // the row menu: one row, then a selection of two
+    // the row menu: one row, then a selection of two; an item whose object the rows lack is not listed
     fireEvent.contextMenu(row(a));
     let menu = await screen.findByRole("menu");
     const unit = f.unit ?? f.units[0];
-    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["СвернутьEnter", "Оценить…", "Скопировать ссылку", "Скопировать id", "Скопировать место", "Открыть отчёт", unit ? `Открыть юнит ${unit}` : "Открыть юнит", "Действие по клику"]);
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual([
+      "СвернутьEnter",
+      "Оценить…",
+      "Скопировать ссылку",
+      "Скопировать id",
+      ...(f.location ? ["Скопировать место"] : []),
+      ...(f.launch ? ["Открыть отчёт"] : []),
+      ...(unit ? [`Открыть юнит ${unit}`] : []),
+      "Действие по клику",
+    ]);
     await user.keyboard("{Escape}");
     await user.click(within(row(a)).getByRole("checkbox"));
     await user.click(within(row(b)).getByRole("checkbox"));
     fireEvent.contextMenu(row(b));
     menu = await screen.findByRole("menu");
     expect(within(menu).getByText("2 находки")).toBeInTheDocument();
-    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Оценить…", "Скопировать id", "Скопировать место", "Действие по клику"]);
+    const fb = run.findings.find((x) => x.id === b) as Finding;
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Оценить…", "Скопировать id", ...(f.location || fb.location ? ["Скопировать место"] : []), "Действие по клику"]);
     await user.keyboard("{Escape}");
+  });
+
+  test("the row menu of a finding the run wrote itself: no report, so «Открыть отчёт» is not listed — nothing is shown disabled", async () => {
+    const own = run.findings.find((f) => !f.launch && f.source === "own") as Finding;
+    expect(own).toBeTruthy();
+    renderFindings(app, KEY, runPath(KEY, { view: "findings", finding: own.id }));
+    await waitFor(() => expect(row(own.id)).toBeTruthy(), { timeout: 4000 });
+    fireEvent.contextMenu(row(own.id));
+    const menu = await screen.findByRole("menu");
+    const items = within(menu).getAllByRole("menuitem").map((i) => i.textContent);
+    const unit = own.unit ?? own.units[0];
+    expect(items).toEqual(["СвернутьEnter", "Оценить…", "Скопировать ссылку", "Скопировать id", ...(own.location ? ["Скопировать место"] : []), ...(unit ? [`Открыть юнит ${unit}`] : []), "Действие по клику"]);
+    expect(items).not.toContain("Открыть отчёт");
+    expect(within(menu).queryAllByRole("menuitem").filter((i) => i.getAttribute("aria-disabled") === "true")).toHaveLength(0);
   });
 
   test("5: a finding's frames open in the viewer, named by the file; Escape returns to the thumbnail", async () => {
@@ -248,8 +277,38 @@ describe("the finding article (BLOCKS → FindingDetail) at the production shape
     expect(textSections(base)[1].text).toBe(`\`/impeccable ${base.fixCommand}\` — ${base.fix}`);
     article(base);
     const headings = screen.getAllByRole("heading").map((h) => h.textContent);
-    expect(headings).toEqual([SECTION.observation, SECTION.fix, SECTION.question, SECTION.rule, SECTION.decision, ...(base.frames.length ? [SECTION.frames] : [])]);
+    expect(headings).toEqual([SECTION.observation, SECTION.fix, SECTION.question, SECTION.rule, SECTION.decision, ...(base.verdict ? [SECTION.verdict] : []), ...(base.frames.length ? [SECTION.frames] : [])]);
     expect(screen.getByText(base.location as string)).toBeInTheDocument();
+  });
+
+  test("craft-20: the critic's enums read in Russian with the raw value in the title; standalone, the severity stays; a saved verdict under «Ваша оценка»", () => {
+    expect(enumFact(CONFIDENCE, FACT.confidence, "med")).toEqual({ text: "критик скорее уверен", title: "уверенность критика: med — критик скорее уверен в находке" });
+    expect(enumFact(CAUSE, FACT.cause, "component")).toEqual({ text: "правка в общем компоненте", title: "охват правки: component — правка в общем компоненте: меняются все его экраны" });
+    expect(enumFact(CAUSE, FACT.cause, "elsewhere")).toEqual({ text: "охват правки elsewhere", title: "охват правки: elsewhere" });
+    expect(Object.keys(CONFIDENCE)).toEqual(["high", "med", "low"]);
+    expect(Object.keys(CAUSE)).toEqual(["local", "component", "token", "conceptual"]);
+    const f = { ...base, confidence: "med", cause: "component", verdict: { verdict: "agree" as const, note: null, at: new Date(NOW).toISOString() } };
+    article(f);
+    const facts = document.querySelector("[data-slot=finding-facts]") as HTMLElement;
+    expect(within(facts).getByText("критик скорее уверен")).toHaveAttribute("title", "уверенность критика: med — критик скорее уверен в находке");
+    expect(within(facts).getByText("правка в общем компоненте")).toHaveAttribute("title", "охват правки: component — правка в общем компоненте: меняются все его экраны");
+    expect(facts).not.toHaveTextContent(/\bmed\b|\bcomponent\b/);
+    expect(within(facts).getByText(base.severity as string)).toBeInTheDocument();
+    const verdict = screen.getByRole("heading", { name: SECTION.verdict }).parentElement as HTMLElement;
+    expect(verdict).toHaveTextContent(/^Ваша оценкасогласен · 19:41 МСК$/);
+  });
+
+  test("craft-20: as a row's detail the fact line leaves out the severity the row shows", () => {
+    render(
+      <UiProvider>
+        <MemoryRouter>
+          <FindingArticle run={run} finding={base} now={NOW} inRow />
+        </MemoryRouter>
+      </UiProvider>,
+    );
+    const facts = document.querySelector("[data-slot=finding-facts]") as HTMLElement;
+    expect(within(facts).queryByText(base.severity as string)).toBeNull();
+    expect(facts.firstElementChild).not.toHaveTextContent(/^·/);
   });
 
   test("an unsplit line: one «Текст находки»; no severity or place reads «не записано»", () => {

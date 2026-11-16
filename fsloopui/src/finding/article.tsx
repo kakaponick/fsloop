@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 import { copyText, FrameStrip, Hint, NotRecorded, RunningText, StatusDot, type Frame } from "@/ui";
 import { ObjectLink, resolverFor, routerLink } from "../app/links.tsx";
 import { SeverityCell } from "./cells.tsx";
-import { FACT, reportWord, SECTION, verdictLine } from "./words.ts";
+import { CAUSE, CONFIDENCE, enumFact, FACT, reportWord, SECTION, verdictValue } from "./words.ts";
 
 type ArticleRun = Pick<Run, "findings" | "units" | "launches" | "journal"> & { key: string };
 
@@ -26,6 +26,8 @@ export interface FindingArticleProps {
   verdict?: ReactNode;
   /** The shared clock, for the saved verdict's time. */
   now: number;
+  /** The article is a table row's detail: the row right above shows the severity, so the fact line leaves it out. */
+  inRow?: boolean;
   className?: string;
 }
 
@@ -60,11 +62,19 @@ const Sep = () => (
   </span>
 );
 
-function FactLine({ run, finding: f }: { run: ArticleRun; finding: Finding }) {
+function FactLine({ run, finding: f, inRow }: { run: ArticleRun; finding: Finding; inRow: boolean }) {
   const label = (text: string) => <span className="text-muted-foreground">{text}</span>;
-  const facts: { key: string; node: ReactNode }[] = [{ key: "severity", node: <SeverityCell finding={f} form="full" /> }];
-  if (f.confidence) facts.push({ key: "confidence", node: <span>{label(FACT.confidence)} {f.confidence}</span> });
-  if (f.cause) facts.push({ key: "cause", node: <span>{label(FACT.cause)} {f.cause}</span> });
+  // a row's detail leaves out the severity its row shows right above it (ux 2)
+  const facts: { key: string; node: ReactNode }[] = inRow ? [] : [{ key: "severity", node: <SeverityCell finding={f} form="full" /> }];
+  // the critic's enums in Russian, the raw value and its meaning in the title (ux 0)
+  for (const [key, words, name, value] of [
+    ["confidence", CONFIDENCE, FACT.confidence, f.confidence],
+    ["cause", CAUSE, FACT.cause, f.cause],
+  ] as const) {
+    if (!value) continue;
+    const fact = enumFact(words, name, value);
+    facts.push({ key, node: <span title={fact.title}>{fact.text}</span> });
+  }
   facts.push({
     key: "report",
     node: (
@@ -163,14 +173,16 @@ function Decision({ run, finding: f }: { run: ArticleRun; finding: Finding }) {
   );
 }
 
-export function FindingArticle({ run, finding: f, verdict, now, className }: FindingArticleProps) {
+export function FindingArticle({ run, finding: f, verdict, now, inRow = false, className }: FindingArticleProps) {
   const sections = textSections(f);
+  // the verdict under its own heading: the control where the view writes it, else the saved one read-only
+  const shownVerdict = verdict ?? (f.verdict ? <p className="m-0">{verdictValue(f.verdict, now)}</p> : null);
   const resolve = resolverFor(run);
   const frames: Frame[] = f.frames.map((name) => ({ src: frameSrc(run.key, name), name }));
   const base = `finding-${f.id.replace(/[^\w-]/g, "-")}`;
   return (
     <article data-slot="finding-article" aria-label={`Находка ${f.id}`} className={cn("@container/finding flex flex-col gap-4", className)}>
-      <FactLine run={run} finding={f} />
+      <FactLine run={run} finding={f} inRow={inRow} />
       <div className="grid items-start gap-x-10 gap-y-4 @min-[52rem]/finding:grid-cols-[minmax(0,var(--container-measure))_minmax(16rem,1fr)]">
         <div data-slot="finding-text" className="flex min-w-0 flex-col gap-3">
           {sections.length ? (
@@ -189,7 +201,11 @@ export function FindingArticle({ run, finding: f, verdict, now, className }: Fin
           <Section title={SECTION.decision} id={`${base}-d`}>
             <Decision run={run} finding={f} />
           </Section>
-          {verdict ?? (f.verdict && <p className="m-0">{verdictLine(f.verdict, now)}</p>)}
+          {shownVerdict && (
+            <Section title={SECTION.verdict} id={`${base}-v`}>
+              {shownVerdict}
+            </Section>
+          )}
         </div>
       </div>
       {frames.length > 0 && (
