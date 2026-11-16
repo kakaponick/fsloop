@@ -12,13 +12,13 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { cn } from "@/lib/utils";
 import { pushHistory, SearchBox } from "@/table";
 import { livenessOf } from "../../shared/liveness.ts";
-import { CountLink, EmptyState, FlatList, GlossaryTooltip, HeldStrip, Loading, PartFailed, readPref, usePref, writePref } from "../ui/index.ts";
+import { CountLink, EmptyState, FlatList, GlossaryTooltip, HeldStrip, Loading, PartFailed, readPref, useFold, usePref, writePref } from "../ui/index.ts";
 import { arrange, GROUPS, heldView, nextWaiting, place, type Group, type PlacedCard, type Placement } from "./held.ts";
 import { useLiveStore, useRuns } from "./live.tsx";
 import { LostConnection, useShellClock } from "./lost-connection.tsx";
 import { runPath } from "./routes.ts";
 import { MiniRow, RunCardItem, type RunItemProps } from "./run-card.tsx";
-import { foldTitle, NOTHING_RUNS, PRODUCT, runMatches, runningCount, RUNS_GLOSSARY, SEARCH_PLACEHOLDER, waitingVerb, waitsShort } from "./words.ts";
+import { foldTitle, NOTHING_RUNS, PRODUCT, runMatches, RUNS_GLOSSARY, SEARCH_PLACEHOLDER, sidebarHead, waitsShort } from "./words.ts";
 
 const RUN_NOUN = { forms: NOUNS.run, gender: "m" } as const;
 /** The updatedAt of each run when the operator last had it open: a later one reads «новое». */
@@ -67,7 +67,7 @@ export function Sidebar({ openKey, band = false }: { openKey: string | null; ban
   const { now, lost } = useShellClock();
   const counts = list.status === "ready" ? runningCounts(list.cards, now) : { going: 0, silent: 0 };
   const waiting = list.status === "ready" ? waitingRuns(list.cards, now, openKey) : { count: 0, next: null };
-  const lead = counts.going + counts.silent > 0 ? runningCount(counts.going, counts.silent) : null;
+  const head = sidebarHead(counts.going, counts.silent, waiting.count);
   // The search is the operator's own narrowing for this visit: kept while the page lives, its terms in the history.
   const [query, setQuery] = useState("");
   const [history, setHistory] = usePref<string[]>(HISTORY, []);
@@ -88,15 +88,15 @@ export function Sidebar({ openKey, band = false }: { openKey: string | null; ban
           {/* improve-6 (1) · how many go, then how many wait on the operator: that part links, in a count's look, to the
               next waiting run after the open one — plain text when the open run is the only one (design-16). One line:
               the waiting part keeps its words, the count before it gives way. */}
-          {(lead || waiting.count > 0) && (
+          {(head.lead || head.waiting) && (
             <span data-slot="running-count" className="flex min-w-0 items-baseline text-muted-foreground tabular-nums">
-              {lead && <span className="min-w-0 truncate">{lead}</span>}
-              {lead && waiting.count > 0 && <span className="shrink-0 whitespace-pre">{" · "}</span>}
-              {waiting.count > 0 && (
+              {head.lead && <span className="min-w-0 truncate">{head.lead}</span>}
+              {head.lead && head.waiting && <span className="shrink-0 whitespace-pre">{" · "}</span>}
+              {head.waiting && (
                 <CountLink
-                  count={waiting.count}
-                  noun={lead ? undefined : NOUNS.run}
-                  suffix={waitingVerb(waiting.count)}
+                  count={head.waiting.count}
+                  noun={head.waiting.noun}
+                  suffix={head.waiting.suffix}
                   tone="warning"
                   href={waiting.next ? runPath(waiting.next) : undefined}
                   onOpen={waiting.next ? () => navigate(runPath(waiting.next as string)) : undefined}
@@ -207,7 +207,7 @@ function Fold({
   propsOf: (p: PlacedCard) => RunItemProps;
   oneLine: boolean;
 }) {
-  const [open, setOpen] = usePref(`fold:sidebar-${group}`, initial);
+  const [open, setOpen] = useFold(`sidebar-${group}`, initial);
   return (
     <Collapsible open={open} onOpenChange={setOpen} data-slot="sidebar-fold" data-group={group}>
       <CollapsibleTrigger className="group/fold flex h-8 w-full snap-start items-center gap-1.5 border-t px-2 text-left text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset">

@@ -34,6 +34,13 @@ export interface FactListProps {
 
 export const MORE = "Подробнее";
 
+/** A fold's one state rule (p3-review-critic-code#code-14): open or closed as the user last left it, under
+ * `fold:<key>` in browser storage, closed unless the caller's `initial` says open. `Fold` and `FactList` keep their
+ * state by it, and whoever reads a fold's state — the run page's header — reads it by it. */
+export function useFold(key: string, initial = false): [boolean, (open: boolean) => void] {
+  return usePref(`fold:${key}`, initial);
+}
+
 /** The fold's trigger, the one part every fold draws (the design check: a fold behind «Подробнее»): a chevron and
  * «Подробнее» in muted ink, on the library's Collapsible — FactList's last row, a page's sections. */
 export function FoldTrigger() {
@@ -57,7 +64,7 @@ export interface FoldProps {
 /** Sections behind «Подробнее» (`ux 9` → Provenance: once done it lives behind «Details»): the trigger on its own
  * reserved 28 px line, what it opens under it — so opening moves nothing above it, the trigger included (Strict 1). */
 export function Fold({ foldKey, label, children, className }: FoldProps) {
-  const [open, setOpen] = usePref(`fold:${foldKey}`, false);
+  const [open, setOpen] = useFold(foldKey);
   return (
     <Collapsible open={open} onOpenChange={setOpen} data-slot="fold" role="group" aria-label={label} className={cn("flex min-w-0 flex-col gap-4", className)}>
       <div className="flex h-7 items-center">
@@ -89,7 +96,7 @@ function Row({ fact, sizers = [] }: { fact: Fact; sizers?: readonly string[] }) 
 }
 
 export function FactList({ facts, more = [], foldKey = "facts", label, className }: FactListProps) {
-  const [open, setOpen] = usePref(`fold:${foldKey}`, false);
+  const [open, setOpen] = useFold(foldKey);
   const ordered = [...facts.filter((f) => f.outcome), ...facts.filter((f) => !f.outcome)];
   // the folded labels hold their room in the first label's cell, open or closed
   const sizers = [...new Set(more.map((f) => f.label))];

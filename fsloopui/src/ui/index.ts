@@ -12,7 +12,7 @@ export { baseName, fileFailure, folderFailure } from "./failure.ts";
 export { FactList, MORE, type Fact, type FactListProps } from "./fact-list.tsx";
 export { FieldCap, type FieldCapProps } from "./field-cap.tsx";
 export { OverflowCue, pastEdge, useOverflowCue, type CueEdge } from "./overflow-cue.tsx";
-export { Fold, FoldTrigger, type FoldProps } from "./fact-list.tsx";
+export { Fold, FoldTrigger, useFold, type FoldProps } from "./fact-list.tsx";
 export { flatItem, FlatList, type FlatListProps } from "./flat-list.tsx";
 export { openItemMenu } from "./flat-list.tsx";
 export { InView, inViewText, itemsInView, useInView, type InViewOptions, type InViewProps, type InViewRange } from "./in-view.tsx";

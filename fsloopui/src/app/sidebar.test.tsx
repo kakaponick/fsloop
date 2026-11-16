@@ -24,7 +24,6 @@ import {
   stageLine,
   unitsLine,
   waitCauses,
-  waitingCount,
   WAITS_GLOSSARY,
   waitsLine,
 } from "./words.ts";
@@ -52,18 +51,18 @@ describe("the card's words, built once", () => {
     expect(runningCount(0, 1)).toBe("1 прогон молчит");
   });
 
-  test("improve-6 · the head: how many go, then how many wait on you; alone, the waiting part names its runs", () => {
+  test("improve-6, p3-review-critic-code#code-8 · the head is built once, in the parts the sidebar renders: how many go, then the waiting part's count and verb; alone, the waiting part names its runs", () => {
     const head = sidebarHead(3, 0, 2);
-    expect(head).toBe("3 прогона идут · 2 ждут вас");
-    expect(words(head)).toBe(7);
+    expect(head).toEqual({ lead: "3 прогона идут", waiting: { count: 2, suffix: "ждут вас" } });
+    expect(words(`${head.lead} · ${head.waiting?.count} ${head.waiting?.suffix}`)).toBe(7);
     const widest = sidebarHead(2, 1, 1);
-    expect(widest).toBe("2 прогона идут · 1 молчит · 1 ждёт вас");
-    expect(words(widest)).toBe(10);
-    expect(sidebarHead(0, 0, 1)).toBe("1 прогон ждёт вас");
-    expect(sidebarHead(3, 0, 0)).toBe("3 прогона идут");
-    expect(sidebarHead(0, 0, 0)).toBe("");
-    expect(waitingCount(21)).toBe("21 ждёт вас");
-    expect(waitingCount(5, { alone: true })).toBe("5 прогонов ждут вас");
+    expect(widest).toEqual({ lead: "2 прогона идут · 1 молчит", waiting: { count: 1, suffix: "ждёт вас" } });
+    expect(words(widest.lead as string)).toBe(6);
+    expect(sidebarHead(0, 0, 1)).toEqual({ lead: null, waiting: { count: 1, noun: ["прогон", "прогона", "прогонов"], suffix: "ждёт вас" } });
+    expect(sidebarHead(0, 2, 5)).toEqual({ lead: "2 прогона молчат", waiting: { count: 5, suffix: "ждут вас" } });
+    expect(sidebarHead(3, 0, 0)).toEqual({ lead: "3 прогона идут", waiting: null });
+    expect(sidebarHead(0, 0, 0)).toEqual({ lead: null, waiting: null });
+    expect(sidebarHead(1, 0, 21).waiting?.suffix).toBe("ждёт вас");
   });
 
   test("improve-6 · the head's waiting part opens the next waiting run after the current one, in the sidebar's order; none when the current run is the only one", () => {
@@ -127,7 +126,11 @@ describe("the card's words, built once", () => {
       { kind: "blocked", term: "заблокирован", text: "u7" },
     ]);
     expect(waitCauses({ redGate: null, blocked: [] })).toEqual([]);
-    expect(glossaryLines(WAITS_GLOSSARY)).toEqual(["красный гейт — проверка этапа нашла нарушения, и прогон не идёт дальше", "заблокирован — Юнит остановлен: прогон ждёт решения или другого юнита."]);
+    // p3-review-critic-craft#craft-3 · the entry is true beside «работает»: the gate stops the next stage, not the run's work
+    const gateLine = "красный гейт — проверка этапа не пройдена: следующий этап ждёт вашего решения";
+    expect(glossaryLines(WAITS_GLOSSARY)).toEqual([gateLine, "заблокирован — Юнит остановлен: прогон ждёт решения или другого юнита."]);
+    expect(words(gateLine)).toBe(12);
+    expect(gateLine.length).toBeLessThanOrEqual(80);
     const card = { lastWriteAt: iso(NOW - 2 * MIN), closed: false };
     expect(livenessShown(card, NOW, false)).toMatchObject({ state: "working", label: "работает", tone: "neutral", lost: false });
     expect(livenessShown({ ...card, lastWriteAt: iso(NOW - 40 * MIN) }, NOW, true)).toMatchObject({ state: "silent", label: "нет связи", tone: "neutral", lost: true });
@@ -207,19 +210,23 @@ describe("the sidebar over the fixture root of 63", () => {
   const sidebar = () => screen.getByRole("complementary", { name: "Прогоны" });
   const cards = () => [...sidebar().querySelectorAll<HTMLAnchorElement>("[data-slot=run-card]")];
   const ready = async () => within(sidebar()).findByText("3 прогона идут");
-  /** Every run under `project`; every open run held by a red gate and two blocked units; every closed run at its widest
-   * outcome: goal not met, commits not pushed. `goals` gets each run's goal by its row's address. */
-  const answerWidest = (project: string, goals = new Map<string, string | null>()) =>
+  /** Every run under `project`; every open run held by a red gate and two blocked units — with `waits` false, none held;
+   * every closed run at its widest outcome: goal not met, commits not pushed. `goals` gets each run's goal by its row's
+   * address. */
+  const answerWidest = (project: string, goals = new Map<string, string | null>(), { waits = true } = {}) =>
     fx.answer((path) =>
       path === "/api/runs"
         ? fx.app.handle(new Request(`http://127.0.0.1${path}`)).then(async (res) => {
             const body = (await res.json()) as { list: Record<string, unknown>[] };
             body.list = body.list.map((c) => {
               goals.set(`/r/${String(c.key)}`, (c.goal as string | null) ?? null);
+              const held = waits
+                ? { redGate: { at: "2026-11-16T16:21:00Z", problems: ["p2-assess-critic-code#code-2 has no decision row"] }, blocked: [{ id: "u23", why: null }, { id: "u7", why: null }] }
+                : { redGate: null, blocked: [] };
               return {
                 ...c,
                 project,
-                ...(c.closed === false ? { redGate: { at: "2026-11-16T16:21:00Z", problems: ["p2-assess-critic-code#code-2 has no decision row"] }, blocked: [{ id: "u23", why: null }, { id: "u7", why: null }] } : {}),
+                ...(c.closed === false ? held : {}),
                 ...(c.closed === true ? { outcome: { pushed: false, goalMet: false, held: [] } } : {}),
               };
             });
@@ -265,9 +272,12 @@ describe("the sidebar over the fixture root of 63", () => {
       "новое, полоса у левого края — Прогон изменился с тех пор, как вы его открывали",
       // improve-6 (1) · the head's waiting part, closed by the cold read: what «ждёт вас» means
       "ждёт вас — Прогону нужно ваше решение: красный гейт или заблокированный юнит",
-      "красный гейт — проверка этапа нашла нарушения, и прогон не идёт дальше",
+      "красный гейт — проверка этапа не пройдена: следующий этап ждёт вашего решения",
       "заблокирован — Юнит остановлен: прогон ждёт решения или другого юнита.",
     ]);
+    // ui → Glossary → Bound: every entry within 80 characters with its value, at most 8 entries
+    for (const line of glossaryLines(RUNS_GLOSSARY)) expect(line.length, line).toBeLessThanOrEqual(80);
+    expect(RUNS_GLOSSARY.length).toBeLessThanOrEqual(8);
   });
 
   test("improve-6 (1), design-16 · the head reads «3 прогона идут · 2 ждут вас» on its reserved line; «2 ждут вас» links in CountLink's look to the next waiting run after the current one — admin, then the silent trigger run", async () => {
@@ -295,6 +305,25 @@ describe("the sidebar over the fixture root of 63", () => {
     expect(getComputedStyle(within(head).getByText("3 прогона идут")).textOverflow).toBe("ellipsis");
   });
 
+  test("p3-review-critic-code#code-8 · the head as rendered, with no run going: the waiting part names its runs — «1 прогон ждёт вас», a link to the waiting run", async () => {
+    const running = new Set(["fsloop/077e72d5", "bots/42d34077", "admin/a5b5ec85"]);
+    fx.answer((path) =>
+      path === "/api/runs"
+        ? fx.app.handle(new Request(`http://127.0.0.1${path}`)).then(async (res) => {
+            const body = (await res.json()) as { list: Record<string, unknown>[] };
+            body.list = body.list.map((c) => (running.has(String(c.key)) ? { ...c, closed: true, outcome: { pushed: true, goalMet: true, held: [] }, redGate: null, blocked: [] } : c));
+            return json(200, body);
+          })
+        : null,
+    );
+    renderShell(fx.transport, { path: `/r/${keyOf(0)}` });
+    const link = await within(sidebar()).findByRole("link", { name: "1 прогон ждёт вас" });
+    const head = sidebar().querySelector("[data-slot=running-count]") as HTMLElement;
+    expect(head.textContent).toBe("1 прогон ждёт вас");
+    expect(words(head.textContent as string)).toBe(4);
+    expect(link).toHaveAttribute("href", `/r/${keyOf(50)}`);
+  });
+
   test("design-16 · when the only waiting run is the one open, the waiting part is plain text: no link to the page the user is on", async () => {
     fx.answer((path) =>
       path === "/api/runs"
@@ -312,14 +341,18 @@ describe("the sidebar over the fixture root of 63", () => {
     expect(within(head).queryByRole("link")).toBeNull();
   });
 
-  test("improve-6 (2) · at 1440 a long-silent run's mini row takes a second reserved line, its goal's first words in muted small type, so two runs of one project tell apart; in the narrow band it stays one 32 px line", async () => {
+  test("improve-6 (2) · at 1440 a long-silent run's mini row takes a second reserved line, its goal's first words in muted small type, so two runs of one project tell apart — the one that waits gives that line to its wait (craft-1); in the narrow band it stays one 32 px line", async () => {
     const silentRows = () => [...sidebar().querySelectorAll<HTMLElement>("[data-slot=sidebar-fold][data-group=silent] [data-slot=mini-row]")];
     const first = renderShell(fx.transport, { path: `/r/${keyOf(0)}` });
     await ready();
     const rows = silentRows();
     expect(rows).toHaveLength(4);
     await applyStylesheet();
-    const goals = rows.map((row) => {
+    for (const row of rows) expect(usedBlockSize(row), row.title).toBe(48);
+    // p3-review-critic-craft#craft-1 · the silent run that waits (trigger/08989893) holds its wait there, not its goal
+    const calm = rows.filter((row) => !row.querySelector("[data-slot=mini-wait-line]"));
+    expect(rows.filter((row) => !calm.includes(row)).map((row) => row.getAttribute("href"))).toEqual([`/r/${keyOf(50)}`]);
+    const goals = calm.map((row) => {
       const goal = row.querySelector("[data-slot=mini-goal]") as HTMLElement;
       expect(goal, row.title).not.toBeNull();
       expect(usedBlockSize(row), row.title).toBe(48);
@@ -330,7 +363,7 @@ describe("the sidebar over the fixture root of 63", () => {
       return goal.textContent ?? "";
     });
     for (const goal of goals) expect(goal).toMatch(/^(Run \d+: |Set up )/);
-    expect(new Set(goals).size).toBe(rows.length);
+    expect(new Set(goals).size).toBe(3);
     first.unmount();
     renderShell(fx.transport, { path: `/r/${keyOf(0)}`, wide: false });
     await ready();
@@ -344,7 +377,8 @@ describe("the sidebar over the fixture root of 63", () => {
 
   test("improve-6 (2) · at the 316 px sidebar a long-silent row keeps at least its goal's first word whole on its second line", async () => {
     const goals = new Map<string, string | null>();
-    answerWidest("db.ren.net", goals);
+    // no run waits: every silent row's second line is its goal (one that waits holds its wait there — craft-1)
+    answerWidest("db.ren.net", goals, { waits: false });
     renderShell(fx.transport, { path: `/r/${keyOf(0)}` });
     await ready();
     await applyStylesheet();
@@ -359,6 +393,29 @@ describe("the sidebar over the fixture root of 63", () => {
       const size = Number.parseFloat(getComputedStyle(second).fontSize);
       expect(textWidth(first, { size }), `${row.title}: the goal's first word «${first}» is cut`).toBeLessThanOrEqual(innerWidth(second, sidebar(), 316));
     }
+  });
+
+  test("p3-review-critic-craft#craft-1 · at 1440 a long-silent row that waits gives its second line to the wait on its amber dot — the goal's place, as the full card gives it — and its first line keeps the liveness whole on its own dot; the row stays 48 px", async () => {
+    renderShell(fx.transport, { path: `/r/${keyOf(0)}` });
+    await ready();
+    const row = sidebar().querySelector(`[data-slot=mini-row][href="/r/${keyOf(50)}"]`) as HTMLElement;
+    expect(row.closest("[data-group=silent]")).not.toBeNull();
+    const state = row.querySelector("[data-slot=mini-state]") as HTMLElement;
+    expect(state.textContent).toBe("молчит · 14 д");
+    expect(state.querySelector("[data-slot=mini-waits]")).toBeNull();
+    expect(state.querySelector("[data-slot=dot]")).toHaveAttribute("data-tone", "warning");
+    expect(row.querySelector("[data-slot=mini-goal]")).toBeNull();
+    const wait = row.querySelector("[data-slot=mini-wait-line]") as HTMLElement;
+    // fixtures/make.ts «silent-waits»: its unit u1 is blocked
+    expect(wait.textContent).toBe("заблокирован u1");
+    expect(words(wait.textContent as string)).toBe(2);
+    expect(wait.querySelector("[data-slot=dot]")).toHaveAttribute("data-tone", "warning");
+    // the name and the title still say the whole state
+    expect(row).toHaveAccessibleName("trigger · 08989893 · молчит · 14 д · заблокирован u1");
+    await applyStylesheet();
+    expect(usedBlockSize(row)).toBe(48);
+    expect(getComputedStyle(wait).fontSize).toBe("12px");
+    expect(getComputedStyle(wait).flexWrap).toBe("nowrap");
   });
 
   test("improve-6 (3) · the current mini row wears the full card's 1 px ink border — the Item's reserved border turning ink, so nothing moves", async () => {
@@ -542,8 +599,11 @@ describe("the sidebar over the fixture root of 63", () => {
     expect(getComputedStyle(shell).gridTemplateColumns).toMatch(/^316px /);
     const rows = [...sidebar().querySelectorAll<HTMLElement>("[data-slot=mini-row]")];
     expect(rows).toHaveLength(4 + 53 + 3);
-    const waiting = rows.filter((r) => /^молчит · \d+ [чд] · красный гейт · 2 юнита заблокированы$/.test(r.querySelector("[data-slot=mini-state]")?.textContent ?? ""));
-    expect(waiting.length).toBeGreaterThan(0);
+    // craft-1 · a silent row that waits: the liveness on the first line, its wait on the second
+    const waiting = rows.filter(
+      (r) => /^молчит · \d+ [чд]$/.test(r.querySelector("[data-slot=mini-state]")?.textContent ?? "") && r.querySelector("[data-slot=mini-wait-line]")?.textContent === "красный гейт · 2 юнита заблокированы",
+    );
+    expect(waiting).toHaveLength(4);
     const closed = rows.filter((r) => r.querySelector("[data-slot=mini-state]")?.textContent === "цель не достигнута");
     expect(closed).toHaveLength(53);
     for (const row of [...waiting, ...closed, ...rows]) {
@@ -584,7 +644,7 @@ describe("the sidebar over the fixture root of 63", () => {
     expect(getComputedStyle(row.querySelector("[data-slot=mini-line]") as HTMLElement).flexWrap).toBe("nowrap");
   });
 
-  test("p2-verdict-critic-craft-verdict-4#craft-1, #craft-2 · at the 316 px sidebar a waiting mini row keeps the wait's « ·» and amber dot whole after its liveness, the cut only on the cause's tail; an unpushed closed row keeps at least its goal's first word whole on its second line", async () => {
+  test("p2-verdict-critic-craft-verdict-4#craft-1, #craft-2, p3-review-critic-craft#craft-1 · at the 316 px sidebar a waiting silent row holds its wait on its second line, its amber dot whole where the wait begins, the cut only on the cause's tail; an unpushed closed row keeps at least its goal's first word whole on its second line", async () => {
     const user = userEvent.setup();
     const goals = new Map<string, string | null>();
     answerWidest("db.ren.net", goals);
@@ -593,25 +653,21 @@ describe("the sidebar over the fixture root of 63", () => {
     await user.click(within(sidebar()).getByRole("button", { name: "Закрытые · 53" }));
     await applyStylesheet();
     const rows = [...sidebar().querySelectorAll<HTMLElement>("[data-slot=mini-row]")];
-    const waiting = rows.filter((r) => r.querySelector("[data-slot=mini-waits]"));
+    const waiting = rows.filter((r) => r.querySelector("[data-slot=mini-wait-line]"));
     expect(waiting).toHaveLength(4);
     for (const row of waiting) {
-      const line = row.querySelector("[data-slot=mini-line]") as HTMLElement;
-      const state = line.querySelector("[data-slot=mini-state]") as HTMLElement;
-      const text = state.querySelector("[data-slot=mini-text]") as HTMLElement;
-      const wait = text.querySelector("[data-slot=mini-waits]") as HTMLElement;
-      const [sep, dot, cause] = [...wait.children];
+      // the first line holds no wait at the sidebar's width: the liveness alone
+      expect(row.querySelector("[data-slot=mini-line] [data-slot=mini-waits]"), row.title).toBeNull();
+      const wait = row.querySelector("[data-slot=mini-wait-line]") as HTMLElement;
+      const [dot, cause] = [...wait.children] as HTMLElement[];
       expect(dot).toHaveAttribute("data-tone", "warning");
       expect(getComputedStyle(dot).width).toBe("7px");
-      const stateSize = flexRow(line, innerWidth(line, sidebar(), 316)).get(state) as number;
-      const textSize = flexRow(state, stateSize).get(text) as number;
-      const parts = flexRow(wait, flexRow(text, textSize).get(wait) as number);
-      expect(parts.get(sep), `${row.title}: the « ·» before the wait is cut`).toBeGreaterThanOrEqual(contentWidth(sep));
+      const parts = flexRow(wait, innerWidth(wait, sidebar(), 316));
       expect(parts.get(dot), `${row.title}: the wait's dot is cut`).toBe(7);
+      expect(getComputedStyle(dot).flexShrink).toBe("0");
       // Only the cause's words give way, at their end.
       expect(cause).toHaveAttribute("data-slot", "mini-cause");
       expect(getComputedStyle(cause).textOverflow).toBe("ellipsis");
-      expect(getComputedStyle(sep).flexShrink).toBe("0");
     }
     // the closed fold's rows (a long-silent row's second line is its goal alone — improve-6 (2))
     const closed = rows.filter((r) => r.closest("[data-group=closed]") && r.querySelector("[data-slot=mini-goal]"));

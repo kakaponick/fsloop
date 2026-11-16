@@ -8,7 +8,7 @@ import { useLayoutEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import type { RunCard } from "../../shared/model.ts";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { Clamp, CountTabs, FactList, Loading, NotRecorded, PartFailed, RunningText, usePref } from "../ui/index.ts";
+import { Clamp, CountTabs, FactList, Loading, NotRecorded, PartFailed, RunningText, useFold } from "../ui/index.ts";
 import { VIEWS, type LoadedRun, type ViewId } from "../views/index.ts";
 import { runFacts } from "./facts.tsx";
 import { resolverFor, routerLink } from "./links.tsx";
@@ -18,7 +18,7 @@ import { runPath, splitKey, viewOf } from "./routes.ts";
 import { useRunTitle } from "./title.ts";
 import { goalLines, RUN_NOT_FOUND_NEXT, runNotFoundText, stageWord } from "./words.ts";
 
-/** The run page's «Подробнее»: one open state for every run (FactList keeps it under `fold:<key>`). */
+/** The run page's «Подробнее»: one open state for every run (FactList keeps it by `useFold`). */
 const FACTS_FOLD = "run";
 
 export function RunPage({ runKey }: { runKey: string }) {
@@ -133,7 +133,7 @@ function RunHeader({ card, run, now, lost }: { card: RunCard; run: LoadedRun | n
 function useHeldOnClose(closed: boolean) {
   const ref = useRef<HTMLElement>(null);
   const running = useRef<number | null>(null);
-  const [fold] = usePref(`fold:${FACTS_FOLD}`, false);
+  const [fold] = useFold(FACTS_FOLD);
   const foldSeen = useRef(fold);
 
   useLayoutEffect(() => {

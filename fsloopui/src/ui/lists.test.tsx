@@ -8,7 +8,7 @@ import { NOUNS } from "../../shared/text.ts";
 import { CountLink } from "./count-link.tsx";
 import { CountTabs, moreTabsName } from "./count-tabs.tsx";
 import { applyStylesheet, usedBlockSize } from "../app/layout-testing.ts";
-import { FactList, Fold } from "./fact-list.tsx";
+import { FactList, Fold, useFold } from "./fact-list.tsx";
 import { flatItem, FlatList } from "./flat-list.tsx";
 import { HeldStrip, heldStripText } from "./held-strip.tsx";
 import { resetPrefsMemory } from "./storage.ts";
@@ -111,6 +111,39 @@ describe("p3-decompose-design-check#design-5: the fold behind «Подробне
     );
     expect(screen.getByRole("button", { name: "Подробнее" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("запуски")).toBeInTheDocument();
+  });
+
+  test("p3-review-critic-code#code-14 · one fold state rule: `useFold(key)` reads and sets what FactList's and Fold's «Подробнее» keep under fold:<key>, closed unless the caller's default says open", async () => {
+    const user = userEvent.setup();
+    function Probe({ k, initial }: { k: string; initial?: boolean }) {
+      const [open, setOpen] = useFold(k, initial);
+      return (
+        <button type="button" data-probe={k} onClick={() => setOpen(!open)}>
+          {open ? "открыт" : "закрыт"}
+        </button>
+      );
+    }
+    const { container } = render(
+      <>
+        <FactList facts={[{ label: "Режим", value: "worktree" }]} more={[{ label: "Версия", value: "4" }]} foldKey="code14-a" />
+        <Fold foldKey="code14-b" label="Секции">
+          <p>секции</p>
+        </Fold>
+        <Probe k="code14-a" />
+        <Probe k="code14-b" />
+        <Probe k="code14-c" initial />
+      </>,
+    );
+    const probe = (k: string) => container.querySelector(`[data-probe=${k}]`) as HTMLElement;
+    expect([probe("code14-a"), probe("code14-b"), probe("code14-c")].map((p) => p.textContent)).toEqual(["закрыт", "закрыт", "открыт"]);
+    const [facts, sections] = screen.getAllByRole("button", { name: "Подробнее" });
+    await user.click(facts);
+    expect(probe("code14-a")).toHaveTextContent("открыт");
+    expect(probe("code14-b")).toHaveTextContent("закрыт");
+    await user.click(probe("code14-b"));
+    expect(sections).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("секции")).toBeInTheDocument();
+    expect(window.localStorage.getItem("fsloopui:fold:code14-b")).toBe("true");
   });
 
   test("Strict 1: the trigger stands on its own reserved 28 px line above what it opens — opening moves nothing above it, nor the trigger", async () => {

@@ -159,11 +159,12 @@ function HeldBox({ slot, what, children }: { slot: string; what: string; childre
     folded.current = true;
     setOpen(false);
   };
-  // «свернуть» goes with its click: focus lands on the count that opens the box again
+  // «свернуть» goes with its click: focus lands on the count that opens the box again — or, when the causes shrank
+  // while the box was open and no count is drawn, on the box itself, never the page's body (code-26)
   useEffect(() => {
     if (!folded.current || open) return;
     folded.current = false;
-    moreButton.current?.focus({ preventScroll: true });
+    (moreButton.current ?? ref.current)?.focus({ preventScroll: true });
   }, [open]);
   const more = open ? 0 : hidden;
   return (

@@ -173,7 +173,8 @@ export function RunCardItem({ card, now, lost, current, fresh, gone }: RunItemPr
  * and its goal's first words, what tells one closed run from the next (p1-review cand-3) — in the narrow band
  * (`oneLine`), where every row is one 32 px line so the band's scroll never slices one (cand-10), that line follows
  * its state as its cause. A long-silent run's row takes the second line too: its goal's first words, muted, what tells
- * «shop 37d5a31e» from «shop a49bc6c7» (improve-6 (2); its age is on the first line already). Its height comes from the
+ * «shop 37d5a31e» from «shop a49bc6c7» (improve-6 (2); its age is on the first line already) — or, when it waits, what
+ * waits on its amber dot, the goal's place as on the full card (p3-review-critic-craft#craft-1). Its height comes from the
  * fold it is placed in and whether the run is closed, never from a live change of its words (Strict 1). The open run's
  * row is the current item: the muted ground and the Item's reserved transparent border turning ink, as on the full
  * card (improve-6 (3)). */
@@ -181,10 +182,13 @@ export function MiniRow({ card, now, lost, current, fresh, gone, group, oneLine 
   const detail: ReturnType<typeof miniDetail> = gone ? { tone: "neutral", fact: VANISHED, text: VANISHED } : miniDetail(card, now, { lost });
   const mark = fresh && !gone;
   const closed = card.closed === true;
-  const goalLine = !closed && group === "silent" && !oneLine;
-  const second = (closed && !oneLine) || goalLine;
-  const waits = detail.waits;
-  const cause = closed && oneLine ? ` · ${closedLine(card, now)}` : waits ? "" : detail.text.slice(detail.fact.length);
+  const silentLine = !closed && group === "silent" && !oneLine;
+  const second = (closed && !oneLine) || silentLine;
+  // p3-review-critic-craft#craft-1 · a long-silent row that waits gives its second line to the wait, as the full card
+  // gives it the goal's place: its first line keeps the liveness whole, the wait is never cut to a stem after it.
+  const waitLine = silentLine ? (detail.waits ?? null) : null;
+  const waits = waitLine ? undefined : detail.waits;
+  const cause = closed && oneLine ? ` · ${closedLine(card, now)}` : detail.waits ? "" : detail.text.slice(detail.fact.length);
   // The name and the title say the whole state: a closed run's outcome with its push.
   const whole = closed && !gone ? outcomeLine(card.outcome).text : detail.text;
   return (
@@ -243,11 +247,20 @@ export function MiniRow({ card, now, lost, current, fresh, gone, group, oneLine 
             </span>
           </span>
         </span>
-        {second && (
-          <span data-slot="mini-goal" className="block truncate text-xs text-muted-foreground">
-            {goalLine ? card.goal : closedLine(card, now)}
-          </span>
-        )}
+        {second &&
+          (waitLine ? (
+            // What waits on its amber dot where it begins, in ink as the full card's two lines; only its words give way.
+            <span data-slot="mini-wait-line" className="flex min-w-0 flex-nowrap items-baseline gap-1.5 text-xs">
+              <Dot tone="warning" className="self-center" />
+              <span data-slot="mini-cause" className="min-w-0 truncate">
+                {waitLine}
+              </span>
+            </span>
+          ) : (
+            <span data-slot="mini-goal" className="block truncate text-xs text-muted-foreground">
+              {silentLine ? card.goal : closedLine(card, now)}
+            </span>
+          ))}
       </Link>
     </Item>
   );

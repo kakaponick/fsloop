@@ -283,6 +283,40 @@ describe("the run page's frame", () => {
     }
   });
 
+  test("p3-review-critic-code#code-26 · «свернуть» when the causes shrank while the box was open: no count is left to draw, so focus lands on the box, never on the page's body", async () => {
+    const user = userEvent.setup();
+    const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    const offsetTop = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetTop");
+    // The box was held at two lines (40 px) over two causes of 30 px; while open, each shrinks to one 20 px line.
+    let cause = 30;
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.dataset.slot === "wait" ? cause : this.dataset.slot === "waits-box" ? 40 : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetTop", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.dataset.slot === "wait" ? [...(this.parentElement?.children ?? [])].indexOf(this) * cause : 0;
+      },
+    });
+    try {
+      renderShell(fx.transport, { path: `/r/${keyOf(40)}` });
+      await loaded();
+      const box = header().querySelector("[data-slot=waits-box]") as HTMLElement;
+      await user.click(within(box).getByRole("button", { name: "ещё 1 · показать" }));
+      cause = 20;
+      await user.click(within(header()).getByRole("button", { name: "Свернуть «Ждёт вас»" }));
+      expect(box.style.height).toBe("40px");
+      expect(within(box).queryByRole("button", { name: /^ещё/ })).toBeNull();
+      expect(box).toHaveFocus();
+    } finally {
+      if (offsetHeight) Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeight);
+      if (offsetTop) Object.defineProperty(HTMLElement.prototype, "offsetTop", offsetTop);
+    }
+  });
+
   test("improve-15 (2) · at 1440 the value column holds each «Ждёт вас» cause whole on one line; the header's height at 1440 and at 900, before and after", async () => {
     renderShell(fx.transport, { path: `/r/${keyOf(40)}` });
     await loaded();

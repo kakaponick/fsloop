@@ -45,14 +45,19 @@ export function runningCount(going: number, silent = 0): string {
 /** «ждёт вас», «ждут вас»: the verb after a count of runs that wait on the operator. */
 export const waitingVerb = (n: number): string => plural(n, ["ждёт вас", "ждут вас", "ждут вас"]);
 
-/** The head's waiting part: «2 ждут вас» after the running count; `alone`, with its noun — «1 прогон ждёт вас». */
-export const waitingCount = (n: number, { alone = false } = {}): string => `${alone ? count(n, NOUNS.run) : num(n)} ${waitingVerb(n)}`;
+/** The sidebar's head in the parts it renders, built once (p3-review-critic-code#code-8). */
+export interface SidebarHead {
+  /** «3 прогона идут · 1 молчит»: the open runs that go and are silent; null when none is in the running group. */
+  lead: string | null;
+  /** The runs that wait on the operator — a red gate, a blocked unit — wherever they stand in the list (improve-6
+   * (1)), drawn as a count: «2 ждут вас» after the lead; with no lead, with its noun — «1 прогон ждёт вас». */
+  waiting: { count: number; noun?: Forms; suffix: string } | null;
+}
 
-/** The sidebar's head, whole: «3 прогона идут · 2 ждут вас» — the open runs that go and are silent, then those that
- * wait on the operator (a red gate, a blocked unit), wherever they stand in the list (improve-6 (1)). */
-export function sidebarHead(going: number, silent: number, waiting: number): string {
+/** The sidebar's head: «3 прогона идут · 2 ждут вас». */
+export function sidebarHead(going: number, silent: number, waiting: number): SidebarHead {
   const lead = going + silent > 0 ? runningCount(going, silent) : null;
-  return [lead, waiting ? waitingCount(waiting, { alone: lead === null }) : null].filter(Boolean).join(" · ");
+  return { lead, waiting: waiting ? { count: waiting, ...(lead ? {} : { noun: NOUNS.run }), suffix: waitingVerb(waiting) } : null };
 }
 
 export interface SettingsPart {
@@ -206,7 +211,8 @@ export function waitsShort(card: Pick<RunCard, "redGate" | "blocked">): string |
 
 /** The glossary on «Ждёт вас»'s terms (ui → Glossary: what the value is). */
 export const WAITS_GLOSSARY = [
-  { value: RED_GATE, meaning: "проверка этапа нашла нарушения, и прогон не идёт дальше" },
+  // true beside «работает» (p3-review-critic-craft#craft-3): the gate stops the next stage, never the run's work
+  { value: RED_GATE, meaning: "проверка этапа не пройдена: следующий этап ждёт вашего решения" },
   { value: UNIT_STATE.blocked.compact, meaning: UNIT_STATE.blocked.meaning },
 ] as const;
 
